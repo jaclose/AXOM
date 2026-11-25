@@ -8,6 +8,8 @@ import { QuestionViewControls, QuestionViewFrame, useQuestionView } from "./Ques
 // every answer is recorded on the question for spaced retry.
 // ===========================================================================
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import { BookOpenCheck, Check, ChevronLeft, Flag, ListPlus, Play, WandSparkles, Sparkles, Minus, RotateCcw, Timer, X } from "lucide-react";
 import { useStore } from "../../lib/store";
 import { STORAGE_KEYS } from "../../lib/brand";
@@ -55,8 +57,8 @@ import {
   getVaultWriteCheckpoint,
 } from "../../lib/localVault";
 import {
-  BLOCK_PRESETS, EXAM_SKINS, blockCounts, clearSuspendedBlock, formatClock, readSuspendedBlock, writeSuspendedBlock,
-  type BlockPreset, type ExamSkin, type SuspendedBlock,
+  BLOCK_PRESETS, EXAM_SKINS, blockCounts, clearSuspendedBlock, discardSuspendedBlock, formatClock, inspectSuspendedBlock, writeSuspendedBlock,
+  type BlockPreset, type ExamSkin, type SuspendedBlock, type SuspendedRecoveryRead,
 } from "../../lib/examSim";
 import { examReducer, itemState, startBlock, type ExamAction, type ExamBlock } from "../../lib/exam/engine";
 import { requiredMediaIdentity } from "../../lib/exam/mediaPreflight";
@@ -254,6 +256,24 @@ function sessionSourceContent(question: QuestionRecord): string {
   });
 }
 
+/** Recovery must retain source identity without copying stems, options or keys into browser recovery. */
+function simulationSourceFingerprint(question: QuestionRecord): string {
+  return bytesToHex(sha256(utf8ToBytes(JSON.stringify([
+    trustedCorrectKey(question), question.stem, question.sourceDocumentId,
+    question.options.map(({ key, text }) => [key, text]), sessionSourceContent(question),
+  ]))));
+}
+
+/** A resumed block can only lose evidence, never acquire it from the live bank.
+ * This also prevents a changed-and-later-reverted record from recertifying answers. */
+function retainedSimulationEvidence(pool: readonly QuestionRecord[], evidence: SuspendedBlock["sourceEvidenceV1"]): Record<string, string> {
+  return Object.fromEntries(pool.flatMap((question) => {
+    const fingerprint = simulationSourceFingerprint(question);
+    return evidence && Object.prototype.hasOwnProperty.call(evidence, question.id)
+      && evidence[question.id] === fingerprint ? [[question.id, fingerprint]] : [];
+  }));
+}
+
 /** The displayed question is an immutable session snapshot. If its answer,
  * source image or stem/choices changed in the live vault, do not score it. */
 function trustedSessionKey(original: QuestionRecord | undefined, current: QuestionRecord | undefined): string | undefined {
@@ -264,6 +284,18 @@ function trustedSessionKey(original: QuestionRecord | undefined, current: Questi
     || (original.content !== current.content || original.attachments !== current.attachments || original.extraction !== current.extraction)
       && sessionSourceContent(original) !== sessionSourceContent(current)) return undefined;
   return trustedCorrectKey(current);
+}
+
+/** One evidence gate for live tutor feedback and the final persisted score. */
+function simulationScoringKey(
+  original: QuestionRecord | undefined,
+  candidates: readonly QuestionRecord[] | undefined,
+  evidence: SuspendedBlock["sourceEvidenceV1"],
+): string | undefined {
+  const current = candidates?.length === 1 ? candidates[0] : undefined;
+  return current && Object.prototype.hasOwnProperty.call(evidence ?? {}, current.id)
+    && evidence?.[current.id] === simulationSourceFingerprint(current)
+    ? trustedSessionKey(original, current) : undefined;
 }
 
 /** The attempt a run has already saved for a question, read from the live workspace. */
@@ -345,8 +377,15 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     return simulate && stored === "axom" ? "nbme" : stored;
   });
   const [presetId, setPresetId] = useState<BlockPreset["id"]>("usmle-2026");
-  const [suspended, setSuspended] = useState<SuspendedBlock | undefined>(() => readSuspendedBlock());
-  const [simRun, setSimRun] = useState<{ runId: string; skin: ExamSkin; pool: QuestionRecord[]; timeLimitSeconds?: number; resume?: SuspendedBlock } | null>(null);
+  const [suspendedRecovery, setSuspendedRecovery] = useState<SuspendedRecoveryRead>(inspectSuspendedBlock);
+  const suspended = suspendedRecovery.status === "present" ? suspendedRecovery.block : undefined;
+  const [simRun, setSimRun] = useState<{ runId: string; skin: ExamSkin; pool: QuestionRecord[]; sourceEvidenceV1: Record<string, string>; timeLimitSeconds?: number; resume?: SuspendedBlock } | null>(null);
+
+  const simulationScoringKeys = useMemo(() => {
+    const claims = questionClaims(questions);
+    return new Map((simRun?.pool ?? []).map((question) => [question.id,
+      simulationScoringKey(question, claims.get(question.id), simRun?.sourceEvidenceV1)]));
+  }, [questions, simRun]);
 
   // --- run state
   const [pool, setPool] = useState<QuestionRecord[]>(() => restored
@@ -763,14 +802,62 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     retryMediaStartRef.current();
   }
 
+  // Setup may outlive a recovery update from another tab. Never apply a
+  // destructive action or resume a snapshot different from the one shown.
+  function requireCurrentSuspended(expected: SuspendedBlock | undefined): boolean {
+    const recovery = inspectSuspendedBlock();
+    if (recovery.status === "unreadable") {
+      setSuspendedRecovery(recovery);
+      retryMediaStartRef.current = null;
+      pushToast({ title: "Recovery could not be checked", body: "The browser recovery is unavailable or conflicting. No new simulation was started and no discard was requested. Retry after checking the saved exam.", tone: "warn" });
+      return false;
+    }
+    const current = recovery.status === "present" ? recovery.block : undefined;
+    if (JSON.stringify(current) === JSON.stringify(expected)) return true;
+    retryMediaStartRef.current = null;
+    setSuspendedRecovery(recovery);
+    pushToast({
+      title: "Suspended exam changed",
+      body: "Recovery changed while this setup was open. Review the current suspended block before continuing.",
+      tone: "warn",
+    });
+    return false;
+  }
+
+  // Only permit a replacement launch after explicit discard and a fresh,
+  // verified absence. A different surviving recovery requires its own consent.
+  function discardDisplayedSuspended(expected: SuspendedBlock): boolean {
+    const discarded = discardSuspendedBlock(expected);
+    const recovery = inspectSuspendedBlock();
+    retryMediaStartRef.current = null;
+    setSuspendedRecovery(recovery);
+    if (!discarded || recovery.status !== "absent") {
+      pushToast({
+        title: discarded ? "Other recovery needs attention" : "Discard could not be confirmed",
+        body: discarded ? "Check the remaining recovery before starting another simulation." : "The browser did not confirm removal of this suspended exam. Check recovery and retry before starting another simulation.",
+        tone: "warn",
+      });
+      return false;
+    }
+    return true;
+  }
+
+  function retrySuspendedRecovery() {
+    retryMediaStartRef.current = null;
+    setSuspendedRecovery(inspectSuspendedBlock());
+  }
+
   function startBuiltBlock(built: QuestionRecord[]) {
     if (examInterface !== "axom") {
+      if (!requireCurrentSuspended(suspended)) return;
       if (suspended && !confirm("Starting a new block discards your suspended block. Continue?")) return;
-      if (suspended?.runId) clearSuspendedBlock(suspended.runId);
-      else writeSuspendedBlock(null);
-      setSuspended(undefined);
+      if (!requireCurrentSuspended(suspended)) return;
+      if (suspended && !discardDisplayedSuspended(suspended)) return;
+      setSuspendedRecovery({ status: "absent" });
       clearActiveQuiz(runId);
-      setSimRun({ runId, skin: examInterface, pool: built, timeLimitSeconds: timed ? built.length * SECONDS_PER_ITEM : undefined });
+      setSimRun({ runId, skin: examInterface, pool: built,
+        sourceEvidenceV1: Object.fromEntries(built.map((question) => [question.id, simulationSourceFingerprint(question)])),
+        timeLimitSeconds: timed ? built.length * SECONDS_PER_ITEM : undefined });
       if (runBlockId) {
         const savedBlock = (s.quizBlocks ?? []).find((block) => block.id === runBlockId);
         if (savedBlock) s.saveQuizBlock({ ...savedBlock, lastRunAt: new Date().toISOString() });
@@ -981,7 +1068,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   }
 
   function resumeSuspended() {
-    if (!suspended) return;
+    if (!suspended || !requireCurrentSuspended(suspended)) return;
     const ready = completeRequestedPool(suspended.poolIds, questions);
     if (!ready) {
       const claims = questionClaims(questions);
@@ -996,18 +1083,19 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       });
       return;
     }
-    const resumed = { ...suspended, runId: suspended.runId ?? crypto.randomUUID() };
+    const sourceEvidenceV1 = retainedSimulationEvidence(ready, suspended.sourceEvidenceV1);
+    const resumed = { ...suspended, runId: suspended.runId ?? crypto.randomUUID(), sourceEvidenceV1 };
     try {
       writeSuspendedBlock(resumed);
-      setSuspended(resumed);
+      setSuspendedRecovery({ status: "present", block: resumed });
     } catch (error) {
       pushToast({ title: "Exam is still suspended", body: error instanceof Error ? error.message : "Could not prepare recovery for this exam.", tone: "warn" });
       return;
     }
     const continueSuspended = () => media.verify(ready, () => {
-      if (!readSuspendedBlock()) return;
+      if (!requireCurrentSuspended(resumed)) return;
       setMode(resumed.mode);
-      setSimRun({ runId: resumed.runId!, skin: resumed.skin, pool: ready, timeLimitSeconds: resumed.timeLimitSeconds, resume: resumed });
+      setSimRun({ runId: resumed.runId!, skin: resumed.skin, pool: ready, sourceEvidenceV1, timeLimitSeconds: resumed.timeLimitSeconds, resume: resumed });
       setStage("sim");
     }, { fresh: true });
     retryMediaStartRef.current = continueSuspended;
@@ -1015,10 +1103,10 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   }
 
   function discardSuspended() {
+    if (!suspended || !requireCurrentSuspended(suspended)) return;
     if (!confirm("Discard the suspended block? Its answers will not be scored.")) return;
-    if (suspended?.runId) clearSuspendedBlock(suspended.runId);
-    else writeSuspendedBlock(null);
-    setSuspended(undefined);
+    if (!requireCurrentSuspended(suspended)) return;
+    discardDisplayedSuspended(suspended);
   }
 
   async function finishSimulation(
@@ -1027,17 +1115,24 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     recovery: SuspendedBlock,
   ): Promise<void> {
     if (!simRun) throw new Error("This exam run is no longer open.");
-    const durableRecovery = { ...recovery, runId: simRun.runId };
+    const durableRecovery = { ...recovery, runId: simRun.runId, sourceEvidenceV1: simRun.sourceEvidenceV1 };
     try {
       writeSuspendedBlock(durableRecovery);
-      setSuspended(durableRecovery);
+      setSuspendedRecovery({ status: "present", block: durableRecovery });
     } catch {
       throw new Error("AXOM could not create a browser recovery copy. Keep this exam window open and retry. No score was saved.");
+    }
+    // Read raw live claims at the write boundary, not a render-time last-wins
+    // map. Even byte-identical duplicate IDs make an attempt target ambiguous.
+    // Keep the durable recovery above intact so the same run can be retried.
+    const liveClaims = questionClaims(useStore.getState().questions ?? EMPTY_QUESTIONS);
+    if (simRun.pool.some((question) => (liveClaims.get(question.id)?.length ?? 0) > 1)) {
+      throw new Error("Multiple records claim a question ID. Your exam recovery is still on this device. Resolve the duplicate records before retrying this save.");
     }
     const originalById = new Map(simRun.pool.map((question) => [question.id, question]));
     // A changed/missing key must not be scored from a stale simulation snapshot.
     const validatedAnswers = answerList.map((answer) => {
-      const key = trustedSessionKey(originalById.get(answer.questionId), questionsById.get(answer.questionId));
+      const key = simulationScoringKey(originalById.get(answer.questionId), liveClaims.get(answer.questionId), simRun.sourceEvidenceV1);
       return { ...answer, correct: key ? answer.answerKey === key : undefined };
     });
     const result: QuizSession = {
@@ -1056,8 +1151,12 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     const checkpoint = getVaultWriteCheckpoint();
     try {
       s.commitQuizRun({
+        // Simulation starts with ready questions; an undefined verdict here means
+        // the original source evidence could not be verified. Keep that answer
+        // (and its flag) in the session, not in a replacement question's mastery,
+        // attempt history or review schedule. Valid flag-only attempts still project.
         attempts: validatedAnswers
-          .filter((a) => a.answerKey || a.flagged)
+          .filter((a) => a.correct !== undefined && (a.answerKey || a.flagged))
           .map((a) => ({ questionId: a.questionId, attempt: attemptFor(a, {}, "simulation", result.id) })),
         session: result,
       });
@@ -1070,8 +1169,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       const detail = error instanceof Error ? error.message : "The local workspace write could not be confirmed.";
       throw new Error(`AXOM could not confirm the final save. Your exam recovery is still on this device. Retry save. ${detail}`, { cause: error });
     }
-    clearSuspendedBlock(simRun.runId);
-    setSuspended(undefined);
+    clearSuspendedBlock(durableRecovery);
+    setSuspendedRecovery(inspectSuspendedBlock());
     setPool(simRun.pool);
     setSession(result);
     setSimRun(null);
@@ -1079,13 +1178,15 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   }
 
   function suspendSimulation(block: SuspendedBlock) {
+    if (!simRun) throw new Error("This exam run is no longer open.");
+    const recovery = { ...block, runId: simRun.runId, sourceEvidenceV1: simRun.sourceEvidenceV1 };
     try {
-      writeSuspendedBlock(block);
+      writeSuspendedBlock(recovery, { requireFreshSessionDiscovery: true });
     } catch (error) {
       pushToast({ title: "Exam is still open", body: error instanceof Error ? error.message : "Could not save the exam. Try again.", tone: "warn" });
       throw error;
     }
-    setSuspended(block);
+    setSuspendedRecovery({ status: "present", block: recovery });
     const counts = blockCounts(block.poolIds, block.items);
     pushToast({
       title: "Exam saved",
@@ -1232,9 +1333,18 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     const canStart = count <= 1000 && available > 0 && (wholeBank || selectedSets.length > 0) && Number.isInteger(count) && count > 0;
     return <Modal title={mode === "exam" ? "Set up an exam block" : "Set up a tutor block"} onClose={onClose}
       footer={<><GhostButton disabled={!canStart} onClick={saveAsBlock}>Save as block</GhostButton>
-        <GButton variant="primary" disabled={!canStart || media.state.phase !== "idle"} onClick={begin}><Play size={ICON_SIZE.body} /> Start {mode} block</GButton></>}>
+        <GButton variant="primary" disabled={!canStart || media.state.phase !== "idle" || (examInterface !== "axom" && suspendedRecovery.status === "unreadable")} onClick={begin}><Play size={ICON_SIZE.body} /> Start {mode} block</GButton></>}>
         <ExamRunnerMediaNotice state={media.state} onRetry={retryMediaStartRef.current ?? undefined} />
         <CommunityPracticeNotice count={availableQuestions.filter(question => community.questionIds.has(question.id)).length} pending={community.pending} possible />
+        {suspendedRecovery.status === "unreadable" && (
+          <div className="sim-suspended-banner">
+            <div role="alert">
+              <b>Suspended exam recovery needs attention</b>
+              <span className="sub">AXOM cannot verify the saved simulation. New simulations are paused. Keep the original exam tab open if available, do not clear browser data, and retry the recovery check. AXOM native practice is still available.</span>
+            </div>
+            <GhostButton disabled={media.state.phase === "checking"} onClick={retrySuspendedRecovery}>Retry recovery check</GhostButton>
+          </div>
+        )}
         {suspended && (
           <div className="sim-suspended-banner" role="status">
             <div>
@@ -1363,6 +1473,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         skin={simRun.skin}
         mode={mode}
         pool={simRun.pool}
+        scoringKeys={simulationScoringKeys}
         unreviewedCount={simRun.pool.filter(question => community.questionIds.has(question.id)).length}
         communityPending={community.pending}
         runId={simRun.runId}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   blockAnswers, countBlock, currentId, elapsedSeconds, examReducer, filterCounts, itemSeconds, itemState, matchesFilter,
-  navigatorEntries, resumeBlock, reviewBlock, shownResult, startBlock, suspendBlock, type ExamAction, type ExamBlock,
+  navigatorEntries, resumeBlock, reviewBlock, reviewCorrectKey, shownResult, startBlock, suspendBlock, type ExamAction, type ExamBlock,
 } from "./engine";
 
 const T0 = 1_800_000_000_000;
@@ -123,6 +123,29 @@ describe("testing and review stay apart", () => {
     block = run(block, { type: "go", index: 1, now: at(12) }, { type: "pick", key: "B" });
     expect(shownResult(block, "q2", "B")).toBeUndefined();
     expect(navigatorEntries(block, keyFor).map((entry) => entry.result)).toEqual(["incorrect", undefined, undefined, undefined]);
+  });
+
+  it.each([
+    { name: "unscored same key", picked: "B", saved: undefined, key: "B", result: "unscored", shownKey: undefined },
+    { name: "unscored changed key", picked: "B", saved: undefined, key: "A", result: "unscored", shownKey: undefined },
+    { name: "legacy unverified", picked: "A", saved: undefined, key: "B", result: "unscored", shownKey: undefined },
+    { name: "saved correct with changed key", picked: "B", saved: true, key: "A", result: "correct", shownKey: undefined },
+    { name: "saved incorrect with changed key", picked: "A", saved: false, key: "A", result: "incorrect", shownKey: undefined },
+    { name: "saved correct with unavailable key", picked: "B", saved: true, key: undefined, result: "correct", shownKey: undefined },
+    { name: "saved correct", picked: "B", saved: true, key: "B", result: "correct", shownKey: "B" },
+    { name: "saved incorrect", picked: "A", saved: false, key: "B", result: "incorrect", shownKey: "B" },
+    { name: "omitted", picked: undefined, saved: false, key: "B", result: "omitted", shownKey: "B" },
+    { name: "unscored omitted", picked: undefined, saved: undefined, key: "B", result: "omitted", shownKey: undefined },
+  ])("keeps historical grading separate from current teaching ($name)", ({ picked, saved, key, result, shownKey }) => {
+    const answers = [{ questionId: "q1", answerKey: picked, correct: saved, flagged: true, seconds: 7 }];
+    const before = JSON.stringify(answers);
+    const review = reviewBlock({ ids: ["q1"], answers, mode: "exam", startedAt: exam().startedAt });
+    expect(shownResult(review, "q1", key)).toBe(result);
+    expect(navigatorEntries(review, () => key)[0]).toMatchObject({ result, flagged: true });
+    expect(reviewCorrectKey(review, "q1", key)).toBe(shownKey);
+    expect(itemState(review, "q1").answerKey).toBe(picked);
+    expect(JSON.stringify(answers)).toBe(before);
+    expect(reviewCorrectKey(tutor(), "q1", key)).toBe(key);
   });
 
   it("shows every result in review, and review changes nothing", () => {

@@ -123,6 +123,8 @@ export interface SuspendedBlock {
   skin: ExamSkin;
   mode: "exam" | "tutor";
   poolIds: string[];
+  /** SHA-256 of the immutable displayed source, never raw question content. Missing entries are unverified. */
+  sourceEvidenceV1?: Record<string, string>;
   index: number;
   items: Record<string, ExamItemState>;
   elapsedMs: number;
@@ -132,13 +134,50 @@ export interface SuspendedBlock {
   suspendedAt: string;
 }
 
+// Bound recovered durations in milliseconds, with headroom for resumed clock
+// accumulation, per-item rounding and seconds-to-milliseconds conversion.
+// Below half the safe-integer range, seconds also retain millisecond-scale
+// precision. Fractions are valid; reject out-of-domain data without clamping.
+const MAX_RECOVERY_DURATION_MS = Math.floor(Number.MAX_SAFE_INTEGER / 2);
+const MAX_RECOVERY_DURATION_SECONDS = MAX_RECOVERY_DURATION_MS / 1000;
+
+/** V1 snapshots are untrusted browser data. Sparse items and the documented
+ * optional legacy fields are valid; malformed values must not reach the engine
+ * or be silently normalized and rewritten by a resume. */
 function parseSuspendedBlock(raw: string | null): SuspendedBlock | undefined {
   try {
     const value = JSON.parse(raw ?? "null") as SuspendedBlock | null;
     if (!value || value.version !== 1 || !Array.isArray(value.poolIds) || !value.poolIds.length
-      || value.poolIds.some((id) => typeof id !== "string" || !id)
+      || value.poolIds.some((id) => typeof id !== "string" || !id
+        || Object.prototype.hasOwnProperty.call(Object.prototype, id))
+      || new Set(value.poolIds).size !== value.poolIds.length
       || (value.runId !== undefined && (typeof value.runId !== "string" || !value.runId))
-      || !(value.skin in EXAM_SKINS)) return undefined;
+      || typeof value.skin !== "string" || !Object.prototype.hasOwnProperty.call(EXAM_SKINS, value.skin)
+      || (value.mode !== "exam" && value.mode !== "tutor")
+      || !Number.isInteger(value.index) || value.index < 0 || value.index >= value.poolIds.length
+      || !Number.isFinite(value.elapsedMs) || value.elapsedMs < 0 || value.elapsedMs > MAX_RECOVERY_DURATION_MS
+      || (value.timeLimitSeconds !== undefined && (!Number.isFinite(value.timeLimitSeconds)
+        || value.timeLimitSeconds <= 0 || value.timeLimitSeconds > MAX_RECOVERY_DURATION_SECONDS))
+      || typeof value.notes !== "string"
+      || typeof value.startedAt !== "string" || !Number.isFinite(Date.parse(value.startedAt))
+      || typeof value.suspendedAt !== "string" || !Number.isFinite(Date.parse(value.suspendedAt))
+      || !value.items || typeof value.items !== "object" || Array.isArray(value.items)) return undefined;
+
+    const pool = new Set(value.poolIds);
+    let totalItemSeconds = 0;
+    for (const [id, item] of Object.entries(value.items)) {
+      if (!pool.has(id) || !item || typeof item !== "object" || Array.isArray(item)
+        || (item.answerKey !== undefined && (typeof item.answerKey !== "string" || !item.answerKey))
+        || typeof item.marked !== "boolean" || typeof item.visited !== "boolean"
+        || (item.submitted !== undefined && typeof item.submitted !== "boolean")
+        || !Array.isArray(item.struck) || item.struck.some((key) => typeof key !== "string" || !key)
+        || !Number.isFinite(item.seconds) || item.seconds < 0 || item.seconds > MAX_RECOVERY_DURATION_SECONDS) return undefined;
+      totalItemSeconds += item.seconds;
+      if (totalItemSeconds > MAX_RECOVERY_DURATION_SECONDS) return undefined;
+    }
+    if (value.sourceEvidenceV1 !== undefined
+      && (!value.sourceEvidenceV1 || typeof value.sourceEvidenceV1 !== "object" || Array.isArray(value.sourceEvidenceV1)
+        || Object.entries(value.sourceEvidenceV1).some(([id, fingerprint]) => !pool.has(id) || typeof fingerprint !== "string"))) return undefined;
     return value;
   } catch {
     return undefined;
@@ -164,18 +203,6 @@ function sameLegacySuspendedRun(left: SuspendedBlock, right: SuspendedBlock): bo
     && left.poolIds.every((id, index) => id === right.poolIds[index]);
 }
 
-function anotherSuspendedBlock(excludingKey: string): SuspendedBlock | undefined {
-  try {
-    for (let index = 0; index < localStorage.length; index += 1) {
-      const key = localStorage.key(index);
-      if (!key || key === excludingKey || !key.startsWith(EXAM_SIM_RUN_PREFIX)) continue;
-      const candidate = parseSuspendedBlock(localStorage.getItem(key));
-      if (candidate) return candidate;
-    }
-  } catch { /* no replacement is available */ }
-  return undefined;
-}
-
 export function readSuspendedBlock(): SuspendedBlock | undefined {
   try {
     const remembered = sessionStorage.getItem(EXAM_SIM_RUN_ID_KEY);
@@ -189,7 +216,103 @@ export function readSuspendedBlock(): SuspendedBlock | undefined {
   }
 }
 
-export function writeSuspendedBlock(block: SuspendedBlock | null): void {
+export type SuspendedRecoveryRead =
+  | { status: "absent" }
+  | { status: "present"; block: SuspendedBlock }
+  | { status: "unreadable" };
+
+function readCheckedSuspendedCopy(key: string): SuspendedBlock | undefined {
+  const raw = localStorage.getItem(key);
+  if (raw === null) return undefined;
+  const block = parseSuspendedBlock(raw);
+  if (!block || !Object.prototype.hasOwnProperty.call(EXAM_SKINS, block.skin)
+    || !block.items || typeof block.items !== "object" || Array.isArray(block.items)
+    || (block.mode !== "exam" && block.mode !== "tutor")) {
+    throw new Error("Unverifiable suspended exam recovery.");
+  }
+  return block;
+}
+
+function sameSuspendedSnapshot(left: SuspendedBlock, right: SuspendedBlock): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+/** Setup actions must distinguish verified absence from unavailable or conflicting
+ * recovery. Do not silently select orphaned runs or rewrite recovery on read. */
+export function inspectSuspendedBlock(useSessionPointer = true): SuspendedRecoveryRead {
+  try {
+    const remembered = useSessionPointer ? sessionStorage.getItem(EXAM_SIM_RUN_ID_KEY) : null;
+    const scoped = remembered ? readCheckedSuspendedCopy(suspendedRunKey(remembered)) : undefined;
+    if (scoped && scoped.runId !== remembered) return { status: "unreadable" };
+    const legacy = readCheckedSuspendedCopy(EXAM_SIM_SUSPENDED_KEY);
+    const current = scoped ?? legacy;
+    if (current) {
+      if (current.runId) {
+        const mirror = readCheckedSuspendedCopy(suspendedRunKey(current.runId));
+        if (mirror && !sameSuspendedSnapshot(mirror, current)) return { status: "unreadable" };
+        if (legacy?.runId === current.runId && !sameSuspendedSnapshot(legacy, current)) return { status: "unreadable" };
+      }
+      return { status: "present", block: current };
+    }
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (key === null || key.startsWith(EXAM_SIM_RUN_PREFIX)) return { status: "unreadable" };
+    }
+    return { status: "absent" };
+  } catch {
+    return { status: "unreadable" };
+  }
+}
+
+/** Explicit, consented discard is not best-effort post-save cleanup. Verify
+ * the selected snapshot and all matching copies before removing any of them,
+ * then require readback. A distinct run (including a legacy run) is untouched. */
+export function discardSuspendedBlock(expected: SuspendedBlock): boolean {
+  try {
+    const current = inspectSuspendedBlock();
+    if (current.status !== "present" || !sameSuspendedSnapshot(current.block, expected)) return false;
+    const keys: string[] = [];
+    if (expected.runId) {
+      const key = suspendedRunKey(expected.runId);
+      const scoped = readCheckedSuspendedCopy(key);
+      if (scoped) {
+        if (!sameSuspendedSnapshot(scoped, expected)) return false;
+        keys.push(key);
+      }
+    }
+    const legacy = readCheckedSuspendedCopy(EXAM_SIM_SUSPENDED_KEY);
+    if (legacy && legacy.runId === expected.runId) {
+      if (!sameSuspendedSnapshot(legacy, expected)) return false;
+      keys.push(EXAM_SIM_SUSPENDED_KEY);
+    }
+    if (!keys.length) return false;
+    // Scoped first: if that removal fails, the legacy discovery copy survives.
+    for (const key of keys) {
+      const copy = readCheckedSuspendedCopy(key);
+      if (!copy || !sameSuspendedSnapshot(copy, expected)) return false;
+      localStorage.removeItem(key);
+      if (localStorage.getItem(key) !== null) return false;
+    }
+    if (expected.runId && localStorage.getItem(suspendedRunKey(expected.runId)) !== null) return false;
+    const remainingLegacy = readCheckedSuspendedCopy(EXAM_SIM_SUSPENDED_KEY);
+    if (remainingLegacy && remainingLegacy.runId === expected.runId) return false;
+    // The pointer contains no answers. Leave it intact on failed removal; a
+    // later read can fall back to a distinct legacy run or verified absence.
+    try {
+      if (expected.runId && sessionStorage.getItem(EXAM_SIM_RUN_ID_KEY) === expected.runId) {
+        sessionStorage.removeItem(EXAM_SIM_RUN_ID_KEY);
+      }
+    } catch { /* optional pointer cleanup after verified removal */ }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function writeSuspendedBlock(
+  block: SuspendedBlock | null,
+  { requireFreshSessionDiscovery = false }: { requireFreshSessionDiscovery?: boolean } = {},
+): void {
   if (!block) {
     try {
       const remembered = sessionStorage.getItem(EXAM_SIM_RUN_ID_KEY);
@@ -201,15 +324,31 @@ export function writeSuspendedBlock(block: SuspendedBlock | null): void {
   }
 
   const serialized = JSON.stringify(block);
+  // The exact bytes we acknowledge must also satisfy the recovery reader.
+  // Validate before touching either mirror or the session discovery pointer.
+  const validated = parseSuspendedBlock(serialized);
+  if (!validated) {
+    throw new Error("This exam recovery contains invalid data. Keep this window open; the previous recovery has not been changed.");
+  }
+  // A user-initiated Save & exit must be discoverable even after this tab
+  // closes. Interim resume/finalization still permits session-local recovery.
+  // Do not clear or rewrite the session pointer to simulate a fresh session.
+  const discoverable = () => {
+    const current = inspectSuspendedBlock();
+    if (current.status !== "present" || !sameSuspendedSnapshot(current.block, validated)) return false;
+    if (!requireFreshSessionDiscovery) return true;
+    const fresh = inspectSuspendedBlock(false);
+    return fresh.status === "present" && sameSuspendedSnapshot(fresh.block, validated);
+  };
   try {
-    if (!block.runId) {
+    if (!validated.runId) {
       localStorage.setItem(EXAM_SIM_SUSPENDED_KEY, serialized);
-      if (localStorage.getItem(EXAM_SIM_SUSPENDED_KEY) === serialized) return;
+      if (localStorage.getItem(EXAM_SIM_SUSPENDED_KEY) === serialized && discoverable()) return;
       throw new Error("The browser did not retain the suspended exam.");
     }
 
-    const pointerSaved = rememberSuspendedRun(block.runId);
-    const runKey = suspendedRunKey(block.runId);
+    const pointerSaved = rememberSuspendedRun(validated.runId);
+    const runKey = suspendedRunKey(validated.runId);
     let scopedSaved = false;
     try {
       localStorage.setItem(runKey, serialized);
@@ -222,39 +361,33 @@ export function writeSuspendedBlock(block: SuspendedBlock | null): void {
       const legacy = parseSuspendedBlock(legacyRaw);
       // Upgrade the same pre-run-id snapshot, but never overwrite a different
       // valid suspended exam merely because this tab finalized later.
-      const mayOwnLegacy = legacyRaw === null || legacy?.runId === block.runId
-        || Boolean(legacy && !legacy.runId && sameLegacySuspendedRun(legacy, block));
+      const mayOwnLegacy = legacyRaw === null || legacy?.runId === validated.runId
+        || Boolean(legacy && !legacy.runId && sameLegacySuspendedRun(legacy, validated));
       if (mayOwnLegacy) {
         localStorage.setItem(EXAM_SIM_SUSPENDED_KEY, serialized);
         legacySaved = localStorage.getItem(EXAM_SIM_SUSPENDED_KEY) === serialized;
       }
     } catch { /* the per-run mirror may still be exact and discoverable */ }
 
-    if (legacySaved || (scopedSaved && pointerSaved)) return;
+    // A retained copy is not sufficient: setup must discover this exact snapshot.
+    // A stale pointer or divergent mirror can otherwise acknowledge an exam
+    // that the canonical reader will reject. Leave both copies for safe retry.
+    if ((legacySaved || (scopedSaved && pointerSaved)) && discoverable()) return;
     throw new Error("The browser did not retain the suspended exam.");
   } catch {
-    throw new Error("Your exam could not be saved. Keep this window open and try again, or finish the block to save your answers.");
+    throw new Error(requireFreshSessionDiscovery
+      ? "AXOM could not verify that this exam can reopen in a new tab. Keep this window open and try again, or finish the block to save your answers."
+      : "Your exam could not be saved. Keep this window open and try again, or finish the block to save your answers.");
   }
 }
 
-/** Clear only the run whose durable workspace save was confirmed. A legacy
- * snapshot with no id, or a different tab's id, is deliberately preserved. */
-export function clearSuspendedBlock(runId: string): void {
-  const runKey = suspendedRunKey(runId);
-  try { localStorage.removeItem(runKey); } catch { /* best effort after the durable save */ }
-  try {
-    if (sessionStorage.getItem(EXAM_SIM_RUN_ID_KEY) === runId) sessionStorage.removeItem(EXAM_SIM_RUN_ID_KEY);
-  } catch { /* optional per-tab pointer */ }
-  try {
-    const legacyRaw = localStorage.getItem(EXAM_SIM_SUSPENDED_KEY);
-    if (legacyRaw !== null) {
-      const legacy = parseSuspendedBlock(legacyRaw);
-      if (!legacy || legacy.runId !== runId) return;
-    }
-    const replacement = anotherSuspendedBlock(runKey);
-    if (replacement) localStorage.setItem(EXAM_SIM_SUSPENDED_KEY, JSON.stringify(replacement));
-    else localStorage.removeItem(EXAM_SIM_SUSPENDED_KEY);
-  } catch { /* best effort after the durable save */ }
+/** Clear only the exact run snapshot whose durable workspace save was
+ * confirmed. A newer or unrelated recovery remains available for review. */
+export function clearSuspendedBlock(expected: SuspendedBlock): boolean {
+  // Finalization crossed an asynchronous durable-write boundary. A run ID
+  // alone cannot authorize deletion of a newer snapshot from another tab.
+  // Reuse exact recovery verification; never promote an unowned orphan.
+  return Boolean(expected.runId) && discardSuspendedBlock(expected);
 }
 
 export interface ExamSimPrefs {

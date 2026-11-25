@@ -34,6 +34,7 @@ export interface ExamSimulatorProps {
   skin: ExamSkin;
   mode: "exam" | "tutor";
   pool: QuestionRecord[];
+  scoringKeys?: ReadonlyMap<string, string | undefined>;
   runId?: string;
   timeLimitSeconds?: number;
   title?: string;
@@ -262,7 +263,7 @@ function ClassicExam({ exam, skin, mode, onClose, unreviewedCount = 0, community
           {mode === "tutor" && !revealed && (
             <button type="button" className="sim-submit" disabled={!item.answerKey || exam.finishLocked} onClick={exam.reveal}>Submit</button>
           )}
-          {revealed && <ExplanationBody question={question} picked={item.answerKey} correctKey={correctKey} result={result} seconds={exam.seconds} />}
+          {revealed && <ExplanationBody question={question} picked={item.answerKey} correctKey={correctKey} result={result} seconds={exam.seconds} reviewing={reviewing} />}
         </section>
 
         {panel && (
