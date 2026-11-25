@@ -226,7 +226,7 @@ describe("Simulation preserves original source evidence across recovery", () => 
       fireEvent.click(screen.getByRole("radio", { name: /UWorld-style/ }));
       fireEvent.click(screen.getByRole("button", { name: `Start ${mode} block` }));
       fireEvent.click(screen.getAllByRole("radio", { name: "B. Beta" })[0]);
-      if (mode === "tutor") fireEvent.click(screen.getByRole("button", { name: "Submit", exact: true }));
+      if (mode === "tutor") fireEvent.click(screen.getByRole("button", { name: /^Submit$/ }));
       fireEvent.click(screen.getByRole("button", { name: "Save & exit" }));
       const recovery = readSuspendedBlock()!;
       expect(recovery.items.q1.answerKey).toBe("B");
