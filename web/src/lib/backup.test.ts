@@ -7,6 +7,23 @@ import { buildQuizPool } from "./quiz";
 import { DEFAULT_JOURNAL_NOTEBOOK } from "./journalNotebook";
 
 describe("portable backup safety", () => {
+  it.each([SCHEMA_VERSION + 1, SCHEMA_VERSION + 100])("rejects future workspace schema %s without projecting it to the current schema", (schemaVersion) => {
+    const portable = { ...toPortableState(makeSeed()), schemaVersion, futureOnlyRecord: { retained: "original bytes" } };
+    expect(() => parseImport(JSON.stringify(portable))).toThrow("newer workspace schema");
+  });
+
+  it.each([null, "35", "36", true, -1, 35.5, Number.MAX_SAFE_INTEGER + 1, {}, []])("rejects malformed explicit workspace schema %j", (schemaVersion) => {
+    expect(() => parseImport(JSON.stringify({ terms: [], schemaVersion }))).toThrow("invalid workspace schema version");
+  });
+
+  it.each([undefined, 0, 31, SCHEMA_VERSION])("still restores supported workspace schema %s", (schemaVersion) => {
+    const seed = makeSeed();
+    const restored = parseImport(JSON.stringify({ ...toPortableState(seed), schemaVersion }));
+    expect(restored.schemaVersion).toBe(SCHEMA_VERSION);
+    expect(restored.terms).toEqual(seed.terms);
+  });
+
+
   it("round-trips exact learner method descriptions, timing and every preference layer", () => {
     const state = makeSeed();
     const original = "  Exact original words\n".repeat(50);

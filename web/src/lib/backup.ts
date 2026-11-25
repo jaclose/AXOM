@@ -370,7 +370,17 @@ export function parseImport(text: string): NoctyriumState {
   if (!data || typeof data !== "object" || !Array.isArray(data.terms)) {
     throw new Error("This file doesn't look like an AXOM backup.");
   }
-  // accept the file even if schemaVersion is missing/older — fill the gaps
+  // Missing version is the supported legacy format. Do not project a future
+  // or malformed explicit version onto the current schema and lose fields.
+  const version = data.schemaVersion;
+  if (version !== undefined) {
+    if (typeof version !== "number" || !Number.isSafeInteger(version) || version < 0) {
+      throw new Error("This backup has an invalid workspace schema version. Keep the original file.");
+    }
+    if (version > SCHEMA_VERSION) {
+      throw new Error("This backup was created with a newer workspace schema. Open it in a compatible newer AXOM version instead.");
+    }
+  }
   const profile = data.profile && typeof data.profile === "object"
     ? data.profile as Record<string, unknown>
     : {};
@@ -382,7 +392,7 @@ export function parseImport(text: string): NoctyriumState {
   const activeFocus = focusOption(activeFocusId);
   const educationTrack = resolveTrack(typeof profile.educationTrack === "string" ? profile.educationTrack : undefined).id;
 
-  const importedSchemaVersion = typeof data.schemaVersion === "number" ? data.schemaVersion : 0;
+  const importedSchemaVersion = version ?? 0;
   return {
     schemaVersion: SCHEMA_VERSION,
     profile: {

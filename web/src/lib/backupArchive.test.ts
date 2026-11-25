@@ -6,6 +6,8 @@ import { readSourceOriginal, saveSourceOriginal, deleteSourceOriginal, SOURCE_OR
 import type { SourceDocument } from "./library";
 import { closeWorkspace, openEmptyWorkspace } from "./question-content/persistenceHarness.testing";
 import { createMediaBackupArchive, mediaBackupBytes, readPortableBackup } from "./backupArchive";
+import { parseImport } from "./backup";
+import { SCHEMA_VERSION } from "./seed";
 import { setQuestionAttachmentAccount } from "./questionAttachmentScope";
 import { ATTACHMENT_EXPORT_KEY, deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob, putQuestionAttachmentBlob, type QuestionImageAttachment } from "./questionAttachments";
 
@@ -19,6 +21,17 @@ afterEach(async () => {
 });
 
 describe("portable binary media backup", () => {
+  it.each(["json", "zip"])("rejects future workspace schema in a %s backup before staging media", async (format) => {
+    const payload = { terms: [], schemaVersion: SCHEMA_VERSION + 1, futureOnlyRecord: { preserved: true } };
+    const file = format === "zip"
+      ? new File([(await createMediaBackupArchive(payload, [])).blob], "future.zip")
+      : new File([JSON.stringify(payload)], "future.json");
+    const backup = await readPortableBackup(file);
+    expect(() => parseImport(backup.rawText)).toThrow("newer workspace schema");
+    expect(JSON.parse(backup.rawText).futureOnlyRecord).toEqual(payload.futureOnlyRecord);
+  });
+
+
   it("round-trips distinct question references to one shared image without embedding base64 in workspace JSON", async () => {
     await putQuestionAttachmentBlob(attachment.blobKey, { blob: new Blob(["AXOM"]), mimeType: "image/png", byteSize: 4, questionId: "held-question", updatedAt: attachment.updatedAt });
     const secondAttachment = { ...attachment, id: "figure-second", assetId: "source-page-second" };
