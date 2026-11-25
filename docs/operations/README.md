@@ -6,6 +6,7 @@ authority: navigation
 # Operations routes
 
 - [Development and environment](development.md)
+- [AI worker operating protocol V1](ai-worker-sop-v1.md)
 - [Testing and CI coverage](testing.md)
 - [Deployment and updates](deployment.md)
 - [Troubleshooting](troubleshooting.md)

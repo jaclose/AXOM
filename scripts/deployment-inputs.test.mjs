@@ -40,7 +40,7 @@ async function withDeployment(t, { ignoreText = ignore, registrySource } = {}) {
   });
   const files = [
     'package.json', 'package-lock.json', 'web/package.json', 'web/package-lock.json',
-    'vercel.json', 'scripts/deployment-inputs.mjs', 'scripts/toolchain.mjs',
+    'vercel.json', 'scripts/deployment-inputs.mjs', 'scripts/vercel-branch-gate.mjs', 'scripts/toolchain.mjs',
     'scripts/release-notes.mjs', 'scripts/release-notes.d.mts',
     'web/scripts/verify-daily-games-bundle.mjs',
     bankRegistry, ...fixtureFiles,
@@ -73,6 +73,7 @@ test('inline registry survives real Vercel filtering while every fixture stays e
   assert.deepEqual(requiredManifests(repo), []);
   assert.deepEqual(checkDeploymentInputs(target), []);
   assert.ok(selected.includes(bankRegistry));
+  assert.ok(selected.includes('scripts/vercel-branch-gate.mjs'), 'ignored build gate survives Vercel filtering');
   assert.equal(selected.some(file => file.startsWith('fixtures/')), false);
   assert.doesNotThrow(() => assertDeploymentPrivacy(selected));
   for (const file of [...excluded, 'web/local-only.txt']) assert.ok(!selected.includes(file), file);
