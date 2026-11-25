@@ -4,6 +4,7 @@ import { GButton } from "../ui/primitives";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { exportStateWithAttachments } from "../../lib/backup";
 import { useStore } from "../../lib/store";
+import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent, subscribeQuestionAttachmentScope, type QuestionAttachmentScope } from "../../lib/questionAttachmentScope";
 import { beginPortableBackupAttempt, lastPortableBackupAt, refreshAfterPortableBackup, subscribePortableBackup } from "../../lib/refreshRecovery";
 
 function backupTime(at: string): string {
@@ -16,17 +17,24 @@ function backupTime(at: string): string {
  * re-checks that nothing changed since that download.
  */
 export function RefreshAfterBackup({ intro = true }: { intro?: boolean } = {}) {
+  const accountScope = useSyncExternalStore(subscribeQuestionAttachmentScope, getQuestionAttachmentScope, getQuestionAttachmentScope);
+  return <ScopedRefreshAfterBackup key={accountScope.generation} intro={intro} accountScope={accountScope} />;
+}
+
+function ScopedRefreshAfterBackup({ intro, accountScope }: { intro: boolean; accountScope: QuestionAttachmentScope }) {
   const backupAt = useSyncExternalStore(subscribePortableBackup, lastPortableBackupAt, () => null);
   const [busy, setBusy] = useState<"backup" | "refresh" | null>(null);
   const [message, setMessage] = useState("");
 
   async function download() {
+    if (!isQuestionAttachmentScopeCurrent(accountScope)) return;
     setBusy("backup");
     setMessage("");
     try {
       const state = useStore.getState();
       const finish = beginPortableBackupAttempt(state);
       const result = await exportStateWithAttachments(state, "complete");
+      if (!isQuestionAttachmentScopeCurrent(accountScope)) return;
       const covered = finish(result);
       const incomplete = result.missingBlobKeys.length || result.missingOriginalIds.length || result.deferredSourceCount !== 0;
       setMessage(incomplete
@@ -35,18 +43,20 @@ export function RefreshAfterBackup({ intro = true }: { intro?: boolean } = {}) {
           ? "Backup downloaded. Keep the file until AXOM saves normally again."
           : "Backup downloaded, but it could not verify the current workspace. Keep the file and download a new backup before refreshing.");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "The backup could not be prepared. Nothing was changed.");
+      if (isQuestionAttachmentScopeCurrent(accountScope)) setMessage(error instanceof Error ? error.message : "The backup could not be prepared. Nothing was changed.");
     } finally {
-      setBusy(null);
+      if (isQuestionAttachmentScopeCurrent(accountScope)) setBusy(null);
     }
   }
 
   async function refresh() {
+    if (!isQuestionAttachmentScopeCurrent(accountScope)) return;
     setBusy("refresh");
     setMessage("");
     try {
       await refreshAfterPortableBackup();
     } catch (error) {
+      if (!isQuestionAttachmentScopeCurrent(accountScope)) return;
       setBusy(null);
       setMessage(error instanceof Error ? error.message : "The refresh could not start. Nothing was changed.");
     }

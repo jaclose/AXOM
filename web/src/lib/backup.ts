@@ -1,4 +1,5 @@
 import { contentMetadata, readDeferredContent } from "./sync/deferredContent";
+import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent } from "./questionAttachmentScope";
 import { readWorkspaceContent } from "./question-content/workspaceContent";
 import { privateReviewMedia } from "./privateLibrary/media";
 import { backupOriginalDocuments, createMediaBackupArchive, LARGE_MEDIA_BACKUP_BYTES, mediaBackupBytes } from "./backupArchive";
@@ -79,9 +80,17 @@ export async function exportStateWithAttachments(
   state: NoctyriumState,
   scope: BackupScope = "complete",
 ): Promise<{ attachmentCount: number; missingBlobKeys: string[]; originalCount: number; missingOriginalIds: string[]; deferredSourceCount: number }> {
+  const accountScope = getQuestionAttachmentScope();
+  const assertCurrent = () => {
+    if (!isQuestionAttachmentScopeCurrent(accountScope)) {
+      throw new Error("The account changed during export. Start a new export from the current workspace.");
+    }
+  };
   if (state.deferredContent && scope === "complete") {
     const { materializeState } = await import("./sync/contentDownloads");
+    assertCurrent();
     state = await materializeState(state);
+    assertCurrent();
   }
   const payload: Record<string, unknown> = {
     _app: BRAND.productName,
@@ -91,10 +100,11 @@ export async function exportStateWithAttachments(
   };
   const metadata = contentMetadata(state);
   const deferredSourceCount = state.deferredContent?.sources.length ?? 0;
-  const options = { localOnly: scope === "saved-work" };
+  const options = { localOnly: scope === "saved-work", scope: accountScope };
   const references = [...(metadata.questions ?? []), ...privateReviewMedia(metadata.documents)];
   if (backupOriginalDocuments(metadata.documents).length || mediaBackupBytes(references) > LARGE_MEDIA_BACKUP_BYTES) {
     const result = await createMediaBackupArchive(payload, references, metadata.documents, options);
+    assertCurrent();
     downloadBackupBlob(result.blob, "zip", scope);
     return { attachmentCount: result.attachmentCount, missingBlobKeys: result.missingBlobKeys, originalCount: result.originalCount, missingOriginalIds: result.missingOriginalIds, deferredSourceCount };
   }
@@ -106,10 +116,13 @@ export async function exportStateWithAttachments(
     attachmentCount = collected.payloads.length;
     missingBlobKeys = collected.missingBlobKeys;
   } catch {
+    // Account cancellation is not a recoverable missing-file error.
+    assertCurrent();
     // Blob store unavailable (private mode): export metadata-only, reported.
     missingBlobKeys = references.flatMap((question) =>
       (question.attachments ?? []).map((attachment) => attachment.blobKey));
   }
+  assertCurrent();
   downloadBackupPayload(payload, scope);
   return { attachmentCount, missingBlobKeys, originalCount: 0, missingOriginalIds: [], deferredSourceCount };
 }
