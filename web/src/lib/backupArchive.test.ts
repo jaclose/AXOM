@@ -21,6 +21,16 @@ afterEach(async () => {
 });
 
 describe("portable binary media backup", () => {
+  it.each(["json", "zip"])("rejects malformed tasks from a %s backup before staging", async (format) => {
+    const payload = { terms: [], schemaVersion: SCHEMA_VERSION, tasks: { id: "preserve-this-source" } };
+    const file = format === "zip"
+      ? new File([(await createMediaBackupArchive(payload, [])).blob], "invalid.zip")
+      : new File([JSON.stringify(payload)], "invalid.json");
+    const backup = await readPortableBackup(file);
+    expect(() => parseImport(backup.rawText)).toThrow("invalid workspace collection (tasks)");
+    expect(JSON.parse(backup.rawText).tasks).toEqual(payload.tasks);
+  });
+
   it.each(["json", "zip"])("rejects future workspace schema in a %s backup before staging media", async (format) => {
     const payload = { terms: [], schemaVersion: SCHEMA_VERSION + 1, futureOnlyRecord: { preserved: true } };
     const file = format === "zip"

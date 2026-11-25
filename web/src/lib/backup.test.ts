@@ -7,6 +7,25 @@ import { buildQuizPool } from "./quiz";
 import { DEFAULT_JOURNAL_NOTEBOOK } from "./journalNotebook";
 
 describe("portable backup safety", () => {
+  it.each([
+    ["tasks", {}], ["courses", "bad"], ["questions", [null]],
+    ["journal", [42]], ["documents", null], ["dayPlans", [[]]],
+    ["savedQuestionFilters", false], ["dailyWordPuzzles", ["bad"]],
+  ])("rejects an explicit malformed %s collection before normalization", (key, value) => {
+    for (const schemaVersion of [undefined, SCHEMA_VERSION]) {
+      expect(() => parseImport(JSON.stringify({ terms: [], schemaVersion, [String(key)]: value })))
+        .toThrow(`invalid workspace collection (${key})`);
+    }
+  });
+
+  it("continues to accept omitted legacy record collections and valid arrays", () => {
+    expect(parseImport(JSON.stringify({ terms: [] })).tasks).toEqual([]);
+    const seed = makeSeed();
+    const restored = parseImport(JSON.stringify(toPortableState(seed)));
+    expect(restored.terms).toEqual(seed.terms);
+    expect(restored.tasks).toEqual(seed.tasks);
+  });
+
   it.each([SCHEMA_VERSION + 1, SCHEMA_VERSION + 100])("rejects future workspace schema %s without projecting it to the current schema", (schemaVersion) => {
     const portable = { ...toPortableState(makeSeed()), schemaVersion, futureOnlyRecord: { retained: "original bytes" } };
     expect(() => parseImport(JSON.stringify(portable))).toThrow("newer workspace schema");

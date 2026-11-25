@@ -381,6 +381,22 @@ export function parseImport(text: string): NoctyriumState {
       throw new Error("This backup was created with a newer workspace schema. Open it in a compatible newer AXOM version instead.");
     }
   }
+  // A present collection must be structurally usable before normalization.
+  // Omitted fields remain supported for legacy backups; explicit malformed
+  // values must not be silently converted into an empty collection or adopted.
+  const collections = [
+    "terms", "courses", "tracker", "productivityTrackers", "resources", "tasks", "journal",
+    "premedExperiences", "prompts", "folders", "logs", "integrations", "blueprintInstalls",
+    "dayPlans", "dailyArchives", "dailyRolloverEvents", "energyFactors", "habits", "habitEntries",
+    "sessions", "closeouts", "recoveryPlans", "questions", "quizSessions", "documents",
+    "questionSets", "savedQuestionFilters", "quizBlocks", "ankiCards", "cardReviews", "dailyWordPuzzles",
+  ] as const;
+  for (const key of collections) {
+    const collection: unknown = data[key];
+    if (collection !== undefined && (!Array.isArray(collection) || !collection.every(isRecord))) {
+      throw new Error(`This backup has an invalid workspace collection (${key}). Keep the original file.`);
+    }
+  }
   const profile = data.profile && typeof data.profile === "object"
     ? data.profile as Record<string, unknown>
     : {};
