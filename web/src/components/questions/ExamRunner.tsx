@@ -801,11 +801,28 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     retryMediaStartRef.current();
   }
 
+  // Setup may outlive a recovery update from another tab. Never apply a
+  // destructive action or resume a snapshot different from the one shown.
+  function requireCurrentSuspended(expected: SuspendedBlock | undefined): boolean {
+    const current = readSuspendedBlock();
+    if (JSON.stringify(current) === JSON.stringify(expected)) return true;
+    retryMediaStartRef.current = null;
+    setSuspended(current);
+    pushToast({
+      title: "Suspended exam changed",
+      body: "Recovery changed while this setup was open. Review the current suspended block before continuing.",
+      tone: "warn",
+    });
+    return false;
+  }
+
   function startBuiltBlock(built: QuestionRecord[]) {
     if (examInterface !== "axom") {
+      if (!requireCurrentSuspended(suspended)) return;
       if (suspended && !confirm("Starting a new block discards your suspended block. Continue?")) return;
+      if (!requireCurrentSuspended(suspended)) return;
       if (suspended?.runId) clearSuspendedBlock(suspended.runId);
-      else writeSuspendedBlock(null);
+      else if (suspended) writeSuspendedBlock(null);
       setSuspended(undefined);
       clearActiveQuiz(runId);
       setSimRun({ runId, skin: examInterface, pool: built,
@@ -1021,7 +1038,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   }
 
   function resumeSuspended() {
-    if (!suspended) return;
+    if (!suspended || !requireCurrentSuspended(suspended)) return;
     const ready = completeRequestedPool(suspended.poolIds, questions);
     if (!ready) {
       const claims = questionClaims(questions);
@@ -1046,7 +1063,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       return;
     }
     const continueSuspended = () => media.verify(ready, () => {
-      if (!readSuspendedBlock()) return;
+      if (!requireCurrentSuspended(resumed)) return;
       setMode(resumed.mode);
       setSimRun({ runId: resumed.runId!, skin: resumed.skin, pool: ready, sourceEvidenceV1, timeLimitSeconds: resumed.timeLimitSeconds, resume: resumed });
       setStage("sim");
@@ -1056,8 +1073,10 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   }
 
   function discardSuspended() {
+    if (!suspended || !requireCurrentSuspended(suspended)) return;
     if (!confirm("Discard the suspended block? Its answers will not be scored.")) return;
-    if (suspended?.runId) clearSuspendedBlock(suspended.runId);
+    if (!requireCurrentSuspended(suspended)) return;
+    if (suspended.runId) clearSuspendedBlock(suspended.runId);
     else writeSuspendedBlock(null);
     setSuspended(undefined);
   }

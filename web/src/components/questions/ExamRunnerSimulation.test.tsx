@@ -106,6 +106,89 @@ describe("ExamRunner simulation", () => {
 });
 
 describe("Suspended exam source recovery", () => {
+  function savedBlock(runId: string): NonNullable<ReturnType<typeof readSuspendedBlock>> {
+    const now = new Date().toISOString();
+    return {
+      version: 1, runId, skin: "nbme", mode: "exam", poolIds: ["q1"], index: 0,
+      items: { q1: { answerKey: "A", marked: false, struck: [], seconds: 12, visited: true } },
+      elapsedMs: 12_000, notes: "Original notes", startedAt: now, suspendedAt: now,
+    };
+  }
+
+  it.each(["same-run", "different-run"] as const)("requires renewed consent to resume a changed snapshot (%s)", (kind) => {
+    const original = savedBlock("old-run");
+    writeSuspendedBlock(original);
+    render(<ExamRunner mode="exam" onClose={vi.fn()} />);
+    const changed = {
+      ...original, runId: kind === "same-run" ? original.runId : "new-run", notes: "Newer notes",
+      items: { q1: { ...original.items.q1, answerKey: "B", marked: true } },
+    };
+    writeSuspendedBlock(changed);
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    expect(screen.queryByRole("dialog", { name: /simulation/ })).toBeNull();
+    expect(readSuspendedBlock()).toEqual(changed);
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    expect(screen.getByRole("dialog", { name: /USMLE \/ NBME.*simulation/ })).toBeTruthy();
+    expect((screen.getAllByRole("radio", { name: "B. Beta" })[0] as HTMLInputElement).checked).toBe(true);
+  });
+
+  it.each(["same-run", "different-run"] as const)("does not discard unseen recovery (%s)", (kind) => {
+    const original = savedBlock("old-run");
+    writeSuspendedBlock(original);
+    render(<ExamRunner mode="exam" onClose={vi.fn()} />);
+    const changed = { ...original, runId: kind === "same-run" ? original.runId : "new-run", notes: "Newer notes" };
+    writeSuspendedBlock(changed);
+    const consent = vi.spyOn(window, "confirm").mockReturnValue(true);
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+      expect(consent).not.toHaveBeenCalled();
+      expect(readSuspendedBlock()).toEqual(changed);
+      expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
+    } finally {
+      consent.mockRestore();
+    }
+  });
+
+  it("rechecks recovery after discard confirmation", () => {
+    const original = savedBlock("old-run");
+    writeSuspendedBlock(original);
+    render(<ExamRunner mode="exam" onClose={vi.fn()} />);
+    const changed = { ...original, notes: "Changed during confirmation" };
+    const consent = vi.spyOn(window, "confirm").mockImplementation(() => {
+      writeSuspendedBlock(changed);
+      return true;
+    });
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+      expect(consent).toHaveBeenCalledTimes(1);
+      expect(readSuspendedBlock()).toEqual(changed);
+      expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
+    } finally {
+      consent.mockRestore();
+    }
+  });
+
+  it("does not start a new simulation over recovery created after setup opened", () => {
+    render(<ExamRunner mode="exam" onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("radio", { name: /USMLE \/ NBME/ }));
+    const changed = savedBlock("new-run");
+    writeSuspendedBlock(changed);
+    const consent = vi.spyOn(window, "confirm").mockReturnValue(true);
+    try {
+      fireEvent.click(screen.getByRole("button", { name: /Start exam block/ }));
+      expect(consent).not.toHaveBeenCalled();
+      expect(screen.queryByRole("dialog", { name: /simulation/ })).toBeNull();
+      expect(readSuspendedBlock()).toEqual(changed);
+      expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: /Start exam block/ }));
+      expect(consent).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("dialog", { name: /USMLE \/ NBME.*simulation/ })).toBeTruthy();
+      expect(readSuspendedBlock()).toBeUndefined();
+    } finally {
+      consent.mockRestore();
+    }
+  });
+
   it("does not resume when any requested ID has multiple claimants", () => {
     const now = new Date().toISOString();
     writeSuspendedBlock({
