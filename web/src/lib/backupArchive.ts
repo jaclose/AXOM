@@ -39,6 +39,30 @@ function exportBudget(requested: Partial<ArchiveBudget>): ArchiveBudget {
 export function backupOriginalDocuments(documents: readonly SourceDocument[]): SourceDocument[] {
   return documents.filter(doc => /^[a-f0-9]{64}$/.test(doc.checksum?.replace(/^sha256:/, "") ?? "") && typeof doc.fileType === "string" && !doc.fileType.startsWith("axom-"));
 }
+// Format 2 has one original entry per document ID. Preserve workspace metadata,
+// but never emit competing editions or a binary without its manifest identity.
+function uniqueBackupOriginals(documents: readonly SourceDocument[], payload: Record<string, unknown>): SourceDocument[] {
+  const originals = new Map<string, SourceDocument>();
+  const checksum = (doc: SourceDocument) => typeof doc.checksum === "string" ? doc.checksum.replace(/^sha256:/, "") : undefined;
+  for (const doc of backupOriginalDocuments(documents)) {
+    const existing = originals.get(doc.id);
+    if (existing && checksum(existing) !== checksum(doc)) throw new Error("Conflicting original-file identities in the backup. Resolve the document conflict before exporting.");
+    originals.set(doc.id, doc);
+  }
+  const deferred = payload.deferredContent as { documents?: SourceDocument[] } | undefined;
+  const manifestDocuments = [
+    ...(Array.isArray(payload.documents) ? payload.documents as SourceDocument[] : []),
+    ...(Array.isArray(deferred?.documents) ? deferred.documents : []),
+  ];
+  const matched = new Set<string>();
+  for (const doc of [...documents, ...manifestDocuments]) {
+    const original = originals.get(doc?.id);
+    if (original && checksum(original) !== checksum(doc)) throw new Error("Conflicting original-file identities in the backup. Resolve the document conflict before exporting.");
+  }
+  for (const doc of manifestDocuments) if (originals.has(doc?.id)) matched.add(doc.id);
+  if (matched.size !== originals.size) throw new Error("An original-file identity is missing from the backup workspace.");
+  return [...originals.values()];
+}
 const FORMAT = "axom-media-backup";
 export const LARGE_MEDIA_BACKUP_BYTES = 128 * 1024 * 1024;
 
@@ -54,6 +78,7 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
   const budget = exportBudget(requestedBudget);
   const scope = options.scope ?? getQuestionAttachmentScope();
   options = { ...options, scope };
+  const originalDocuments = uniqueBackupOriginals(documents, payload);
   const zip = new JSZip();
   const media: MediaEntry[] = [];
   const missingBlobKeys: string[] = [];
@@ -81,13 +106,14 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
   }
   const originals: OriginalEntry[] = [];
   const missingOriginalIds: string[] = [];
-  for (const document of backupOriginalDocuments(documents)) {
+  for (const document of originalDocuments) {
     try {
       const blob = await readSourceOriginal(document.id, document.checksum, options);
       if (!blob || blob.size > MAX_ORIGINAL_BYTES) throw new Error("Original unavailable or too large");
       checkBinary(blob.size, MAX_ORIGINAL_BYTES);
       const bytes = new Uint8Array(await blob.arrayBuffer());
       checkBinary(bytes.byteLength, MAX_ORIGINAL_BYTES);
+      if (bytes.byteLength !== blob.size || blob.type.length > 255 || await sha256Hex(bytes) !== document.checksum!.replace(/^sha256:/, "")) throw new Error("Original failed backup integrity check");
       const file = `originals/${originals.length}`;
       zip.file(file, bytes, { createFolders: false });
       originals.push({ file, documentId: document.id, sha256: document.checksum!.replace(/^sha256:/, ""), byteSize: bytes.byteLength, mimeType: blob.type });

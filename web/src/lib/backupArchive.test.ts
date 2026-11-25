@@ -37,7 +37,7 @@ describe("portable binary media backup", () => {
     expect(restored!.questionId).toBe("second-use");
     expect(await backup.restoreMedia(references)).toMatchObject({ restored: 0, skipped: 1 });
     await staged.rollback();
-    expect(await getQuestionAttachmentBlob(attachment.blobKey)).toBeUndefined();
+    expect(await (await getQuestionAttachmentBlob(attachment.blobKey))!.blob.text()).toBe("AXOM");
   });
 
   it("counts actual ZIP entries and reserves a manifest entry", async () => {
@@ -95,6 +95,33 @@ describe("portable binary media backup", () => {
     const backup = await readPortableBackup(new File([JSON.stringify(payload)], "collision.json"));
     await expect(backup.restoreMedia(refs)).rejects.toThrow("existing storage key with different bytes");
     expect(await (await getQuestionAttachmentBlob(attachment.blobKey))!.blob.text()).toBe("SAFE");
+  });
+
+  it("writes one original entry for identical duplicate identities without removing metadata", async () => {
+    const original = new Blob(["duplicate source"], { type: "text/plain" });
+    const document: SourceDocument = { id: "duplicate-source", title: "Source", fileName: "source.txt", fileType: "text/plain", uploadedAt: "2026-10-13", rawText: "duplicate source", sizeBytes: original.size, checksum: await sha256Hex(await original.arrayBuffer()), tags: [], linkedQuestionSetIds: [], libraryOnly: true };
+    const copy = { ...document, title: "Another label" };
+    await saveSourceOriginal(document, original);
+    const documents = [document, copy];
+    const exported = await createMediaBackupArchive({ documents }, [], documents);
+    expect(exported).toMatchObject({ originalCount: 1, missingOriginalIds: [] });
+    const backup = await readPortableBackup(new File([exported.blob], "duplicates.zip"));
+    expect(JSON.parse(backup.rawText).documents).toEqual(documents);
+    await deleteSourceOriginal(document.id);
+    expect(await backup.restoreOriginals(documents)).toEqual({ restored: 1, skipped: 0 });
+    expect(await (await readSourceOriginal(document.id, document.checksum))?.text()).toBe("duplicate source");
+  });
+
+  it.each([false, true])("rejects competing original identities in either order (reverse: %s)", async reverse => {
+    const original = new Blob(["first source"], { type: "text/plain" });
+    const document: SourceDocument = { id: "competing-source", title: "Source", fileName: "source.txt", fileType: "text/plain", uploadedAt: "2026-10-13", rawText: "first source", sizeBytes: original.size, checksum: await sha256Hex(await original.arrayBuffer()), tags: [], linkedQuestionSetIds: [], libraryOnly: true };
+    const other = { ...document, checksum: await sha256Hex("other source") };
+    await saveSourceOriginal(document, original);
+    const documents = reverse ? [other, document] : [document, other];
+    await expect(createMediaBackupArchive({ documents }, [], documents)).rejects.toThrow("Conflicting original-file identities");
+    await expect(createMediaBackupArchive({ documents: [documents[0]], deferredContent: { documents: [documents[1]] } }, [], [document])).rejects.toThrow("Conflicting original-file identities");
+    await expect(createMediaBackupArchive({}, [], [document])).rejects.toThrow("identity is missing");
+    expect(await (await readSourceOriginal(document.id, document.checksum))?.text()).toBe("first source");
   });
 
   it("round-trips verified originals, retries safely and preserves a newer local edition", async () => {
