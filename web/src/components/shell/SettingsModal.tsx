@@ -157,22 +157,14 @@ export async function persistPortableRestore(input: {
     originals = await restoreOriginals(metadata.documents ?? []);
   } catch (error) {
     assertAccount();
-    try {
-      await mediaStage.rollback();
-    } catch (rollbackError) {
-      throw new Error(`Original files could not be prepared, and staged image cleanup could not be confirmed. ${errorText(rollbackError)} The workspace was not changed; keep this tab open.`, { cause: rollbackError });
-    }
-    throw new Error(`Original files could not be prepared. ${errorText(error)} The workspace was not changed. Verified original-file bytes may remain cached.`, { cause: error });
+    // Staged keys may already be referenced by this or another tab. A failed
+    // preparation is not evidence that the bytes are safe to delete.
+    throw new Error(`Original files could not be prepared. ${errorText(error)} The workspace was not changed by recovery. Prepared images and original files may remain cached.`, { cause: error });
   }
 
   assertAccount();
   if (services.getState() !== current) {
-    try {
-      await mediaStage.rollback();
-    } catch (rollbackError) {
-      throw new Error(`Your workspace changed during recovery, and staged image cleanup could not be confirmed. ${errorText(rollbackError)} No workspace was replaced; keep this tab open.`, { cause: rollbackError });
-    }
-    throw new Error("Your workspace changed while preparing recovery. Nothing was replaced; retry when saving finishes. Verified original-file bytes may remain cached.");
+    throw new Error("Your workspace changed while preparing recovery. Nothing was replaced; retry when saving finishes. Prepared images and original files may remain cached.");
   }
 
   onProgress?.("Saving the recovered workspace on this device…");
@@ -189,32 +181,26 @@ export async function persistPortableRestore(input: {
     // A later account or edit owns the active workspace. Keep the backup and
     // staged bytes rather than rolling an older user's snapshot over it.
     assertAccount();
-    if (adopted && services.getState() !== adopted) throw new Error("The workspace changed while recovery was saving. Keep this tab open and your backup; the newer workspace was not replaced.", { cause: targetError });
+    if (services.getState() !== (adopted ?? current)) throw new Error("The workspace changed while recovery was saving. Keep this tab open and your backup; recovery did not roll back the changed workspace.", { cause: targetError });
     let workspaceRollbackError: unknown;
-    let mediaRollbackError: unknown;
     try {
       const rollbackCheckpoint = services.getCheckpoint();
       current.replaceAll(priorState, scope.accountId);
+      const rollbackAdopted = services.getState();
       await services.flush();
       assertAccount();
+      if (services.getState() !== rollbackAdopted) throw new Error("The workspace changed while the prior state was saving.");
       services.assertWritesSince(rollbackCheckpoint);
     } catch (error) {
       workspaceRollbackError = error;
     }
     assertAccount();
-    try {
-      await mediaStage.rollback();
-    } catch (error) {
-      mediaRollbackError = error;
-    }
-
+    // Even a successful prior-state write cannot establish that another tab
+    // has no references to these bytes. Retain them instead of attempting cleanup.
     if (workspaceRollbackError) {
-      throw new Error(`The recovered workspace could not be confirmed on disk, and AXOM could not confirm the prior workspace rollback. Keep this tab open and export the workspace before retrying. Save error: ${errorText(targetError)} Rollback error: ${errorText(workspaceRollbackError)}`, { cause: targetError });
+      throw new Error(`The recovered workspace could not be confirmed on disk, and AXOM could not confirm the prior workspace rollback. Keep this tab open and export the workspace before retrying. Prepared images and original files were not cleaned up. Save error: ${errorText(targetError)} Rollback error: ${errorText(workspaceRollbackError)}`, { cause: targetError });
     }
-    if (mediaRollbackError) {
-      throw new Error(`The recovered workspace was not saved. Your prior workspace was restored and confirmed, but staged image cleanup could not be confirmed. ${errorText(mediaRollbackError)}`, { cause: targetError });
-    }
-    throw new Error(`The recovered workspace was not saved. Your prior workspace was restored and confirmed on this device. ${errorText(targetError)} Verified original-file bytes may remain cached.`, { cause: targetError });
+    throw new Error(`The recovered workspace was not confirmed saved. Your prior workspace was restored and confirmed on this device. ${errorText(targetError)} Prepared images and original files may remain cached.`, { cause: targetError });
   }
 
   services.recordRestore({ kind: mode === "merge" ? "portable-merge" : "portable-restore", detail: fileName });

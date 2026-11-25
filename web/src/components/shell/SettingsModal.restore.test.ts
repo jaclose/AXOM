@@ -118,17 +118,17 @@ describe.each(["replace", "merge"] as const)("portable %s transaction", (mode) =
     expect(h.maintainAttachments).not.toHaveBeenCalled();
   });
 
-  it("removes staged media when original-file preparation fails", async () => {
+  it("retains staged media when original-file preparation fails", async () => {
     const h = restoreHarness(mode);
     h.restoreOriginals.mockRejectedValueOnce(new Error("original refused"));
 
     await expect(h.run()).rejects.toThrow(/Original files could not be prepared.*workspace was not changed/);
-    expect(h.rollback).toHaveBeenCalledOnce();
+    expect(h.rollback).not.toHaveBeenCalled();
     expect(h.replaceAll).not.toHaveBeenCalled();
     expect(h.recordRestore).not.toHaveBeenCalled();
   });
 
-  it("aborts and removes staged media when the captured workspace changes", async () => {
+  it("aborts and retains staged media when the captured workspace changes", async () => {
     const h = restoreHarness(mode);
     h.restoreOriginals.mockImplementationOnce(async () => {
       h.setLive({ ...h.current, profile: { ...h.current.profile, name: "Concurrent edit" } } as unknown as Store);
@@ -136,7 +136,7 @@ describe.each(["replace", "merge"] as const)("portable %s transaction", (mode) =
     });
 
     await expect(h.run()).rejects.toThrow(/workspace changed while preparing recovery/);
-    expect(h.rollback).toHaveBeenCalledOnce();
+    expect(h.rollback).not.toHaveBeenCalled();
     expect(h.replaceAll).not.toHaveBeenCalled();
     expect(h.recordRestore).not.toHaveBeenCalled();
   });
@@ -151,7 +151,7 @@ describe.each(["replace", "merge"] as const)("portable %s transaction", (mode) =
     expect(h.flush).toHaveBeenCalledTimes(2);
     expect(h.assertWritesSince).toHaveBeenNthCalledWith(1, 0);
     expect(h.assertWritesSince).toHaveBeenNthCalledWith(2, 1);
-    expect(h.rollback).toHaveBeenCalledOnce();
+    expect(h.rollback).not.toHaveBeenCalled();
     expect(h.getLive().profile.name).toBe(`Prior ${mode}`);
     expect(h.recordRestore).not.toHaveBeenCalled();
     expect(h.maintainAttachments).not.toHaveBeenCalled();
@@ -164,8 +164,49 @@ describe.each(["replace", "merge"] as const)("portable %s transaction", (mode) =
     await expect(h.run()).rejects.toThrow(/could not confirm the prior workspace rollback.*Keep this tab open/);
     expect(h.flush).toHaveBeenCalledTimes(2);
     expect(h.assertWritesSince).toHaveBeenCalledTimes(2);
-    expect(h.rollback).toHaveBeenCalledOnce();
+    expect(h.rollback).not.toHaveBeenCalled();
     expect(h.recordRestore).not.toHaveBeenCalled();
+  });
+
+  it("retains staged bytes if the prior workspace flush rejects after target receipt refusal", async () => {
+    const h = restoreHarness(mode);
+    h.assertWritesSince.mockImplementationOnce(() => { throw new Error("target receipt refused"); });
+    h.flush.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("prior flush refused"));
+
+    await expect(h.run()).rejects.toThrow(/could not confirm the prior workspace rollback.*Prepared images and original files were not cleaned up/);
+    expect(h.rollback).not.toHaveBeenCalled();
+    expect(h.recordRestore).not.toHaveBeenCalled();
+    expect(h.maintainAttachments).not.toHaveBeenCalled();
+  });
+
+  it("does not report rollback confirmation if a newer edit appears during its flush", async () => {
+    const h = restoreHarness(mode);
+    h.assertWritesSince.mockImplementationOnce(() => { throw new Error("target receipt refused"); });
+    h.flush.mockResolvedValueOnce(undefined).mockImplementationOnce(async () => {
+      h.setLive({ ...h.getLive(), profile: { ...h.getLive().profile, name: "New edit" } } as Store);
+    });
+
+    await expect(h.run()).rejects.toThrow(/could not confirm the prior workspace rollback.*workspace changed while the prior state was saving/);
+    expect(h.getLive().profile.name).toBe("New edit");
+    expect(h.rollback).not.toHaveBeenCalled();
+    expect(h.assertWritesSince).toHaveBeenCalledTimes(1);
+    expect(h.recordRestore).not.toHaveBeenCalled();
+    expect(h.maintainAttachments).not.toHaveBeenCalled();
+  });
+
+  it("does not roll back a changed workspace when target saving fails", async () => {
+    const h = restoreHarness(mode);
+    h.flush.mockImplementationOnce(async () => {
+      h.setLive({ ...h.getLive(), profile: { ...h.getLive().profile, name: "New edit" } } as Store);
+      throw new Error("target flush refused");
+    });
+
+    await expect(h.run()).rejects.toThrow(/workspace changed while recovery was saving/);
+    expect(h.getLive().profile.name).toBe("New edit");
+    expect(h.replaceAll).toHaveBeenCalledTimes(1);
+    expect(h.rollback).not.toHaveBeenCalled();
+    expect(h.recordRestore).not.toHaveBeenCalled();
+    expect(h.maintainAttachments).not.toHaveBeenCalled();
   });
 
   it("keeps durable success when maintenance fails and reports cleanup as a warning", async () => {
