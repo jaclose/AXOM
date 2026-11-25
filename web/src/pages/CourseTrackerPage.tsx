@@ -742,7 +742,9 @@ function ScheduleImportModal({ defaultPath, onClose }: { defaultPath: string; on
     const destination = path || "Imported schedule";
     const latest = reconcileScheduleDuplicates(review, useStore.getState().tracker, destination);
     const items = scheduleCandidatesToTracker(latest, destination);
-    if (!items.length || items.length !== importable) {
+    const staleConfirmation = review.some((row, index) => row.selected && row.confirmedConflictKey &&
+      latest[index].confirmedConflictKey !== row.confirmedConflictKey);
+    if (!items.length || items.length !== importable || staleConfirmation) {
       setReview(latest);
       pushToast({ title: "Schedule review changed", body: "Check the updated duplicate and activity review before importing." });
       return;
@@ -799,7 +801,16 @@ function ScheduleImportModal({ defaultPath, onClose }: { defaultPath: string; on
               {row.sourceName ? ` · ${row.sourceName}` : ""}
             </small>
             {row.duplicate === "conflict" && !row.problem && row.conflictKey && <div className="schedule-review-fields">
-              <span className="sub">The same title, date and type has a different explicit activity. Keep the existing item by leaving this unselected, correct the details, or confirm this is a separate event.</span>
+              <span className="sub">The same title, date and type has a different explicit activity. Compare the following records before confirming a separate event. Leaving this unselected preserves the existing items.</span>
+              <ul aria-label="Conflicting records" className="sub">
+                {row.conflictClaims?.map((claim, claimIndex) => <li key={`${claim.origin}-${claim.id}-${claimIndex}`}>
+                  {claim.origin === "tracker" ? "Existing tracker item" : "Other schedule row"}: {claim.label} · {COURSE_ACTIVITY_LABEL[claim.activity]}
+                  {claim.date ? ` · ${claim.date}` : ""}
+                  {claim.origin === "batch" ? ` · ${claim.sourceName ?? "Schedule"} (row ${claim.sourceLine})` : ""}
+                  {claim.origin === "tracker" && claim.note ? ` · ${claim.note}` : ""}
+                  {claim.templateKey ? ` · Template ${claim.templateKey}` : ""}
+                </li>)}
+              </ul>
               <GButton size="sm" onClick={() => updateRow(index, canImportScheduleCandidate(row)
                 ? { confirmedConflictKey: undefined, selected: false }
                 : { confirmedConflictKey: row.conflictKey, selected: true })}>

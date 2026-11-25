@@ -176,6 +176,43 @@ describe("course schedule intake", () => {
     expect(scheduleCandidatesToTracker(nowDuplicate, path)).toEqual([]);
   });
 
+  it("requires renewed confirmation when material counterpart claims change", () => {
+    const path = "Term 1/BPM 500/FTM 1/Week 3";
+    const [source] = parseCourseSchedule("2026-08-14,Session 1,IMCQ", [], "original.csv");
+    const [item] = scheduleCandidatesToTracker([source], path);
+    const existing: TrackerItem = { ...item, id: "existing", updated: "2026-08-14" };
+    const other = { ...existing, id: "other", note: "Imported from other.csv" };
+    const original = [existing, other];
+    const [collision] = parseCourseSchedule("2026-08-14,Session 1,ESoft", original, "incoming.csv", {}, path);
+    const [confirmed] = reconcileScheduleDuplicates([{ ...collision, confirmedConflictKey: collision.conflictKey, selected: true }], original, path);
+    expect(canImportScheduleCandidate(confirmed)).toBe(true);
+    expect(confirmed.conflictClaims).toHaveLength(2);
+    const before = JSON.stringify(original);
+    const [unchanged] = reconcileScheduleDuplicates([confirmed], [other, { ...existing, passes: 3, attendance: "attended", updated: "2026-09-01" }], path);
+    expect(unchanged).toMatchObject({ selected: true, confirmedConflictKey: confirmed.conflictKey });
+    for (const changed of [
+      [{ ...existing, id: "replacement" }, other],
+      [{ ...existing, note: "Imported from replacement.csv" }, other],
+      [{ ...existing, templateKey: "new-line" }, other],
+      [...original, { ...existing, id: "third" }],
+      [...original, existing],
+      [existing],
+      [],
+    ]) {
+      const [row] = reconcileScheduleDuplicates([confirmed], changed, path);
+      expect(row.selected).toBe(false);
+      expect(row.confirmedConflictKey).toBeUndefined();
+      expect(scheduleCandidatesToTracker([row], path)).toEqual([]);
+    }
+    expect(JSON.stringify(original)).toBe(before);
+    const [first, second] = parseCourseSchedule("2026-08-14,Session 1,IMCQ\n2026-08-14,Session 1,ESoft", [], "batch.csv", {}, path);
+    const batch = reconcileScheduleDuplicates([{ ...first, confirmedConflictKey: first.conflictKey, selected: true }, second], [], path);
+    expect(batch[0].selected).toBe(true);
+    expect(reconcileScheduleDuplicates([batch[1], batch[0]], [], path)[1].selected).toBe(true);
+    expect(reconcileScheduleDuplicates([batch[0], { ...batch[1], sourceName: "different.csv" }], [], path)[0].selected).toBe(false);
+    expect(reconcileScheduleDuplicates([batch[0]], [], path)[0].selected).toBe(false);
+  });
+
   it("keeps a 2,000-row intake linear enough for an ordinary browser interaction", () => {
     const input = Array.from({ length: 2_000 }, (_, index) => `2026-09-${String(index % 28 + 1).padStart(2, "0")},Synthetic Lecture ${index + 1},Lecture`).join("\n");
     const started = performance.now();

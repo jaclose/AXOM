@@ -3,6 +3,19 @@ import type { TrackerItem, TrackerKind } from "./types";
 import { trackerPathKey } from "./pathUtils";
 import { COURSE_ACTIVITIES, COURSE_ACTIVITY_LABEL, TRACKER_KIND_FOR_ACTIVITY, isCourseActivity, type CourseActivity } from "./course-engine/activity";
 
+interface ScheduleConflictClaim {
+  origin: "tracker" | "batch";
+  id: string;
+  label: string;
+  activity: CourseActivity;
+  path?: string;
+  date?: string;
+  note?: string;
+  templateKey?: string;
+  sourceName?: string;
+  sourceLine?: number;
+}
+
 export interface ScheduleCandidate {
   id: string;
   date?: string;
@@ -16,8 +29,9 @@ export interface ScheduleCandidate {
   sourceName?: string;
   selected: boolean;
   duplicate: "exact" | "conflict" | "likely" | "none";
-  /** Bound to the destination, identity and incompatible explicit categories. */
+  /** Bound to the destination and material counterpart claims, not progress or selection. */
   conflictKey?: string;
+  conflictClaims?: ScheduleConflictClaim[];
   confirmedConflictKey?: string;
   problem?: string;
 }
@@ -86,16 +100,32 @@ export function reconcileScheduleDuplicates(
   // Unclassified rows retain the conservative legacy duplicate behavior.
   // Explicit incompatible categories are not proof of the same event.
   const existingCategories = new Map<string, Set<string>>();
-  const batchCategories = new Map<string, Set<string>>();
+  const conflictClaimsByIdentity = new Map<string, ScheduleConflictClaim[]>();
   const seenCategories = new Map<string, Set<string>>();
   function remember(map: Map<string, Set<string>>, key: string, activity?: CourseActivity) {
     const categories = map.get(key) ?? new Set<string>();
     categories.add(activity ?? "");
     map.set(key, categories);
   }
-  for (const item of scoped) remember(existingCategories, identity(item.label, item.kind, dateFrom(item.assessmentDate, item.note)), item.activity);
+  function rememberClaim(key: string, claim: ScheduleConflictClaim) {
+    const claims = conflictClaimsByIdentity.get(key) ?? [];
+    claims.push(claim);
+    conflictClaimsByIdentity.set(key, claims);
+  }
+  for (const item of scoped) {
+    const date = dateFrom(item.assessmentDate, item.note);
+    const key = identity(item.label, item.kind, date);
+    remember(existingCategories, key, item.activity);
+    if (isCourseActivity(item.activity)) rememberClaim(key, {
+      origin: "tracker", id: item.id, label: item.label, activity: item.activity,
+      path: trackerPathKey(item.path), date, note: item.note, templateKey: item.templateKey,
+    });
+  }
   for (const row of candidates) {
-    if (normalize(row.label)) remember(batchCategories, identity(row.label, row.kind, row.date), row.activity);
+    if (normalize(row.label) && isCourseActivity(row.activity)) rememberClaim(identity(row.label, row.kind, row.date), {
+      origin: "batch", id: row.id, label: row.label, activity: row.activity,
+      date: row.date, sourceName: row.sourceName, sourceLine: row.sourceLine,
+    });
   }
   const legacyExact = new Set(scoped.filter((item) => item.activity === undefined).map((item) => identity(item.label, item.kind, dateFrom(item.assessmentDate, item.note))));
   const labels = new Set(scoped.map((item) => normalize(item.label)));
@@ -107,16 +137,24 @@ export function reconcileScheduleDuplicates(
     const prior = new Set([...(existingCategories.get(key) ?? []), ...(seenCategories.get(key) ?? [])]);
     const matchesLegacy = candidate.legacyIdentity?.original === key && legacyExact.has(candidate.legacyIdentity.previous);
     const exact = matchesLegacy || prior.has(activity) || prior.has("") || (!activity && prior.size > 0);
-    const incompatible = activity ? [...new Set([...(existingCategories.get(key) ?? []), ...(batchCategories.get(key) ?? [])])]
-      .filter((category) => category && category !== activity).sort() : [];
+    const incompatible = !exact && activity ? (conflictClaimsByIdentity.get(key) ?? [])
+      .filter((claim) => claim.activity !== activity) : [];
     const duplicate: ScheduleCandidate["duplicate"] = exact ? "exact" : incompatible.length ? "conflict"
       : labels.has(labelKey) || seenLabels.has(labelKey) ? "likely" : "none";
-    const conflictKey = duplicate === "conflict"
-      ? JSON.stringify([scopePath === undefined ? null : trackerPathKey(scopePath), key, activity, incompatible]) : undefined;
+    // Sorting serialized claims preserves multiplicity without binding to order.
+    // Mutable progress, attendance, selection and update timestamps are excluded.
+    const conflictClaims = duplicate === "conflict" ? incompatible
+      .map((claim) => ({ claim, snapshot: JSON.stringify(claim) }))
+      .sort((a, b) => a.snapshot < b.snapshot ? -1 : a.snapshot > b.snapshot ? 1 : 0)
+      .map(({ claim }) => claim) : undefined;
+    const conflictKey = conflictClaims
+      ? JSON.stringify([scopePath === undefined ? null : trackerPathKey(scopePath), key, activity,
+        candidate.id, candidate.label, candidate.sourceName, candidate.sourceLine, conflictClaims]) : undefined;
     const confirmedConflictKey = conflictKey && candidate.confirmedConflictKey === conflictKey ? conflictKey : undefined;
+    const staleConfirmation = Boolean(candidate.confirmedConflictKey && !confirmedConflictKey);
     if (labelKey) { remember(seenCategories, key, candidate.activity); seenLabels.add(labelKey); }
-    return { ...candidate, duplicate, conflictKey, confirmedConflictKey,
-      selected: duplicate === "exact" || (duplicate === "conflict" && !confirmedConflictKey) ? false : candidate.selected };
+    return { ...candidate, duplicate, conflictKey, conflictClaims, confirmedConflictKey,
+      selected: duplicate === "exact" || staleConfirmation || (duplicate === "conflict" && !confirmedConflictKey) ? false : candidate.selected };
   });
 }
 

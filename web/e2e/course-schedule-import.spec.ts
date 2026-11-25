@@ -78,6 +78,13 @@ test("conflicting schedule categories require deliberate distinct-event confirma
   await expect(dialog.getByRole("button", { name: "Import selected (0)" })).toBeDisabled();
   await dialog.getByRole("button", { name: "Confirm distinct activity" }).first().click();
   await expect(dialog.getByRole("button", { name: "Import selected (1)" })).toBeEnabled();
+  await expect(dialog.getByRole("list", { name: "Conflicting records" }).first()).toContainText("ESoft quiz");
+  const secondTitle = dialog.locator(".schedule-review-row").nth(1).getByLabel("Title");
+  await secondTitle.fill("Different synthetic event");
+  await expect(dialog.getByRole("button", { name: "Import selected (0)" })).toBeDisabled();
+  await secondTitle.fill("Synthetic category collision");
+  await expect(dialog.getByRole("button", { name: "Confirm distinct activity" })).toHaveCount(2);
+  await dialog.getByRole("button", { name: "Confirm distinct activity" }).first().click();
   await dialog.getByRole("button", { name: "Confirm distinct activity" }).click();
   await expect(dialog.getByRole("button", { name: "Import selected (2)" })).toBeEnabled();
   await dialog.getByRole("button", { name: "Import selected (2)" }).click();
