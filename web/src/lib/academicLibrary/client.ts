@@ -156,7 +156,21 @@ export async function reviewAcademicCourse(collection: string, approved: boolean
     await attestAcademicExplanations(receipt, accountId, rationaleReviewed);
   }
   const { error } = await (await academicClient(accountId)).rpc("academic_review", { collection, approved });
-  if (error) throw new Error(/Reviewer access/.test(error.message ?? "")
+  if (!error) return;
+  // Community submissions intentionally use a different, exact-revision review RPC.
+  // Only the server can identify this exception; never guess from the course title
+  // or bypass its independent reviewer and revision-bound explanation checks.
+  if (/Use exact community revision review/.test(error.message ?? "")) {
+    if (!receipt || receipt.collectionId !== collection || !receipt.revisionId) {
+      throw new Error("This course has a Community submission. Open Question Bank > Community Uploads to review its current revision.");
+    }
+    const community = await (await academicClient(accountId)).rpc("academic_community_review", {
+      collection, revision: receipt.revisionId, approved,
+    });
+    if (community.error) throw new Error("The Community submission changed or its review could not be saved. Reopen the exact revision and retry.");
+    return;
+  }
+  throw new Error(/Reviewer access/.test(error.message ?? "")
     ? "Only an academic reviewer can approve shared courses."
     : "The review could not be saved. Refresh the course to check its status, then retry.");
 }

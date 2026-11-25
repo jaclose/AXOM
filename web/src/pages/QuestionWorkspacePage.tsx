@@ -155,6 +155,9 @@ export function QuestionWorkspacePage() {
   const documents = useMemo(() => allDocuments.filter(doc => !["axom-private-library-catalog", "axom-private-bank-review", COMMUNITY_REFERENCE_TYPE].includes(doc.fileType)), [allDocuments]);
   const communityStatus = useMemo(() => communityReviewStatus(allDocuments, accountId), [allDocuments, accountId]);
   const unreviewedLocalCount = questions.filter(question => communityStatus.questionIds.has(question.id)).length;
+  // Incomplete Community downloads are retried in their own workflow. A pending-only
+  // marker must not label unrelated personal Library or Questions panels as unreviewed.
+  // Exact linked questions still show their warning; active quiz warnings are unchanged.
   const privateReview = useMemo(() => summarizePrivateReviewBacklog(allDocuments), [allDocuments]);
   const [tab, setTab] = useState<BankTab>("sets");
   const [bankView, setBankView] = useState<"books" | "weeks">("books");
@@ -676,7 +679,7 @@ export function QuestionWorkspacePage() {
         />
       </>}
       {tab === "sets" && <>
-        <CommunityPracticeNotice count={unreviewedLocalCount} pending={communityStatus.pending} possible />
+        <CommunityPracticeNotice count={unreviewedLocalCount} pending={false} possible />
         <div className="cb-view-switch" role="group" aria-label="Question bank view">
           <button aria-pressed={bankView === "books"} onClick={() => setBankView("books")}>Courses</button>
           <button aria-pressed={bankView === "weeks"} onClick={() => setBankView("weeks")}>Weeks &amp; sets</button>
@@ -703,7 +706,7 @@ export function QuestionWorkspacePage() {
 
       {tab === "bank" && (
         <>
-          <CommunityPracticeNotice count={unreviewedLocalCount} pending={communityStatus.pending} possible />
+          <CommunityPracticeNotice count={unreviewedLocalCount} pending={false} possible />
           <BankBrowser
             key={bankReview.key}
             onOpen={setOpen}

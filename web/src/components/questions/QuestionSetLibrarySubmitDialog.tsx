@@ -9,7 +9,7 @@ import { STORAGE_KEYS } from "../../lib/brand";
 import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint, localVaultStorage } from "../../lib/localVault";
 import type { QuestionSet } from "../../lib/library";
 import type { QuestionRecord } from "../../lib/questions";
-import { questionPracticeReadiness } from "../../lib/questionFilters";
+import { summarizeQuestionSetSubmissionReadiness } from "../../lib/sharing/questionSetSubmissionReadiness";
 import { hasMainExplanation } from "../../lib/questionExplanationCoverage";
 import { prepareCurrentCommunityQuestionSetSubmission, sameCommunitySetReviewRevision } from "../../lib/sharing/communitySetPublicationGuard";
 import {
@@ -76,7 +76,8 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     const byId = new Map(questions.map(question => [question.id, question]));
     return set.questionIds.map(id => byId.get(id));
   }, [questions, set.questionIds]);
-  const unresolved = sourceQuestions.filter(question => !question || questionPracticeReadiness(question) !== "ready").length;
+  const { missing, held } = summarizeQuestionSetSubmissionReadiness(sourceQuestions);
+  const unresolved = missing + held;
   const withMedia = sourceQuestions.filter(question => question && ((question.attachments?.length ?? 0) > 0
     || (question.content?.assets.length ?? 0) > 0)).length;
   const missingExplanations = sourceQuestions.filter(question => question && !hasMainExplanation(question)).length;
@@ -381,7 +382,8 @@ export function QuestionSetLibrarySubmitDialog({ set, questions, onClose, autoDr
     <div className="qsl-submit stack gap12" aria-busy={busy || checking || generating || savingDrafts}>
       <p>Offer this Question Set to every signed-in AXOM learner. An academic reviewer checks it before it appears in search.</p>
       <div className="qsl-submit-facts"><BookUp2 size={20} aria-hidden="true" /><b>{set.questionIds.length} questions</b><span>Only question text, choices, answers, explanations, tags and citations are submitted. Your attempts, notes, files and course filing stay private.</span></div>
-      {unresolved > 0 && <p role="alert" className="qsl-error">{unresolved} question{unresolved === 1 ? " is" : "s are"} still held for answer or source review. Resolve them before submitting this set.</p>}
+      {missing > 0 && <p role="alert" className="qsl-error">{missing} question record{missing === 1 ? " is" : "s are"} missing on this device. Your saved set still lists the question IDs, but the questions themselves are not loaded. Reopen the correct saved workspace or recover from a verified backup before submitting; missing questions cannot be reviewed or published.</p>}
+      {held > 0 && <p role="alert" className="qsl-error">{held} present question{held === 1 ? " is" : "s are"} still held for answer or source review. Resolve the answer/source evidence before submitting this set.</p>}
       {withMedia > 0 && <p role="alert" className="qsl-error">{withMedia} question{withMedia === 1 ? " uses" : "s use"} an image or media that this library snapshot cannot carry. Keep this set private until media-safe sharing is available.</p>}
       {missingExplanations > 0 && <div className="qsl-assist stack gap8">
         <b>{missingExplanations} missing explanation{missingExplanations === 1 ? "" : "s"}</b>

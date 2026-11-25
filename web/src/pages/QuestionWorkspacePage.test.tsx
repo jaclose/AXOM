@@ -773,3 +773,45 @@ describe("QBank single-question medical-media integrity", () => {
     expect(screen.queryByRole("dialog", { name: "Verify essential clinical figures" })).toBeNull();
   });
 });
+
+describe("QuestionWorkspacePage community notice scope", () => {
+  const pendingReference = (questionIds: string[], pending: boolean): SourceDocument => {
+    const revision = "33333333-3333-4333-8333-333333333333";
+    const rawText = JSON.stringify({
+      version: 1, accountId: "test-account", revisionId: revision, questionIds, pending,
+    });
+    return {
+      id: `community-${revision}`,
+      title: "Community review status",
+      fileName: "community-reference.json",
+      fileType: "axom-community-reference",
+      uploadedAt: "2026-11-18T12:00:00.000Z",
+      rawText, sizeBytes: rawText.length,
+      tags: [], linkedQuestionSetIds: [], libraryOnly: true,
+    };
+  };
+
+  it("does not show a stale incomplete-download warning on unrelated personal Question Bank panels", async () => {
+    useStore.setState({
+      questions: [question({ id: "private-ready", stem: "Private practice question" })],
+      questionSets: [set("private-set", "Private practice set", "private-ready", "2026-11-18T12:00:00.000Z")],
+      documents: [pendingReference([], true)],
+    });
+    const user = userEvent.setup();
+    render(<QuestionWorkspacePage />);
+
+    expect(screen.queryByText(/A community download is incomplete/)).toBeNull();
+    await user.click(screen.getByRole("tab", { name: "Questions (1)" }));
+    expect(screen.queryByText(/A community download is incomplete/)).toBeNull();
+  });
+
+  it("keeps the unreviewed warning for questions explicitly linked to a Community revision", () => {
+    useStore.setState({
+      questions: [question({ id: "shared-unreviewed" })],
+      questionSets: [set("shared-set", "Downloaded community set", "shared-unreviewed", "2026-11-18T12:00:00.000Z")],
+      documents: [pendingReference(["shared-unreviewed"], false)],
+    });
+    render(<QuestionWorkspacePage />);
+    expect(screen.getByText(/1 question may be included in this practice/)).toBeTruthy();
+  });
+});
