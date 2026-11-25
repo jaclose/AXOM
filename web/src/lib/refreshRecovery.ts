@@ -17,7 +17,7 @@ import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent, subscribe
  */
 const REFRESH_NOTICE_KEY = "axom.refresh-after-backup.v1";
 
-interface Coverage { at: string; length: number; fingerprint: string; scope: QuestionAttachmentScope }
+interface Coverage { at: string; snapshot: string; scope: QuestionAttachmentScope }
 type BackupReceipt = Awaited<ReturnType<typeof exportStateWithAttachments>>;
 
 let coverage: Coverage | null = null;
@@ -25,19 +25,16 @@ let backupAttempt = 0;
 let unloadAllowed = false;
 const listeners = new Set<() => void>();
 
+// Discard the previous account's exact in-memory snapshot on every transition.
+subscribeQuestionAttachmentScope(() => {
+  coverage = null;
+  unloadAllowed = false;
+});
+
 function persistedForm(state: NoctyriumState): string {
   const options = useStore.persist.getOptions();
   // partialize only reads data fields; the actions it is typed for are not needed.
   return JSON.stringify({ state: options.partialize ? options.partialize(state as Store) : state, version: options.version });
-}
-
-function fingerprint(value: string): string {
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return (hash >>> 0).toString(16);
 }
 
 /** Revoke earlier coverage before exporting. Only this attempt can grant a new
@@ -46,6 +43,7 @@ function fingerprint(value: string): string {
  * downloadable, but cannot waive the unsaved-work safeguard. */
 export function beginPortableBackupAttempt(state: NoctyriumState): (result: BackupReceipt, at?: Date) => boolean {
   const attempt = ++backupAttempt;
+  unloadAllowed = false;
   const scope = getQuestionAttachmentScope();
   let snapshot: string | null = null;
   try { snapshot = persistedForm(state); } catch { /* exporting may still recover some work */ }
@@ -61,7 +59,9 @@ export function beginPortableBackupAttempt(state: NoctyriumState): (result: Back
     if (result.missingBlobKeys.length || result.missingOriginalIds.length || result.deferredSourceCount !== 0) return false;
     try {
       if (snapshot !== persistedForm(useStore.getState())) return false;
-      coverage = { at: at.toISOString(), length: snapshot.length, fingerprint: fingerprint(snapshot), scope };
+      // Keep exact serialized identity in this tab's memory only. A short hash
+      // can collide and must never authorize a potentially destructive reload.
+      coverage = { at: at.toISOString(), snapshot, scope };
     } catch { return false; }
     for (const listener of listeners) listener();
     return true;
@@ -84,7 +84,7 @@ export function backupCoversOpenWorkspace(): boolean {
   if (!coverage || !isQuestionAttachmentScopeCurrent(coverage.scope)) return false;
   try {
     const value = persistedForm(useStore.getState());
-    return value.length === coverage.length && fingerprint(value) === coverage.fingerprint;
+    return value === coverage.snapshot;
   } catch {
     return false;
   }
@@ -92,7 +92,7 @@ export function backupCoversOpenWorkspace(): boolean {
 
 /** An explicit refresh after a covering backup may skip unsaved-work prompts. */
 export function isUnloadAllowedForRefresh(): boolean {
-  return unloadAllowed;
+  return unloadAllowed && backupCoversOpenWorkspace();
 }
 
 const WORKSPACE_CHANGED = "Your workspace changed after the backup was downloaded. Download a new backup, then refresh.";
@@ -113,7 +113,15 @@ export async function refreshAfterPortableBackup(
   if (coverage !== covering || !backupCoversOpenWorkspace()) throw new Error(WORKSPACE_CHANGED);
   try { sessionStorage.setItem(REFRESH_NOTICE_KEY, covering.at); } catch { /* the notice is optional */ }
   unloadAllowed = true;
-  reload();
+  try {
+    reload();
+  } catch (error) {
+    unloadAllowed = false;
+    try {
+      if (sessionStorage.getItem(REFRESH_NOTICE_KEY) === covering.at) sessionStorage.removeItem(REFRESH_NOTICE_KEY);
+    } catch { /* the notice is optional */ }
+    throw error;
+  }
 }
 
 /** The backup time behind a refresh that just happened, once; null otherwise. */

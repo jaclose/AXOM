@@ -133,6 +133,64 @@ describe("refresh after a portable backup", () => {
     expect(takeRefreshAfterBackupNotice()).toBeNull();
   });
 
+  it.each(["before refresh", "during activation"])("refuses distinct equal-length legacy hash collisions %s", async (when) => {
+    // Isolate the persisted identity boundary with the independent QA's fixed
+    // collision fixture. This is not a collision in the full AXOM store schema.
+    const options = useStore.persist.getOptions();
+    const partialize = vi.spyOn(useStore.persist, "getOptions").mockReturnValue({
+      ...options, version: 1,
+      partialize: (state) => ({ tasks: state.tasks } as ReturnType<NonNullable<typeof options.partialize>>),
+    });
+    const setTitle = (title: string) => useStore.setState({
+      tasks: [{ id: "sample", title, done: false } as never],
+    });
+    try {
+      setTitle("Study 2b4b9e76");
+      expect(recordPortableBackup(useStore.getState())).toBe(true);
+      expect(backupCoversOpenWorkspace()).toBe(true);
+      const reload = vi.fn();
+      if (when === "before refresh") {
+        setTitle("Study 4e964cb6");
+        expect(backupCoversOpenWorkspace()).toBe(false);
+      }
+      await expect(refreshAfterPortableBackup(async () => {
+        if (when === "during activation") setTitle("Study 4e964cb6");
+      }, reload)).rejects.toThrow(/changed after the backup/);
+      expect(reload).not.toHaveBeenCalled();
+      expect(isUnloadAllowedForRefresh()).toBe(false);
+      expect(takeRefreshAfterBackupNotice()).toBeNull();
+    } finally {
+      partialize.mockRestore();
+    }
+  });
+
+  it("revokes unload permission and the refresh notice if reload throws", async () => {
+    expect(recordPortableBackup(useStore.getState())).toBe(true);
+    await expect(refreshAfterPortableBackup(async () => undefined, () => {
+      expect(isUnloadAllowedForRefresh()).toBe(true);
+      throw new Error("reload refused");
+    })).rejects.toThrow("reload refused");
+    expect(isUnloadAllowedForRefresh()).toBe(false);
+    expect(takeRefreshAfterBackupNotice()).toBeNull();
+    const reload = vi.fn();
+    await refreshAfterPortableBackup(async () => undefined, reload);
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it("does not carry unload authorization into another backup attempt or account", async () => {
+    setQuestionAttachmentAccount("account-a");
+    expect(recordPortableBackup(useStore.getState())).toBe(true);
+    await refreshAfterPortableBackup(async () => undefined, vi.fn());
+    expect(isUnloadAllowedForRefresh()).toBe(true);
+    setQuestionAttachmentAccount("account-b");
+    expect(isUnloadAllowedForRefresh()).toBe(false);
+    expect(recordPortableBackup(useStore.getState())).toBe(true);
+    expect(isUnloadAllowedForRefresh()).toBe(false);
+    await refreshAfterPortableBackup(async () => undefined, vi.fn());
+    beginPortableBackupAttempt(useStore.getState());
+    expect(isUnloadAllowedForRefresh()).toBe(false);
+  });
+
   it("refreshes after a slow activation when nothing changed meanwhile", async () => {
     recordPortableBackup(useStore.getState());
     let settle!: () => void;
