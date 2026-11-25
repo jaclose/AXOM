@@ -89,6 +89,7 @@ describe("explicit simulation recovery", () => {
   });
 
   it.each([
+    ["coercible non-string skin", { skin: ["nbme"] }],
     ["missing index", { index: undefined }],
     ["fractional index", { index: 0.5 }],
     ["negative index", { index: -1 }],

@@ -145,7 +145,7 @@ function parseSuspendedBlock(raw: string | null): SuspendedBlock | undefined {
         || Object.prototype.hasOwnProperty.call(Object.prototype, id))
       || new Set(value.poolIds).size !== value.poolIds.length
       || (value.runId !== undefined && (typeof value.runId !== "string" || !value.runId))
-      || !Object.prototype.hasOwnProperty.call(EXAM_SKINS, value.skin)
+      || typeof value.skin !== "string" || !Object.prototype.hasOwnProperty.call(EXAM_SKINS, value.skin)
       || (value.mode !== "exam" && value.mode !== "tutor")
       || !Number.isInteger(value.index) || value.index < 0 || value.index >= value.poolIds.length
       || !Number.isFinite(value.elapsedMs) || value.elapsedMs < 0
