@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { applyAttempt, type QuestionRecord } from "../../lib/questions";
 import { makeSeed } from "../../lib/seed";
 import { useStore } from "../../lib/store";
-import { EXAM_SIM_SUSPENDED_KEY, readSuspendedBlock, writeSuspendedBlock } from "../../lib/examSim";
+import { EXAM_SIM_SUSPENDED_KEY, inspectSuspendedBlock, readSuspendedBlock, writeSuspendedBlock } from "../../lib/examSim";
 import * as localVault from "../../lib/localVault";
 import { ExamRunner } from "./ExamRunner";
 
@@ -114,6 +114,40 @@ describe("Suspended exam source recovery", () => {
       elapsedMs: 12_000, notes: "Original notes", startedAt: now, suspendedAt: now,
     };
   }
+
+  it.each(["scoped", "legacy"] as const)("keeps the exam open after a divergent %s write and retries safely", (copy) => {
+    const original = savedBlock("write-refusal");
+    writeSuspendedBlock(original);
+    const onClose = vi.fn();
+    render(<ExamRunner mode="exam" onClose={onClose} />);
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    expect(screen.getByRole("dialog", { name: /simulation/ })).toBeTruthy();
+    const scopedKey = `${EXAM_SIM_SUSPENDED_KEY}:run:write-refusal`;
+    const target = copy === "scoped" ? scopedKey : EXAM_SIM_SUSPENDED_KEY;
+    const other = copy === "scoped" ? EXAM_SIM_SUSPENDED_KEY : scopedKey;
+    const prior = localStorage.getItem(target);
+    fireEvent.click(screen.getAllByRole("radio", { name: "B. Beta" })[0]);
+    const set = Storage.prototype.setItem;
+    const refusal = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key: string, value: string) {
+      if (this === localStorage && key === target) return;
+      set.call(this, key, value);
+    });
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Save & exit" }));
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByRole("dialog", { name: /simulation/ })).toBeTruthy();
+      expect(inspectSuspendedBlock()).toEqual({ status: "unreadable" });
+      expect(localStorage.getItem(target)).toBe(prior);
+      expect(JSON.parse(localStorage.getItem(other)!).items.q1.answerKey).toBe("B");
+      expect(useStore.getState().quizSessions).toHaveLength(0);
+    } finally {
+      refusal.mockRestore();
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Save & exit" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    const recovery = inspectSuspendedBlock();
+    expect(recovery).toMatchObject({ status: "present", block: { runId: original.runId, items: { q1: { answerKey: "B" } } } });
+  });
 
   it("keeps a resumed exam open and its previous recovery readable when the next clock exceeds the saved domain", () => {
     const original = { ...savedBlock("clock-boundary"), elapsedMs: Math.floor(Number.MAX_SAFE_INTEGER / 2) };

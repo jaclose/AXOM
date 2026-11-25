@@ -257,6 +257,87 @@ describe("explicit simulation recovery", () => {
     expect(inspectSuspendedBlock()).toEqual({ status: "present", block: JSON.parse(JSON.stringify(legacy)) });
   });
 
+  it.each(["scoped", "legacy"] as const)("refuses acknowledgement on existing %s mirror write refusal, then retries", (copy) => {
+    writeSuspendedBlock(block);
+    const next = { ...block, notes: "new answers and notes" };
+    const target = copy === "scoped" ? scopedKey : EXAM_SIM_SUSPENDED_KEY;
+    const other = copy === "scoped" ? EXAM_SIM_SUSPENDED_KEY : scopedKey;
+    const set = Storage.prototype.setItem;
+    const refusal = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key: string, value: string) {
+      if (this === localStorage && key === target) throw new Error("Synthetic write refusal");
+      set.call(this, key, value);
+    });
+    try {
+      expect(() => writeSuspendedBlock(next)).toThrow(/Keep this window open/);
+      expect(inspectSuspendedBlock()).toEqual({ status: "unreadable" });
+      expect(localStorage.getItem(target)).toBe(JSON.stringify(block));
+      expect(localStorage.getItem(other)).toBe(JSON.stringify(next));
+    } finally {
+      refusal.mockRestore();
+    }
+    writeSuspendedBlock(next);
+    expect(inspectSuspendedBlock()).toEqual({ status: "present", block: next });
+  });
+
+  it.each(["scoped", "legacy", "pointer"] as const)("allows first-write recovery via a discoverable copy when %s write fails", (copy) => {
+    const target = copy === "scoped" ? scopedKey : copy === "legacy"
+      ? EXAM_SIM_SUSPENDED_KEY : `${EXAM_SIM_SUSPENDED_KEY}:run-id`;
+    const set = Storage.prototype.setItem;
+    const refusal = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key: string, value: string) {
+      if (this === (copy === "pointer" ? sessionStorage : localStorage) && key === target) return;
+      set.call(this, key, value);
+    });
+    try {
+      writeSuspendedBlock(block);
+      expect(inspectSuspendedBlock()).toEqual({ status: "present", block });
+    } finally {
+      refusal.mockRestore();
+    }
+  });
+
+  it.each([false, true])("does not acknowledge a new run behind a refused stale pointer (legacy exists=%s)", (withLegacy) => {
+    const other = { ...block, runId: "other", notes: "unrelated" };
+    const otherKey = `${EXAM_SIM_SUSPENDED_KEY}:run:other`;
+    writeSuspendedBlock(other);
+    if (!withLegacy) localStorage.removeItem(EXAM_SIM_SUSPENDED_KEY);
+    const set = Storage.prototype.setItem;
+    const refusal = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key: string, value: string) {
+      if (this === sessionStorage && key === `${EXAM_SIM_SUSPENDED_KEY}:run-id`) return;
+      set.call(this, key, value);
+    });
+    try {
+      expect(() => writeSuspendedBlock(block)).toThrow(/Keep this window open/);
+      expect(inspectSuspendedBlock()).toEqual({ status: "present", block: other });
+      expect(localStorage.getItem(otherKey)).toBe(JSON.stringify(other));
+      expect(localStorage.getItem(scopedKey)).toBe(JSON.stringify(block));
+      expect(localStorage.getItem(EXAM_SIM_SUSPENDED_KEY)).toBe(JSON.stringify(withLegacy ? other : block));
+    } finally {
+      refusal.mockRestore();
+    }
+    writeSuspendedBlock(block);
+    expect(inspectSuspendedBlock()).toEqual({ status: "present", block });
+    expect(localStorage.getItem(otherKey)).toBe(JSON.stringify(other));
+  });
+
+  it("retains malformed unrelated legacy bytes without acknowledging inaccessible recovery", () => {
+    localStorage.setItem(EXAM_SIM_SUSPENDED_KEY, "{broken");
+    expect(() => writeSuspendedBlock(block)).toThrow(/Keep this window open/);
+    expect(inspectSuspendedBlock()).toEqual({ status: "unreadable" });
+    expect(localStorage.getItem(EXAM_SIM_SUSPENDED_KEY)).toBe("{broken");
+    expect(localStorage.getItem(scopedKey)).toBe(JSON.stringify(block));
+  });
+
+  it("requires discovery even for a no-ID legacy write behind a different pointer", () => {
+    const other = { ...block, runId: "other", notes: "unrelated" };
+    writeSuspendedBlock(other);
+    localStorage.removeItem(EXAM_SIM_SUSPENDED_KEY);
+    const legacy = { ...block, runId: undefined };
+    expect(() => writeSuspendedBlock(legacy)).toThrow(/Keep this window open|retain/i);
+    expect(inspectSuspendedBlock()).toEqual({ status: "present", block: other });
+    expect(localStorage.getItem(EXAM_SIM_SUSPENDED_KEY)).toBe(JSON.stringify(legacy));
+    expect(localStorage.getItem(`${EXAM_SIM_SUSPENDED_KEY}:run:other`)).toBe(JSON.stringify(other));
+  });
+
   it("accepts valid tutor recovery with source evidence and optional timing", () => {
     const tutor: SuspendedBlock = {
       ...block, mode: "tutor", timeLimitSeconds: 180,

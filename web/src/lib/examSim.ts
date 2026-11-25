@@ -342,7 +342,10 @@ export function writeSuspendedBlock(block: SuspendedBlock | null): void {
   try {
     if (!validated.runId) {
       localStorage.setItem(EXAM_SIM_SUSPENDED_KEY, serialized);
-      if (localStorage.getItem(EXAM_SIM_SUSPENDED_KEY) === serialized) return;
+      if (localStorage.getItem(EXAM_SIM_SUSPENDED_KEY) === serialized) {
+        const recovery = inspectSuspendedBlock();
+        if (recovery.status === "present" && sameSuspendedSnapshot(recovery.block, validated)) return;
+      }
       throw new Error("The browser did not retain the suspended exam.");
     }
 
@@ -368,7 +371,13 @@ export function writeSuspendedBlock(block: SuspendedBlock | null): void {
       }
     } catch { /* the per-run mirror may still be exact and discoverable */ }
 
-    if (legacySaved || (scopedSaved && pointerSaved)) return;
+    // A retained copy is not sufficient: setup must discover this exact snapshot.
+    // A stale pointer or divergent mirror can otherwise acknowledge an exam
+    // that the canonical reader will reject. Leave both copies for safe retry.
+    if (legacySaved || (scopedSaved && pointerSaved)) {
+      const recovery = inspectSuspendedBlock();
+      if (recovery.status === "present" && sameSuspendedSnapshot(recovery.block, validated)) return;
+    }
     throw new Error("The browser did not retain the suspended exam.");
   } catch {
     throw new Error("Your exam could not be saved. Keep this window open and try again, or finish the block to save your answers.");
