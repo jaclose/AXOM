@@ -29,7 +29,7 @@ describe("exam simulation engine", () => {
     };
     localStorage.setItem(EXAM_SIM_SUSPENDED_KEY, JSON.stringify(legacy));
     writeSuspendedBlock(current);
-    clearSuspendedBlock("current");
+    expect(clearSuspendedBlock(current)).toBe(true);
 
     expect(JSON.parse(localStorage.getItem(EXAM_SIM_SUSPENDED_KEY)!)).toEqual(legacy);
     expect(localStorage.getItem(`${EXAM_SIM_SUSPENDED_KEY}:run:current`)).toBeNull();
@@ -79,6 +79,65 @@ describe("explicit simulation recovery", () => {
   beforeEach(() => {
     localStorage.clear();
     sessionStorage.clear();
+  });
+
+  it("clears exact acknowledged recovery after finalization", () => {
+    writeSuspendedBlock(block);
+    expect(clearSuspendedBlock(block)).toBe(true);
+    expect(inspectSuspendedBlock()).toEqual({ status: "absent" });
+    expect(localStorage.getItem(scopedKey)).toBeNull();
+    expect(localStorage.getItem(EXAM_SIM_SUSPENDED_KEY)).toBeNull();
+  });
+
+  it("preserves a newer snapshot of the same run after finalization", () => {
+    writeSuspendedBlock(block);
+    const newer = { ...block, notes: "Newer notes" };
+    writeSuspendedBlock(newer);
+    expect(clearSuspendedBlock(block)).toBe(false);
+    expect(inspectSuspendedBlock()).toEqual({ status: "present", block: newer });
+    expect(localStorage.getItem(scopedKey)).toBe(JSON.stringify(newer));
+    expect(localStorage.getItem(EXAM_SIM_SUSPENDED_KEY)).toBe(JSON.stringify(newer));
+  });
+
+  it.each(["divergent", "foreign", "malformed"] as const)("preserves %s scoped recovery after finalization", (kind) => {
+    writeSuspendedBlock(block);
+    const raw = kind === "malformed" ? "{broken" : JSON.stringify({
+      ...block, ...(kind === "foreign" ? { runId: "other" } : { notes: "Newer notes" }),
+    });
+    localStorage.setItem(scopedKey, raw);
+    expect(clearSuspendedBlock(block)).toBe(false);
+    expect(localStorage.getItem(scopedKey)).toBe(raw);
+    expect(localStorage.getItem(EXAM_SIM_SUSPENDED_KEY)).toBe(JSON.stringify(block));
+    expect(inspectSuspendedBlock()).toEqual({ status: "unreadable" });
+  });
+
+  it("retains orphan runs without silently promoting them after finalization", () => {
+    writeSuspendedBlock(block);
+    const other = { ...block, runId: "other", notes: "Unowned recovery" };
+    const otherKey = `${EXAM_SIM_SUSPENDED_KEY}:run:other`;
+    localStorage.setItem(otherKey, JSON.stringify(other));
+    expect(clearSuspendedBlock(block)).toBe(true);
+    expect(localStorage.getItem(otherKey)).toBe(JSON.stringify(other));
+    expect(localStorage.getItem(EXAM_SIM_SUSPENDED_KEY)).toBeNull();
+    expect(localStorage.getItem(scopedKey)).toBeNull();
+    expect(inspectSuspendedBlock(false)).toEqual({ status: "unreadable" });
+  });
+
+  it("retains the discovery mirror if finalization cannot remove the scoped copy", () => {
+    writeSuspendedBlock(block);
+    const remove = Storage.prototype.removeItem;
+    const refusal = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(function (this: Storage, key: string) {
+      if (this === localStorage && key === scopedKey) return;
+      remove.call(this, key);
+    });
+    try {
+      expect(clearSuspendedBlock(block)).toBe(false);
+      expect(localStorage.getItem(scopedKey)).toBe(JSON.stringify(block));
+      expect(localStorage.getItem(EXAM_SIM_SUSPENDED_KEY)).toBe(JSON.stringify(block));
+      expect(inspectSuspendedBlock()).toEqual({ status: "present", block });
+    } finally {
+      refusal.mockRestore();
+    }
   });
 
   it("distinguishes verified absence, present and malformed recovery", () => {

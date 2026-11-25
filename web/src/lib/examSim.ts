@@ -203,18 +203,6 @@ function sameLegacySuspendedRun(left: SuspendedBlock, right: SuspendedBlock): bo
     && left.poolIds.every((id, index) => id === right.poolIds[index]);
 }
 
-function anotherSuspendedBlock(excludingKey: string): SuspendedBlock | undefined {
-  try {
-    for (let index = 0; index < localStorage.length; index += 1) {
-      const key = localStorage.key(index);
-      if (!key || key === excludingKey || !key.startsWith(EXAM_SIM_RUN_PREFIX)) continue;
-      const candidate = parseSuspendedBlock(localStorage.getItem(key));
-      if (candidate) return candidate;
-    }
-  } catch { /* no replacement is available */ }
-  return undefined;
-}
-
 export function readSuspendedBlock(): SuspendedBlock | undefined {
   try {
     const remembered = sessionStorage.getItem(EXAM_SIM_RUN_ID_KEY);
@@ -393,24 +381,13 @@ export function writeSuspendedBlock(
   }
 }
 
-/** Clear only the run whose durable workspace save was confirmed. A legacy
- * snapshot with no id, or a different tab's id, is deliberately preserved. */
-export function clearSuspendedBlock(runId: string): void {
-  const runKey = suspendedRunKey(runId);
-  try { localStorage.removeItem(runKey); } catch { /* best effort after the durable save */ }
-  try {
-    if (sessionStorage.getItem(EXAM_SIM_RUN_ID_KEY) === runId) sessionStorage.removeItem(EXAM_SIM_RUN_ID_KEY);
-  } catch { /* optional per-tab pointer */ }
-  try {
-    const legacyRaw = localStorage.getItem(EXAM_SIM_SUSPENDED_KEY);
-    if (legacyRaw !== null) {
-      const legacy = parseSuspendedBlock(legacyRaw);
-      if (!legacy || legacy.runId !== runId) return;
-    }
-    const replacement = anotherSuspendedBlock(runKey);
-    if (replacement) localStorage.setItem(EXAM_SIM_SUSPENDED_KEY, JSON.stringify(replacement));
-    else localStorage.removeItem(EXAM_SIM_SUSPENDED_KEY);
-  } catch { /* best effort after the durable save */ }
+/** Clear only the exact run snapshot whose durable workspace save was
+ * confirmed. A newer or unrelated recovery remains available for review. */
+export function clearSuspendedBlock(expected: SuspendedBlock): boolean {
+  // Finalization crossed an asynchronous durable-write boundary. A run ID
+  // alone cannot authorize deletion of a newer snapshot from another tab.
+  // Reuse exact recovery verification; never promote an unowned orphan.
+  return Boolean(expected.runId) && discardSuspendedBlock(expected);
 }
 
 export interface ExamSimPrefs {

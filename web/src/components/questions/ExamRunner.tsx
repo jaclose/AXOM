@@ -1169,8 +1169,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       const detail = error instanceof Error ? error.message : "The local workspace write could not be confirmed.";
       throw new Error(`AXOM could not confirm the final save. Your exam recovery is still on this device. Retry save. ${detail}`, { cause: error });
     }
-    clearSuspendedBlock(simRun.runId);
-    setSuspendedRecovery({ status: "absent" });
+    clearSuspendedBlock(durableRecovery);
+    setSuspendedRecovery(inspectSuspendedBlock());
     setPool(simRun.pool);
     setSession(result);
     setSimRun(null);

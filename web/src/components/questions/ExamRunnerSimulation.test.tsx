@@ -108,6 +108,38 @@ describe("ExamRunner simulation", () => {
     expect(Object.values(reopened.block.items).some(item => item.answerKey === "B")).toBe(true);
   });
 
+  it("preserves newer same-run recovery written while final save is awaiting durability", async () => {
+    sessionStorage.clear();
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const flush = vi.spyOn(localVault, "flushLocalVaultWrites").mockReturnValueOnce(pending);
+    try {
+      render(<ExamRunner mode="exam" onClose={vi.fn()} />);
+      fireEvent.click(screen.getByRole("radio", { name: /UWorld-style/ }));
+      fireEvent.click(screen.getByRole("button", { name: /Start exam block/ }));
+      fireEvent.click(screen.getAllByRole("radio", { name: "B. Beta" })[0]);
+      fireEvent.click(screen.getByRole("button", { name: /End Block/ }));
+      fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "End Block" }));
+      await waitFor(() => expect(flush).toHaveBeenCalledTimes(1));
+      const recovery = inspectSuspendedBlock();
+      expect(recovery.status).toBe("present");
+      if (recovery.status !== "present" || !recovery.block.runId) throw new Error("Expected active recovery");
+      const newer = { ...recovery.block, notes: "Newer recovery from another tab" };
+      const scopedKey = `${EXAM_SIM_SUSPENDED_KEY}:run:${newer.runId}`;
+      localStorage.setItem(scopedKey, JSON.stringify(newer));
+      localStorage.setItem(EXAM_SIM_SUSPENDED_KEY, JSON.stringify(newer));
+      await act(async () => { release(); await pending; });
+      await waitFor(() => expect(screen.getByText("Block results")).toBeTruthy());
+      expect(useStore.getState().quizSessions).toHaveLength(1);
+      expect(localStorage.getItem(scopedKey)).toBe(JSON.stringify(newer));
+      expect(localStorage.getItem(EXAM_SIM_SUSPENDED_KEY)).toBe(JSON.stringify(newer));
+      expect(inspectSuspendedBlock()).toEqual({ status: "present", block: newer });
+    } finally {
+      release();
+      flush.mockRestore();
+    }
+  });
+
   it("retains final recovery and retries one stable run without duplicate attempts", async () => {
     const flush = vi.spyOn(localVault, "flushLocalVaultWrites")
       .mockRejectedValueOnce(new Error("Synthetic vault refusal"))
