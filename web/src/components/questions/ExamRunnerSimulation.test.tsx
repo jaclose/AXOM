@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { applyAttempt, type QuestionRecord } from "../../lib/questions";
 import { makeSeed } from "../../lib/seed";
 import { useStore } from "../../lib/store";
-import { readSuspendedBlock, writeSuspendedBlock } from "../../lib/examSim";
+import { EXAM_SIM_SUSPENDED_KEY, readSuspendedBlock, writeSuspendedBlock } from "../../lib/examSim";
 import * as localVault from "../../lib/localVault";
 import { ExamRunner } from "./ExamRunner";
 
@@ -114,6 +114,57 @@ describe("Suspended exam source recovery", () => {
       elapsedMs: 12_000, notes: "Original notes", startedAt: now, suspendedAt: now,
     };
   }
+
+  it.each([
+    ["discard", "scoped", "throw"], ["discard", "legacy", "noop"],
+    ["start", "scoped", "noop"], ["start", "legacy", "throw"],
+  ] as const)("holds %s on %s removal refusal (%s)", (action, copy, refusal) => {
+    const original = savedBlock("refused-run");
+    writeSuspendedBlock(original);
+    const { unmount } = render(<ExamRunner mode="exam" onClose={vi.fn()} />);
+    if (action === "start") fireEvent.click(screen.getByRole("radio", { name: /USMLE \/ NBME/ }));
+    const target = copy === "legacy" ? EXAM_SIM_SUSPENDED_KEY : `${EXAM_SIM_SUSPENDED_KEY}:run:refused-run`;
+    const remove = Storage.prototype.removeItem;
+    const refusalSpy = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(function (this: Storage, key: string) {
+      if (this === localStorage && key === target) {
+        if (refusal === "throw") throw new Error("Synthetic removal refusal");
+        return;
+      }
+      remove.call(this, key);
+    });
+    const consent = vi.spyOn(window, "confirm").mockReturnValue(true);
+    try {
+      fireEvent.click(screen.getByRole("button", { name: action === "start" ? /Start exam block/ : "Discard" }));
+      expect(consent).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("dialog", { name: /simulation/ })).toBeNull();
+      expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
+    } finally {
+      refusalSpy.mockRestore();
+      consent.mockRestore();
+    }
+    expect(readSuspendedBlock()).toEqual(original);
+    unmount();
+    render(<ExamRunner mode="exam" onClose={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
+  });
+
+  it.each(["read-refusal", "malformed"] as const)("does not start a new simulation with unverifiable recovery (%s)", (kind) => {
+    render(<ExamRunner mode="exam" onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("radio", { name: /USMLE \/ NBME/ }));
+    const get = Storage.prototype.getItem;
+    const read = kind === "read-refusal" ? vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, key: string) {
+      if (this === localStorage && key === EXAM_SIM_SUSPENDED_KEY) throw new Error("Synthetic read refusal");
+      return get.call(this, key);
+    }) : undefined;
+    if (kind === "malformed") localStorage.setItem(EXAM_SIM_SUSPENDED_KEY, "{broken");
+    try {
+      fireEvent.click(screen.getByRole("button", { name: /Start exam block/ }));
+      expect(screen.queryByRole("dialog", { name: /simulation/ })).toBeNull();
+    } finally {
+      read?.mockRestore();
+    }
+    if (kind === "malformed") expect(localStorage.getItem(EXAM_SIM_SUSPENDED_KEY)).toBe("{broken");
+  });
 
   it.each(["same-run", "different-run"] as const)("requires renewed consent to resume a changed snapshot (%s)", (kind) => {
     const original = savedBlock("old-run");

@@ -57,7 +57,7 @@ import {
   getVaultWriteCheckpoint,
 } from "../../lib/localVault";
 import {
-  BLOCK_PRESETS, EXAM_SKINS, blockCounts, clearSuspendedBlock, formatClock, readSuspendedBlock, writeSuspendedBlock,
+  BLOCK_PRESETS, EXAM_SKINS, blockCounts, clearSuspendedBlock, discardSuspendedBlock, formatClock, inspectSuspendedBlock, writeSuspendedBlock,
   type BlockPreset, type ExamSkin, type SuspendedBlock,
 } from "../../lib/examSim";
 import { examReducer, itemState, startBlock, type ExamAction, type ExamBlock } from "../../lib/exam/engine";
@@ -377,7 +377,10 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     return simulate && stored === "axom" ? "nbme" : stored;
   });
   const [presetId, setPresetId] = useState<BlockPreset["id"]>("usmle-2026");
-  const [suspended, setSuspended] = useState<SuspendedBlock | undefined>(() => readSuspendedBlock());
+  const [suspended, setSuspended] = useState<SuspendedBlock | undefined>(() => {
+    const recovery = inspectSuspendedBlock();
+    return recovery.status === "present" ? recovery.block : undefined;
+  });
   const [simRun, setSimRun] = useState<{ runId: string; skin: ExamSkin; pool: QuestionRecord[]; sourceEvidenceV1: Record<string, string>; timeLimitSeconds?: number; resume?: SuspendedBlock } | null>(null);
 
   const simulationScoringKeys = useMemo(() => {
@@ -804,7 +807,13 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   // Setup may outlive a recovery update from another tab. Never apply a
   // destructive action or resume a snapshot different from the one shown.
   function requireCurrentSuspended(expected: SuspendedBlock | undefined): boolean {
-    const current = readSuspendedBlock();
+    const recovery = inspectSuspendedBlock();
+    if (recovery.status === "unreadable") {
+      retryMediaStartRef.current = null;
+      pushToast({ title: "Recovery could not be checked", body: "The browser recovery is unavailable or conflicting. No new simulation was started and no discard was requested. Retry after checking the saved exam.", tone: "warn" });
+      return false;
+    }
+    const current = recovery.status === "present" ? recovery.block : undefined;
     if (JSON.stringify(current) === JSON.stringify(expected)) return true;
     retryMediaStartRef.current = null;
     setSuspended(current);
@@ -816,13 +825,31 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     return false;
   }
 
+  // Only permit a replacement launch after explicit discard and a fresh,
+  // verified absence. A different surviving recovery requires its own consent.
+  function discardDisplayedSuspended(expected: SuspendedBlock): boolean {
+    const discarded = discardSuspendedBlock(expected);
+    const recovery = inspectSuspendedBlock();
+    retryMediaStartRef.current = null;
+    if (recovery.status === "present") setSuspended(recovery.block);
+    else if (discarded) setSuspended(undefined);
+    if (!discarded || recovery.status !== "absent") {
+      pushToast({
+        title: discarded ? "Other recovery needs attention" : "Discard could not be confirmed",
+        body: discarded ? "Check the remaining recovery before starting another simulation." : "The browser did not confirm removal of this suspended exam. Check recovery and retry before starting another simulation.",
+        tone: "warn",
+      });
+      return false;
+    }
+    return true;
+  }
+
   function startBuiltBlock(built: QuestionRecord[]) {
     if (examInterface !== "axom") {
       if (!requireCurrentSuspended(suspended)) return;
       if (suspended && !confirm("Starting a new block discards your suspended block. Continue?")) return;
       if (!requireCurrentSuspended(suspended)) return;
-      if (suspended?.runId) clearSuspendedBlock(suspended.runId);
-      else if (suspended) writeSuspendedBlock(null);
+      if (suspended && !discardDisplayedSuspended(suspended)) return;
       setSuspended(undefined);
       clearActiveQuiz(runId);
       setSimRun({ runId, skin: examInterface, pool: built,
@@ -1076,9 +1103,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     if (!suspended || !requireCurrentSuspended(suspended)) return;
     if (!confirm("Discard the suspended block? Its answers will not be scored.")) return;
     if (!requireCurrentSuspended(suspended)) return;
-    if (suspended.runId) clearSuspendedBlock(suspended.runId);
-    else writeSuspendedBlock(null);
-    setSuspended(undefined);
+    discardDisplayedSuspended(suspended);
   }
 
   async function finishSimulation(

@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   EXAM_SIM_SUSPENDED_KEY, answersFromItems, blockCounts, clearSuspendedBlock, clockElapsedMs, formatClock,
-  pauseClock, resumeClock, reviewIndices, writeSuspendedBlock, type SuspendedBlock,
+  discardSuspendedBlock, inspectSuspendedBlock, pauseClock, resumeClock, reviewIndices, writeSuspendedBlock, type SuspendedBlock,
 } from "./examSim";
 import { searchLabValues, LAB_SECTIONS } from "../data/labValues";
 
@@ -62,5 +62,76 @@ describe("exam simulation engine", () => {
     expect(searchLabValues("csf glucose")).toEqual([expect.objectContaining({ range: "40–70 mg/dL" })]);
     expect(searchLabValues("Na+")[0].name).toBe("Sodium (Na⁺)");
     expect(searchLabValues("")).toEqual([]);
+  });
+});
+
+describe("explicit simulation recovery", () => {
+  const at = "2026-11-25T05:00:00Z";
+  const block: SuspendedBlock = {
+    version: 1, runId: "selected", skin: "nbme", mode: "exam", poolIds: ["a"], index: 0,
+    items: { a: items.a }, elapsedMs: 40000, notes: "original", startedAt: at, suspendedAt: at,
+  };
+  const scopedKey = `${EXAM_SIM_SUSPENDED_KEY}:run:selected`;
+
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+
+  it("distinguishes verified absence, present and malformed recovery", () => {
+    expect(inspectSuspendedBlock()).toEqual({ status: "absent" });
+    writeSuspendedBlock(block);
+    expect(inspectSuspendedBlock()).toEqual({ status: "present", block });
+    localStorage.setItem(EXAM_SIM_SUSPENDED_KEY, "{broken");
+    expect(inspectSuspendedBlock()).toEqual({ status: "unreadable" });
+    expect(discardSuspendedBlock(block)).toBe(false);
+    expect(localStorage.getItem(scopedKey)).toBe(JSON.stringify(block));
+  });
+
+  it("holds an orphan or divergent same-run copy without rewriting either", () => {
+    localStorage.setItem(scopedKey, JSON.stringify(block));
+    expect(inspectSuspendedBlock()).toEqual({ status: "unreadable" });
+    writeSuspendedBlock(block);
+    const divergent = { ...block, notes: "unseen changes" };
+    localStorage.setItem(EXAM_SIM_SUSPENDED_KEY, JSON.stringify(divergent));
+    expect(inspectSuspendedBlock()).toEqual({ status: "unreadable" });
+    expect(discardSuspendedBlock(block)).toBe(false);
+    expect(localStorage.getItem(scopedKey)).toBe(JSON.stringify(block));
+    expect(localStorage.getItem(EXAM_SIM_SUSPENDED_KEY)).toBe(JSON.stringify(divergent));
+  });
+
+  it("confirms exact target removal and preserves a different legacy run", () => {
+    const other = { ...block, runId: "other", notes: "unrelated" };
+    writeSuspendedBlock(other);
+    writeSuspendedBlock(block);
+    expect(discardSuspendedBlock(block)).toBe(true);
+    expect(localStorage.getItem(scopedKey)).toBeNull();
+    expect(localStorage.getItem(EXAM_SIM_SUSPENDED_KEY)).toBe(JSON.stringify(other));
+    expect(inspectSuspendedBlock()).toEqual({ status: "present", block: other });
+  });
+
+  it("discards only the exact no-ID legacy snapshot", () => {
+    const legacy = { ...block, runId: undefined };
+    writeSuspendedBlock(legacy);
+    expect(discardSuspendedBlock(legacy)).toBe(true);
+    expect(inspectSuspendedBlock()).toEqual({ status: "absent" });
+  });
+
+  it.each(["scoped", "legacy"] as const)("holds on %s read refusal before removal", (copy) => {
+    writeSuspendedBlock(block);
+    const target = copy === "scoped" ? scopedKey : EXAM_SIM_SUSPENDED_KEY;
+    const get = Storage.prototype.getItem;
+    const read = vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, key: string) {
+      if (this === localStorage && key === target) throw new Error("Synthetic read refusal");
+      return get.call(this, key);
+    });
+    try {
+      expect(inspectSuspendedBlock()).toEqual({ status: "unreadable" });
+      expect(discardSuspendedBlock(block)).toBe(false);
+    } finally {
+      read.mockRestore();
+    }
+    expect(localStorage.getItem(scopedKey)).toBe(JSON.stringify(block));
+    expect(localStorage.getItem(EXAM_SIM_SUSPENDED_KEY)).toBe(JSON.stringify(block));
   });
 });

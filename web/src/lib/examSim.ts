@@ -191,6 +191,99 @@ export function readSuspendedBlock(): SuspendedBlock | undefined {
   }
 }
 
+export type SuspendedRecoveryRead =
+  | { status: "absent" }
+  | { status: "present"; block: SuspendedBlock }
+  | { status: "unreadable" };
+
+function readCheckedSuspendedCopy(key: string): SuspendedBlock | undefined {
+  const raw = localStorage.getItem(key);
+  if (raw === null) return undefined;
+  const block = parseSuspendedBlock(raw);
+  if (!block || !Object.prototype.hasOwnProperty.call(EXAM_SKINS, block.skin)
+    || !block.items || typeof block.items !== "object" || Array.isArray(block.items)
+    || (block.mode !== "exam" && block.mode !== "tutor")) {
+    throw new Error("Unverifiable suspended exam recovery.");
+  }
+  return block;
+}
+
+function sameSuspendedSnapshot(left: SuspendedBlock, right: SuspendedBlock): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+/** Setup actions must distinguish verified absence from unavailable or conflicting
+ * recovery. Do not silently select orphaned runs or rewrite recovery on read. */
+export function inspectSuspendedBlock(): SuspendedRecoveryRead {
+  try {
+    const remembered = sessionStorage.getItem(EXAM_SIM_RUN_ID_KEY);
+    const scoped = remembered ? readCheckedSuspendedCopy(suspendedRunKey(remembered)) : undefined;
+    if (scoped && scoped.runId !== remembered) return { status: "unreadable" };
+    const legacy = readCheckedSuspendedCopy(EXAM_SIM_SUSPENDED_KEY);
+    const current = scoped ?? legacy;
+    if (current) {
+      if (current.runId) {
+        const mirror = readCheckedSuspendedCopy(suspendedRunKey(current.runId));
+        if (mirror && !sameSuspendedSnapshot(mirror, current)) return { status: "unreadable" };
+        if (legacy?.runId === current.runId && !sameSuspendedSnapshot(legacy, current)) return { status: "unreadable" };
+      }
+      return { status: "present", block: current };
+    }
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (key === null || key.startsWith(EXAM_SIM_RUN_PREFIX)) return { status: "unreadable" };
+    }
+    return { status: "absent" };
+  } catch {
+    return { status: "unreadable" };
+  }
+}
+
+/** Explicit, consented discard is not best-effort post-save cleanup. Verify
+ * the selected snapshot and all matching copies before removing any of them,
+ * then require readback. A distinct run (including a legacy run) is untouched. */
+export function discardSuspendedBlock(expected: SuspendedBlock): boolean {
+  try {
+    const current = inspectSuspendedBlock();
+    if (current.status !== "present" || !sameSuspendedSnapshot(current.block, expected)) return false;
+    const keys: string[] = [];
+    if (expected.runId) {
+      const key = suspendedRunKey(expected.runId);
+      const scoped = readCheckedSuspendedCopy(key);
+      if (scoped) {
+        if (!sameSuspendedSnapshot(scoped, expected)) return false;
+        keys.push(key);
+      }
+    }
+    const legacy = readCheckedSuspendedCopy(EXAM_SIM_SUSPENDED_KEY);
+    if (legacy && legacy.runId === expected.runId) {
+      if (!sameSuspendedSnapshot(legacy, expected)) return false;
+      keys.push(EXAM_SIM_SUSPENDED_KEY);
+    }
+    if (!keys.length) return false;
+    // Scoped first: if that removal fails, the legacy discovery copy survives.
+    for (const key of keys) {
+      const copy = readCheckedSuspendedCopy(key);
+      if (!copy || !sameSuspendedSnapshot(copy, expected)) return false;
+      localStorage.removeItem(key);
+      if (localStorage.getItem(key) !== null) return false;
+    }
+    if (expected.runId && localStorage.getItem(suspendedRunKey(expected.runId)) !== null) return false;
+    const remainingLegacy = readCheckedSuspendedCopy(EXAM_SIM_SUSPENDED_KEY);
+    if (remainingLegacy && remainingLegacy.runId === expected.runId) return false;
+    // The pointer contains no answers. Leave it intact on failed removal; a
+    // later read can fall back to a distinct legacy run or verified absence.
+    try {
+      if (expected.runId && sessionStorage.getItem(EXAM_SIM_RUN_ID_KEY) === expected.runId) {
+        sessionStorage.removeItem(EXAM_SIM_RUN_ID_KEY);
+      }
+    } catch { /* optional pointer cleanup after verified removal */ }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function writeSuspendedBlock(block: SuspendedBlock | null): void {
   if (!block) {
     try {
