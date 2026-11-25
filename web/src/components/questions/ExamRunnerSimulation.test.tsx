@@ -115,6 +115,38 @@ describe("Suspended exam source recovery", () => {
     };
   }
 
+  it("keeps a resumed exam open and its previous recovery readable when the next clock exceeds the saved domain", () => {
+    const original = { ...savedBlock("clock-boundary"), elapsedMs: Math.floor(Number.MAX_SAFE_INTEGER / 2) };
+    writeSuspendedBlock(original);
+    const onClose = vi.fn();
+    const at = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(at);
+    try {
+      render(<ExamRunner mode="exam" onClose={onClose} />);
+      fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+      expect(screen.getByRole("dialog", { name: /simulation/ })).toBeTruthy();
+      // Resume can upgrade evidence metadata. Compare against that exact saved copy.
+      const scopedKey = `${EXAM_SIM_SUSPENDED_KEY}:run:clock-boundary`;
+      const legacy = localStorage.getItem(EXAM_SIM_SUSPENDED_KEY);
+      const scoped = localStorage.getItem(scopedKey);
+      const pointerKey = `${EXAM_SIM_SUSPENDED_KEY}:run-id`;
+      const pointer = sessionStorage.getItem(pointerKey);
+      clock.mockReturnValue(at + 1000);
+      fireEvent.click(screen.getByRole("button", { name: "Save & exit" }));
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByRole("dialog", { name: /simulation/ })).toBeTruthy();
+      expect(localStorage.getItem(EXAM_SIM_SUSPENDED_KEY)).toBe(legacy);
+      expect(localStorage.getItem(scopedKey)).toBe(scoped);
+      expect(sessionStorage.getItem(pointerKey)).toBe(pointer);
+      expect(readSuspendedBlock()?.elapsedMs).toBe(original.elapsedMs);
+      expect(useStore.getState().quizSessions).toHaveLength(0);
+      fireEvent.click(screen.getAllByRole("radio", { name: "B. Beta" })[0]);
+      expect((screen.getAllByRole("radio", { name: "B. Beta" })[0] as HTMLInputElement).checked).toBe(true);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it.each([
     ["discard", "scoped", "throw"], ["discard", "legacy", "noop"],
     ["start", "scoped", "noop"], ["start", "legacy", "throw"],

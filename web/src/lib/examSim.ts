@@ -333,15 +333,21 @@ export function writeSuspendedBlock(block: SuspendedBlock | null): void {
   }
 
   const serialized = JSON.stringify(block);
+  // The exact bytes we acknowledge must also satisfy the recovery reader.
+  // Validate before touching either mirror or the session discovery pointer.
+  const validated = parseSuspendedBlock(serialized);
+  if (!validated) {
+    throw new Error("This exam recovery contains invalid data. Keep this window open; the previous recovery has not been changed.");
+  }
   try {
-    if (!block.runId) {
+    if (!validated.runId) {
       localStorage.setItem(EXAM_SIM_SUSPENDED_KEY, serialized);
       if (localStorage.getItem(EXAM_SIM_SUSPENDED_KEY) === serialized) return;
       throw new Error("The browser did not retain the suspended exam.");
     }
 
-    const pointerSaved = rememberSuspendedRun(block.runId);
-    const runKey = suspendedRunKey(block.runId);
+    const pointerSaved = rememberSuspendedRun(validated.runId);
+    const runKey = suspendedRunKey(validated.runId);
     let scopedSaved = false;
     try {
       localStorage.setItem(runKey, serialized);
@@ -354,8 +360,8 @@ export function writeSuspendedBlock(block: SuspendedBlock | null): void {
       const legacy = parseSuspendedBlock(legacyRaw);
       // Upgrade the same pre-run-id snapshot, but never overwrite a different
       // valid suspended exam merely because this tab finalized later.
-      const mayOwnLegacy = legacyRaw === null || legacy?.runId === block.runId
-        || Boolean(legacy && !legacy.runId && sameLegacySuspendedRun(legacy, block));
+      const mayOwnLegacy = legacyRaw === null || legacy?.runId === validated.runId
+        || Boolean(legacy && !legacy.runId && sameLegacySuspendedRun(legacy, validated));
       if (mayOwnLegacy) {
         localStorage.setItem(EXAM_SIM_SUSPENDED_KEY, serialized);
         legacySaved = localStorage.getItem(EXAM_SIM_SUSPENDED_KEY) === serialized;

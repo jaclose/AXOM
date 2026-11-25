@@ -173,6 +173,8 @@ describe("explicit simulation recovery", () => {
     expect(suspended.elapsedMs).toBe(41000.5);
     expect(suspended.items.a.seconds).toBe(41.5);
     expect(suspended.timeLimitSeconds).toBe(90.5);
+    writeSuspendedBlock(suspended);
+    expect(inspectSuspendedBlock()).toEqual({ status: "present", block: JSON.parse(JSON.stringify(suspended)) });
   });
 
   it("keeps representable aggregate durations and leaves room for subsequent clock ticks", () => {
@@ -195,6 +197,64 @@ describe("explicit simulation recovery", () => {
     expect(answers[1].seconds).toBe(seconds);
     expect(Number.isSafeInteger(answers.reduce((sum, answer) => sum + (answer.seconds ?? Number.NaN), 0))).toBe(true);
     expect(Number.isSafeInteger((large.timeLimitSeconds ?? 0) * 1000)).toBe(true);
+  });
+
+  it.each(["clock", "item", "aggregate"] as const)("refuses a resumed snapshot crossing the %s duration bound before writing", (boundary) => {
+    const near: SuspendedBlock = {
+      ...block,
+      elapsedMs: boundary === "clock" ? maxDurationMs : 40000,
+      poolIds: ["a", "b"],
+      items: {
+        a: { ...items.a, seconds: boundary === "item" ? maxDurationSeconds
+          : boundary === "aggregate" ? maxDurationSeconds - 2 : 40 },
+        b: { ...items.b, seconds: boundary === "aggregate" ? 2 : 0 },
+      },
+    };
+    writeSuspendedBlock(near);
+    const before = localStorage.getItem(scopedKey);
+    const legacy = localStorage.getItem(EXAM_SIM_SUSPENDED_KEY);
+    const pointerKey = `${EXAM_SIM_SUSPENDED_KEY}:run-id`;
+    const pointer = sessionStorage.getItem(pointerKey);
+    const now = Date.parse(at);
+    const resumed = resumeBlock(near, near.poolIds, now);
+    const next = suspendBlock(resumed, now + 1000, { skin: near.skin, runId: near.runId });
+    expect(() => writeSuspendedBlock(next)).toThrow(/previous recovery has not been changed/);
+    expect(localStorage.getItem(scopedKey)).toBe(before);
+    expect(localStorage.getItem(EXAM_SIM_SUSPENDED_KEY)).toBe(legacy);
+    expect(sessionStorage.getItem(pointerKey)).toBe(pointer);
+    expect(inspectSuspendedBlock()).toEqual({ status: "present", block: near });
+  });
+
+  it("accepts an actual resumed clock reaching exactly the reader bound", () => {
+    const near = { ...block, elapsedMs: maxDurationMs - 1000 };
+    writeSuspendedBlock(near);
+    const now = Date.parse(at);
+    const next = suspendBlock(resumeBlock(near, near.poolIds, now), now + 1000, {
+      skin: near.skin, runId: near.runId,
+    });
+    expect(next.elapsedMs).toBe(maxDurationMs);
+    writeSuspendedBlock(next);
+    expect(inspectSuspendedBlock()).toEqual({ status: "present", block: JSON.parse(JSON.stringify(next)) });
+  });
+
+  it("refuses an invalid first write without creating a discovery pointer or mirrors", () => {
+    expect(() => writeSuspendedBlock({ ...block, elapsedMs: Infinity })).toThrow();
+    expect(inspectSuspendedBlock()).toEqual({ status: "absent" });
+    expect(localStorage.getItem(scopedKey)).toBeNull();
+    expect(localStorage.getItem(EXAM_SIM_SUSPENDED_KEY)).toBeNull();
+    expect(sessionStorage.getItem(`${EXAM_SIM_SUSPENDED_KEY}:run-id`)).toBeNull();
+  });
+
+  it("refuses invalid legacy and distinct-run writes without replacing the prior recovery", () => {
+    const legacy = { ...block, runId: undefined };
+    writeSuspendedBlock(legacy);
+    const raw = localStorage.getItem(EXAM_SIM_SUSPENDED_KEY);
+    expect(() => writeSuspendedBlock({ ...legacy, index: -1 })).toThrow();
+    expect(() => writeSuspendedBlock({ ...block, runId: "other", elapsedMs: maxDurationMs + 1 })).toThrow();
+    expect(localStorage.getItem(EXAM_SIM_SUSPENDED_KEY)).toBe(raw);
+    expect(localStorage.getItem(`${EXAM_SIM_SUSPENDED_KEY}:run:other`)).toBeNull();
+    expect(sessionStorage.getItem(`${EXAM_SIM_SUSPENDED_KEY}:run-id`)).toBeNull();
+    expect(inspectSuspendedBlock()).toEqual({ status: "present", block: JSON.parse(JSON.stringify(legacy)) });
   });
 
   it("accepts valid tutor recovery with source evidence and optional timing", () => {
