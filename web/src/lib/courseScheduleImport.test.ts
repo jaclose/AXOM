@@ -266,6 +266,39 @@ describe("course schedule intake", () => {
     expect(invalid.selected).toBe(false);
   });
 
+  it.each([
+    ["CSV file", '2026-11-25,"Start\n2026-11-26,Embedded,IMCQ\nEnd",Lecture\n2026-11-27,Real,IMCQ', "schedule.csv", ["Real"]],
+    ["pasted CSV", '2026-11-25,"Start\n2026-11-26,Embedded,IMCQ\nEnd",Lecture\n2026-11-27,Real,IMCQ', undefined, ["Real"]],
+    ["TSV file", '2026-11-25\t"Start\r\n2026-11-26\tEmbedded\tIMCQ\r\nEnd"\tLecture\r\n2026-11-27\tReal\tIMCQ', "schedule.tsv", ["Real"]],
+    ["unclosed CSV", '2026-11-25,"Start\n2026-11-26,Embedded,IMCQ', "schedule.csv", []],
+    ["unclosed paste", '2026-11-25,"Start\n2026-11-26,Embedded,IMCQ', undefined, []],
+    ["header inside quotes", 'date,title,type\n2026-11-25,"Start\ndate,title,type\n2026-11-26,Embedded,IMCQ\nEnd",Lecture\n2026-11-27,Real,IMCQ', undefined, ["Real"]],
+    ["escaped quotes", '2026-11-25,"Start ""quoted""\n2026-11-26,Embedded,IMCQ\nEnd",Lecture\n2026-11-27,Real,IMCQ', "schedule.csv", ["Real"]],
+    ["malformed opening quote", '2026-11-25,bad"Start\n2026-11-26,Embedded,IMCQ\nEnd",Lecture\n2026-11-27,Real,IMCQ', "schedule.csv", ["Real"]],
+  ] as const)("holds the entire quoted record in %s", (_name, input, sourceName, labels) => {
+    const rows = parseCourseSchedule(input, [], sourceName);
+    const held = rows.filter((row) => row.sourceProblem);
+    expect(held).toHaveLength(1);
+    expect(held[0].selected).toBe(false);
+    expect(held[0].rawInput).toContain("Embedded");
+    expect(scheduleCandidatesToTracker(rows, "T1").map((row) => row.label)).toEqual(labels);
+    expect(scheduleCandidatesToTracker([{ ...held[0], selected: true, label: "Forced", problem: undefined }], "T1")).toEqual([]);
+  });
+
+  it("retains the complete CRLF record, original physical line range and next source line", () => {
+    const raw = '2026-11-25,"Start\r\n2026-11-26,Embedded,IMCQ\r\nEnd",Lecture';
+    const rows = parseCourseSchedule("date,title,type\r\n" + raw + "\r\n2026-11-27,Real,IMCQ", [], "schedule.csv");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ sourceLine: 2, rawInput: raw, selected: false, sourceProblem: expect.stringContaining("Lines 2-4:") });
+    expect(rows[1]).toMatchObject({ sourceLine: 5, label: "Real", activity: "imcq", selected: true });
+  });
+
+  it("keeps free-form quote text and single-line escaped fields admissible", () => {
+    expect(scheduleCandidatesToTracker(parseCourseSchedule('Renal, physiology\nA "quoted" title'), "T1").map((row) => row.label))
+      .toEqual(["Renal, physiology", 'A "quoted" title']);
+    expect(scheduleCandidatesToTracker(parseCourseSchedule('2026-11-25,"Session ""one""",IMCQ'), "T1")[0].label).toBe('Session "one"');
+  });
+
   it("keeps a 2,000-row intake linear enough for an ordinary browser interaction", () => {
     const input = Array.from({ length: 2_000 }, (_, index) => `2026-09-${String(index % 28 + 1).padStart(2, "0")},Synthetic Lecture ${index + 1},Lecture`).join("\n");
     const started = performance.now();

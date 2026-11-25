@@ -120,6 +120,36 @@ test("malformed structured schedule rows stay held until source correction", asy
   await expect(module.getByRole("button", { name: "Missed Impossible day" })).toHaveCount(0);
 });
 
+test("quoted multiline schedule fragments cannot create standalone attendance events", async ({ page }) => {
+  await seedOnboarded(page);
+  await page.goto("/#tracker");
+  await page.getByRole("button", { name: "Import schedule" }).click();
+  const dialog = page.getByRole("dialog", { name: "Import course schedule" });
+  await dialog.getByLabel("Tracker destination").fill("Term 1/BPM 500/FTM 1/Week 3");
+  const raw = 'date,title,type\r\n2026-11-25,"Start\r\n2026-11-26,Embedded synthetic event,IMCQ\r\nEnd",Lecture\r\n2026-11-27,Real synthetic event,IMCQ';
+  await dialog.locator('input[type="file"]').setInputFiles({
+    name: "multiline.csv", mimeType: "text/csv", buffer: Buffer.from(raw),
+  });
+  await expect(dialog.getByText("1 invalid", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("1 ready", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Lines 2-4:", { exact: false })).toBeVisible();
+  await expect(dialog.getByText("Source row 2:", { exact: false })).toContainText("Embedded synthetic event");
+  await dialog.getByRole("button", { name: "Select importable" }).click();
+  await expect(dialog.getByRole("button", { name: "Import selected (1)" })).toBeEnabled();
+  const paste = dialog.getByLabel("Or paste schedule rows");
+  await paste.fill('2026-11-25,"Start\n2026-11-26,Embedded synthetic event,IMCQ');
+  await dialog.getByRole("button", { name: "Replace review with pasted rows" }).click();
+  await expect(dialog.getByRole("button", { name: "Import selected (0)" })).toBeDisabled();
+  await paste.fill("2026-11-27,Real synthetic event,IMCQ");
+  await dialog.getByRole("button", { name: "Replace review with pasted rows" }).click();
+  await dialog.getByRole("button", { name: "Import selected (1)" }).click();
+  await reloadAfterSave(page);
+  const module = page.locator(".week-overview").getByRole("region", { name: "FTM 1 by week" });
+  await module.getByRole("button", { name: /Week 3/ }).click();
+  await expect(module.getByRole("button", { name: "Missed Real synthetic event" })).toHaveCount(1);
+  await expect(module.getByRole("button", { name: "Missed Embedded synthetic event" })).toHaveCount(0);
+});
+
 async function completeOnboarding(page: Page) {
   if (!(await completeSetup(page, "Schedule Intake Test", { ifVisible: true }))) return;
   const later = page.getByRole("button", { name: "Review later" });

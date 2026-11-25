@@ -163,20 +163,36 @@ export function reconcileScheduleDuplicates(
 }
 
 function parseDelimitedSchedule(text: string, existing: readonly TrackerItem[], sourceName?: string, scopePath?: string): ScheduleCandidate[] {
-  const lines = text.split(/\r?\n/);
+  const lines = text.split("\n");
   const first = lines.find((line) => line.trim())?.trim() ?? "";
   const declaredSeparator = /\.tsv$/i.test(sourceName ?? "") || /^date\t/i.test(first) ? "\t"
     : /\.csv$/i.test(sourceName ?? "") || /^date,/i.test(first) ? "," : undefined;
-  const rows = lines.flatMap((raw, index) => {
-    const line = raw.trim();
-    if (!line || /^date[,\t]/i.test(line)) return [];
-    // A comma in a free-form title does not itself establish a structured row.
-    const datePrefix = raw.match(/^\s*"?(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}\/\d{1,2}\/\d{2,4})"? *([,\t])/);
+  // Frame structured records before admitting any physical line. Multiline
+  // fields are not supported by splitRow; hold the whole affected record
+  // instead of letting date-shaped continuation text become an activity.
+  const records: Array<{ raw: string; index: number; endIndex: number; separator?: string }> = [];
+  for (let index = 0; index < lines.length;) {
+    const firstLine = lines[index].replace(/\r$/, "");
+    const datePrefix = firstLine.match(/^\s*"?(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}\/\d{1,2}\/\d{2,4})"? *([,\t])/);
     const separator = declaredSeparator ?? datePrefix?.[1];
+    let endIndex = index;
+    let open = Boolean(separator) && quoteContinues(firstLine);
+    while (open && endIndex + 1 < lines.length) {
+      endIndex += 1;
+      open = quoteContinues(lines[endIndex], open);
+    }
+    records.push({ raw: lines.slice(index, endIndex + 1).join("\n").replace(/\r$/, ""), index, endIndex, separator });
+    index = endIndex + 1;
+  }
+  const rows = records.flatMap(({ raw, index, endIndex, separator }) => {
+    const line = raw.trim();
+    if (index === endIndex && (!line || /^date[,\t]/i.test(line))) return [];
     function held(reason: string) {
-      const problem = "Line " + (index + 1) + ": " + reason;
+      const location = index === endIndex ? "Line " + (index + 1) : "Lines " + (index + 1) + "-" + (endIndex + 1);
+      const problem = location + ": " + reason;
       return [{ ...candidate(String(index + 1), "", "Lecture", undefined, index + 1, sourceName, problem), sourceProblem: problem, rawInput: raw }];
     }
+    if (index !== endIndex) return held("Multiline or unclosed quoted fields. Correct the entire source record and review again.");
     const cells = separator ? splitRow(raw, separator) : [line];
     if (!cells) return held("Malformed quoted fields. Correct the source row and review again.");
     if (separator && (cells.length < 2 || cells.length > 3)) return held("Expected date, title and optional type. Correct the source row and review again.");
@@ -230,6 +246,18 @@ function candidate(id: string, label: string, kind: TrackerKind, date: string | 
     duplicate: "none",
     problem,
   };
+}
+
+// Conservative boundary scanner: even malformed quote placement cannot
+// authorize a continuation as a separate record. Escaped quotes do not close
+// an open field. Ordinary free-form rows never enter this scanner.
+function quoteContinues(line: string, quoted = false): boolean {
+  for (let index = 0; index < line.length; index += 1) {
+    if (line[index] !== '"') continue;
+    if (quoted && line[index + 1] === '"') { index += 1; continue; }
+    quoted = !quoted;
+  }
+  return quoted;
 }
 
 // Single-line CSV and TSV share positional, quoted-field semantics.
