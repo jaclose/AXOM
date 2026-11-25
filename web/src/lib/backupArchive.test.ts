@@ -31,6 +31,19 @@ describe("portable binary media backup", () => {
     expect(JSON.parse(backup.rawText).tasks).toEqual(payload.tasks);
   });
 
+  it.each(["json", "zip"])("rejects invalid nested course modules from a %s backup before staging", async (format) => {
+    const payload = { terms: [], schemaVersion: SCHEMA_VERSION, courses: [
+      { id: "valid-course", modules: [{ id: "m1", name: "NB1" }] },
+      { id: "invalid-course", modules: [null] },
+    ] };
+    const file = format === "zip"
+      ? new File([(await createMediaBackupArchive(payload, [])).blob], "invalid-course.zip")
+      : new File([JSON.stringify(payload)], "invalid-course.json");
+    const backup = await readPortableBackup(file);
+    expect(() => parseImport(backup.rawText)).toThrow("invalid course module collection");
+    expect(JSON.parse(backup.rawText).courses).toEqual(payload.courses);
+  });
+
   it.each(["json", "zip"])("rejects future workspace schema in a %s backup before staging media", async (format) => {
     const payload = { terms: [], schemaVersion: SCHEMA_VERSION + 1, futureOnlyRecord: { preserved: true } };
     const file = format === "zip"

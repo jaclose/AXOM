@@ -397,6 +397,17 @@ export function parseImport(text: string): NoctyriumState {
       throw new Error(`This backup has an invalid workspace collection (${key}). Keep the original file.`);
     }
   }
+  // Course Tracker consumes each present course's module array directly.
+  // Missing modules are not a documented legacy migration; do not silently
+  // replace a malformed or incomplete course with an empty course.
+  for (const course of data.courses ?? []) {
+    const modules: unknown = course.modules;
+    if (!Array.isArray(modules) || !modules.every(module =>
+      isRecord(module) && typeof module.id === "string" && module.id.trim() !== "" &&
+      typeof module.name === "string")) {
+      throw new Error("This backup has an invalid course module collection. Keep the original file.");
+    }
+  }
   const profile = data.profile && typeof data.profile === "object"
     ? data.profile as Record<string, unknown>
     : {};

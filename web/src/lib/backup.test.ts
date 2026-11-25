@@ -18,6 +18,30 @@ describe("portable backup safety", () => {
     }
   });
 
+  it.each([
+    undefined, null, {}, false, "bad", [null], [[]], [{}],
+    [{ id: "", name: "NB1" }], [{ id: " ", name: "NB1" }],
+    [{ id: 42, name: "NB1" }], [{ id: "m1" }],
+    [{ id: "m1", name: null }], [{ id: "m1", name: 42 }],
+    [{ id: "m1", name: "NB1" }, {}],
+  ].map(modules => ({ modules })))("rejects malformed course modules %j", ({ modules }) => {
+    for (const schemaVersion of [undefined, 31, SCHEMA_VERSION]) {
+      const course = { ...makeSeed().courses[0], modules };
+      expect(() => parseImport(JSON.stringify({ terms: [], schemaVersion, courses: [course] })))
+        .toThrow("invalid course module collection");
+    }
+  });
+
+  it("preserves valid module identifiers, names and empty courses through portable admission", () => {
+    const seed = makeSeed();
+    seed.courses[0].modules = [{ id: "m1", name: "NB1" }, { id: "m2", name: "" }];
+    const populated = parseImport(JSON.stringify(toPortableState(seed)));
+    expect(populated.courses).toEqual(seed.courses);
+    seed.courses[0].modules = [];
+    expect(parseImport(JSON.stringify(toPortableState(seed))).courses).toEqual(seed.courses);
+    expect(parseImport(JSON.stringify({ terms: [] })).courses).toEqual([]);
+  });
+
   it("continues to accept omitted legacy record collections and valid arrays", () => {
     expect(parseImport(JSON.stringify({ terms: [] })).tasks).toEqual([]);
     const seed = makeSeed();
