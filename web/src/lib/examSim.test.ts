@@ -193,7 +193,7 @@ describe("explicit simulation recovery", () => {
     const answers = blockAnswers(resumed, now + 1000, () => "B");
     expect(answers[0].seconds).toBe(seconds + 1);
     expect(answers[1].seconds).toBe(seconds);
-    expect(Number.isSafeInteger(answers.reduce((sum, answer) => sum + answer.seconds, 0))).toBe(true);
+    expect(Number.isSafeInteger(answers.reduce((sum, answer) => sum + (answer.seconds ?? Number.NaN), 0))).toBe(true);
     expect(Number.isSafeInteger((large.timeLimitSeconds ?? 0) * 1000)).toBe(true);
   });
 
