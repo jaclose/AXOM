@@ -6,12 +6,14 @@ import { readSourceOriginal, saveSourceOriginal, deleteSourceOriginal, SOURCE_OR
 import type { SourceDocument } from "./library";
 import { closeWorkspace, openEmptyWorkspace } from "./question-content/persistenceHarness.testing";
 import { createMediaBackupArchive, mediaBackupBytes, readPortableBackup } from "./backupArchive";
+import { setQuestionAttachmentAccount } from "./questionAttachmentScope";
 import { ATTACHMENT_EXPORT_KEY, deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob, putQuestionAttachmentBlob, type QuestionImageAttachment } from "./questionAttachments";
 
 const attachment: QuestionImageAttachment = { id: "figure", blobKey: "private-library:figure", fileName: "figure.png", mimeType: "image/png", byteSize: 4, altText: "Test figure", createdAt: "2026-10-10T00:00:00Z", updatedAt: "2026-10-10T00:00:00Z", role: "question" };
 const refs = [{ id: "held-question", attachments: [attachment] }];
 beforeEach(async () => { await openEmptyWorkspace(); vi.stubGlobal("Blob", NativeBlob); vi.stubGlobal("File", NativeFile); });
 afterEach(async () => {
+  setQuestionAttachmentAccount(undefined);
   await new Promise<void>(resolve => { const request = indexedDB.deleteDatabase(SOURCE_ORIGINALS_DB); request.onsuccess = () => resolve(); });
   await closeWorkspace();
 });
@@ -86,6 +88,53 @@ describe("portable binary media backup", () => {
     await expect(readPortableBackup(new File([await forged.generateAsync({ type: "arraybuffer" })], "duplicate.zip"))).rejects.toThrow("invalid or missing original-file");
     await deleteSourceOriginal(document.id);
     expect(await createMediaBackupArchive({ documents: [document] }, [], [document])).toMatchObject({ originalCount: 0, missingOriginalIds: [document.id] });
+  });
+
+  it.each([false, true])("rejects a stale ZIP image restore (return to original account: %s)", async returnToOriginal => {
+    setQuestionAttachmentAccount("backup-test-a");
+    await putQuestionAttachmentBlob(attachment.blobKey, {
+      blob: new Blob(["AXOM"]), mimeType: "image/png", byteSize: 4,
+      questionId: "held-question", updatedAt: attachment.updatedAt,
+    });
+    const exported = await createMediaBackupArchive({}, refs);
+    const backup = await readPortableBackup(new File([exported.blob], "scope.zip"));
+    await deleteQuestionAttachmentBlobs([attachment.blobKey]);
+    const pending = backup.restoreMedia(refs);
+    setQuestionAttachmentAccount("backup-test-b");
+    if (returnToOriginal) setQuestionAttachmentAccount("backup-test-a");
+    await expect(pending).rejects.toThrow("account changed");
+    setQuestionAttachmentAccount("backup-test-b");
+    expect(await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true })).toBeUndefined();
+    setQuestionAttachmentAccount("backup-test-a");
+    expect(await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true })).toBeUndefined();
+  });
+
+  it.each([false, true])("rejects a previously read JSON backup after an account transition (return: %s)", async returnToOriginal => {
+    setQuestionAttachmentAccount("backup-test-a");
+    const payload = { [ATTACHMENT_EXPORT_KEY]: [{ ...attachment, questionId: "held-question", base64: "QVhPTQ==" }] };
+    const backup = await readPortableBackup(new File([JSON.stringify(payload)], "scope.json"));
+    setQuestionAttachmentAccount("backup-test-b");
+    if (returnToOriginal) setQuestionAttachmentAccount("backup-test-a");
+    await expect(backup.restoreMedia(refs)).rejects.toThrow("account changed");
+    await expect(backup.restoreOriginals([])).rejects.toThrow("account changed");
+    setQuestionAttachmentAccount("backup-test-b");
+    expect(await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true })).toBeUndefined();
+    setQuestionAttachmentAccount("backup-test-a");
+    expect(await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true })).toBeUndefined();
+  });
+
+  it("does not restore verified originals into a replacement account", async () => {
+    setQuestionAttachmentAccount("backup-test-a");
+    const original = new Blob(["private source"], { type: "text/plain" });
+    const document: SourceDocument = { id: "scope-source", title: "Source", fileName: "source.txt", fileType: "text/plain", uploadedAt: "2026-10-13", rawText: "private source", sizeBytes: original.size, checksum: await sha256Hex(await original.arrayBuffer()), tags: [], linkedQuestionSetIds: [], libraryOnly: true };
+    await saveSourceOriginal(document, original);
+    const exported = await createMediaBackupArchive({ documents: [document] }, [], [document]);
+    const backup = await readPortableBackup(new File([exported.blob], "scope.zip"));
+    setQuestionAttachmentAccount("backup-test-b");
+    await expect(backup.restoreOriginals([document])).rejects.toThrow("account changed");
+    expect(await readSourceOriginal(document.id, document.checksum)).toBeUndefined();
+    setQuestionAttachmentAccount("backup-test-a");
+    expect(await (await readSourceOriginal(document.id, document.checksum))?.text()).toBe("private source");
   });
 
   it("rejects unrelated ZIPs and missing media before allowing a workspace restore", async () => {

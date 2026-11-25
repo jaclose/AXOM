@@ -71,13 +71,29 @@ export interface PortableBackupRead {
 
 /** Read and validate a portable copy before any workspace state is adopted. */
 export async function readPortableBackup(file: File): Promise<PortableBackupRead> {
+  // Bind deferred archive extraction and staging to the original generation.
+  // Returning to the same account cannot resume an abandoned attempt.
+  const scope = getQuestionAttachmentScope();
+  const assertRestoreScope = () => {
+    if (!isQuestionAttachmentScopeCurrent(scope)) throw new Error("The account changed during recovery. Choose the backup again in the intended account.");
+  };
   if (!file.name.toLowerCase().endsWith(".zip")) {
     const rawText = await file.text();
+    assertRestoreScope();
     const payloads = extractQuestionAttachmentPayloads(JSON.parse(rawText));
-    return { rawText, restoreMedia: refs => stageQuestionAttachmentPayloads(payloads, refs), restoreOriginals: async () => ({ restored: 0, skipped: 0 }) };
+    return { rawText, restoreMedia: async refs => {
+      assertRestoreScope();
+      return stageQuestionAttachmentPayloads(payloads, refs, scope);
+    }, restoreOriginals: async () => {
+      assertRestoreScope();
+      return { restored: 0, skipped: 0 };
+    } };
   }
   if (file.size > 2 * 1024 * 1024 * 1024) throw new Error("This backup exceeds the 2 GB archive limit.");
-  const zip = await JSZip.loadAsync(new Uint8Array(await file.arrayBuffer()));
+  const archiveBytes = await file.arrayBuffer();
+  assertRestoreScope();
+  const zip = await JSZip.loadAsync(new Uint8Array(archiveBytes));
+  assertRestoreScope();
   if (Object.keys(zip.files).length > 30000) throw new Error("Too many files in this backup.");
   let expanded = 0;
   for (const entry of Object.values(zip.files)) {
@@ -90,6 +106,7 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
   const workspace = zip.file("workspace.json");
   if (!workspace) throw new Error("This ZIP is not an AXOM workspace backup. Prepared libraries are installed from the Course Library or QBank.");
   const rawText = await workspace.async("string");
+  assertRestoreScope();
   const manifest = JSON.parse(rawText) as { _backupFormat?: string; _backupVersion?: number; media?: MediaEntry[]; originals?: OriginalEntry[]; documents?: SourceDocument[]; deferredContent?: { documents?: SourceDocument[] } };
   if (manifest._backupFormat !== FORMAT || ![1, 2].includes(manifest._backupVersion ?? 0) || !Array.isArray(manifest.media)) throw new Error("Unsupported workspace backup format.");
   const media = manifest.media;
@@ -111,28 +128,39 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
       || typeof item.mimeType !== "string" || item.mimeType.length > 255
       || documents.get(item.documentId)?.checksum?.replace(/^sha256:/, "") !== item.sha256) throw new Error("The backup contains an invalid or missing original-file record.");
     const bytes = await zip.file(item.file)!.async("uint8array");
+    assertRestoreScope();
     if (bytes.byteLength !== item.byteSize || await sha256Hex(bytes) !== item.sha256) throw new Error("An original file failed its backup integrity check. No workspace data has been changed.");
+    assertRestoreScope();
     ids.add(item.documentId); files.add(item.file);
   }
+  assertRestoreScope();
   return { rawText, restoreOriginals: async documents => {
-    const scope = getQuestionAttachmentScope();
+    assertRestoreScope();
     let restored = 0, skipped = 0;
     for (const item of originals) {
       const document = documents.find(doc => doc.id === item.documentId && doc.checksum?.replace(/^sha256:/, "") === item.sha256);
-      if (!document || await readSourceOriginal(document.id, document.checksum, { scope })) { skipped++; continue; }
+      if (!document) { skipped++; continue; }
+      const existing = await readSourceOriginal(document.id, document.checksum, { scope });
+      assertRestoreScope();
+      if (existing) { skipped++; continue; }
       const bytes = await zip.file(item.file)!.async("uint8array");
+      assertRestoreScope();
       await saveSourceOriginal(document, new Blob([bytes as BlobPart], { type: item.mimeType }), { scope });
+      assertRestoreScope();
       restored++;
     }
     return { restored, skipped };
   }, restoreMedia: async references => {
+    assertRestoreScope();
     const payloads: QuestionAttachmentExportPayload[] = [];
     for (const item of media) {
       const bytes = await zip.file(item.file)!.async("uint8array");
+      assertRestoreScope();
       if (bytes.length > MAX_QUESTION_ATTACHMENT_BYTES) throw new Error("A backup image exceeds the safety limit.");
       const base64 = await blobToBase64(new Blob([bytes as BlobPart]));
+      assertRestoreScope();
       payloads.push(...extractQuestionAttachmentPayloads({ [ATTACHMENT_EXPORT_KEY]: [{ ...item.metadata, base64 }] }));
     }
-    return stageQuestionAttachmentPayloads(payloads, references);
+    return stageQuestionAttachmentPayloads(payloads, references, scope);
   } };
 }

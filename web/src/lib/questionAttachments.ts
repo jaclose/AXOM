@@ -637,8 +637,9 @@ function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
 export async function stageQuestionAttachmentPayloads(
   payloads: readonly QuestionAttachmentExportPayload[],
   questions: ReadonlyArray<{ id: string; attachments?: readonly QuestionImageAttachment[] }>,
+  scope: QuestionAttachmentScope = getQuestionAttachmentScope(),
 ): Promise<StagedQuestionAttachmentRestore> {
-  const scope = getQuestionAttachmentScope();
+  assertScope(scope);
   const surviving = new Map<string, QuestionImageAttachment & { questionId: string }>();
   for (const question of questions) {
     for (const attachment of question.attachments ?? []) {

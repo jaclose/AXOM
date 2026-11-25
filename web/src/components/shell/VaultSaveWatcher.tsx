@@ -60,7 +60,6 @@ export function VaultSaveWatcher() {
         if (!pending) updateWarning(FAILURE_BODY, false);
         return;
       }
-      let id: string | undefined;
       pushToast({
         title: "AXOM could not save on this device",
         body: pending ? PENDING_BODY : FAILURE_BODY,
@@ -74,7 +73,7 @@ export function VaultSaveWatcher() {
           onAction: () => { void exportBackup(scope, id); },
         }],
       });
-      id = useToasts.getState().toasts.find(toast => toast.dedupe === "vault-write-failure")?.id;
+      const id = useToasts.getState().toasts.find(toast => toast.dedupe === "vault-write-failure")?.id;
       warningId = id;
     }
     // An old account's warning and action must not carry into the new scope.
