@@ -40,6 +40,42 @@ describe("portable binary media backup", () => {
     expect(await getQuestionAttachmentBlob(attachment.blobKey)).toBeUndefined();
   });
 
+  it("counts actual ZIP entries and reserves a manifest entry", async () => {
+    await putQuestionAttachmentBlob(attachment.blobKey, { blob: new Blob(["AXOM"]), mimeType: "image/png", byteSize: 4, questionId: "held-question", updatedAt: attachment.updatedAt });
+    await expect(createMediaBackupArchive({}, refs, [], {}, { maxEntries: 1 })).rejects.toThrow("Too many files");
+    const result = await createMediaBackupArchive({}, refs, [], {}, { maxEntries: 2 });
+    const { default: JSZip } = await import("jszip");
+    const zip = await JSZip.loadAsync(new Uint8Array(await result.blob.arrayBuffer()));
+    expect(Object.keys(zip.files).sort()).toEqual(["media/0", "workspace.json"]);
+    expect((await readPortableBackup(new File([result.blob], "budget.zip"))).rawText).toContain("media/0");
+  });
+
+  it("budgets workspace UTF-8 bytes rather than string length", async () => {
+    const payload = { label: "漢字🌍" };
+    const first = await createMediaBackupArchive(payload, []);
+    const backup = await readPortableBackup(new File([first.blob], "budget.zip"));
+    const bytes = new Blob([backup.rawText]).size;
+    expect(bytes).toBeGreaterThan(backup.rawText.length);
+    await expect(createMediaBackupArchive(payload, [], [], {}, { maxWorkspaceBytes: bytes - 1 })).rejects.toThrow("safety limit");
+    await expect(createMediaBackupArchive(payload, [], [], {}, { maxWorkspaceBytes: bytes })).resolves.toMatchObject({ attachmentCount: 0 });
+  });
+
+  it("rejects ZIP overhead when expanded entries fit", async () => {
+    const payload = { label: "small backup" };
+    const first = await createMediaBackupArchive(payload, []);
+    const backup = await readPortableBackup(new File([first.blob], "budget.zip"));
+    const expanded = new Blob([backup.rawText]).size;
+    expect(first.blob.size).toBeGreaterThan(expanded);
+    await expect(createMediaBackupArchive(payload, [], [], {}, { maxBytes: expanded })).rejects.toThrow("archive safety limit");
+    await expect(createMediaBackupArchive(payload, [], [], {}, { maxBytes: first.blob.size })).resolves.toMatchObject({ attachmentCount: 0 });
+  });
+
+  it("rejects an aggregate binary budget without changing stored bytes", async () => {
+    await putQuestionAttachmentBlob(attachment.blobKey, { blob: new Blob(["AXOM"]), mimeType: "image/png", byteSize: 4, questionId: "held-question", updatedAt: attachment.updatedAt });
+    await expect(createMediaBackupArchive({}, refs, [], {}, { maxBytes: 3 })).rejects.toThrow("archive safety limit");
+    expect(await (await getQuestionAttachmentBlob(attachment.blobKey))!.blob.text()).toBe("AXOM");
+  });
+
   it("reports missing images and retains compatibility with existing JSON backups", async () => {
     expect((await createMediaBackupArchive({}, refs)).missingBlobKeys).toEqual([attachment.blobKey]);
     const payload = { _app: "AXOM", [ATTACHMENT_EXPORT_KEY]: [{ ...attachment, questionId: "held-question", base64: "QVhPTQ==" }] };
