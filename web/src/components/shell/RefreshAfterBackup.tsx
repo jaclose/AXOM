@@ -4,7 +4,7 @@ import { GButton } from "../ui/primitives";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { exportStateWithAttachments } from "../../lib/backup";
 import { useStore } from "../../lib/store";
-import { lastPortableBackupAt, recordPortableBackup, refreshAfterPortableBackup, subscribePortableBackup } from "../../lib/refreshRecovery";
+import { beginPortableBackupAttempt, lastPortableBackupAt, refreshAfterPortableBackup, subscribePortableBackup } from "../../lib/refreshRecovery";
 
 function backupTime(at: string): string {
   return new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -25,12 +25,15 @@ export function RefreshAfterBackup({ intro = true }: { intro?: boolean } = {}) {
     setMessage("");
     try {
       const state = useStore.getState();
+      const finish = beginPortableBackupAttempt(state);
       const result = await exportStateWithAttachments(state, "complete");
-      recordPortableBackup(state);
-      const missing = result.missingBlobKeys.length + result.missingOriginalIds.length;
-      setMessage(missing
-        ? `Backup downloaded. ${missing} ${missing === 1 ? "file was" : "files were"} already missing on this device and could not be included.`
-        : "Backup downloaded. Keep the file until AXOM saves normally again.");
+      const covered = finish(result);
+      const incomplete = result.missingBlobKeys.length || result.missingOriginalIds.length || result.deferredSourceCount !== 0;
+      setMessage(incomplete
+        ? "Backup downloaded, but it is incomplete. Some referenced files or account content could not be included. Keep this tab open and retry before refreshing."
+        : covered
+          ? "Backup downloaded. Keep the file until AXOM saves normally again."
+          : "Backup downloaded, but it could not verify the current workspace. Keep the file and download a new backup before refreshing.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "The backup could not be prepared. Nothing was changed.");
     } finally {
