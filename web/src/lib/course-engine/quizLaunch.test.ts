@@ -53,10 +53,30 @@ describe("course to canonical quiz handoff", () => {
   it("carries an explicitly selected course identity without mixing similarly named modules", () => {
     launchCourseQuiz({ term: "Term 2", module: "NB2", courseId: "bpm-501", week: 3,
       questionIds: ["one"], setIds: ["set-one"] });
-    expect(readCourseQuizLaunch(questions)).toMatchObject({
+    expect(readCourseQuizLaunch([{ ...questions[0], module: "NB2", week: 3, courseId: "bpm-501" }])).toMatchObject({
       term: "Term 2", module: "NB2", courseId: "bpm-501", week: 3,
       questionIds: ["one"], setIds: ["set-one"],
     });
+  });
+
+  it("holds source-declared module, week and course contradictions without consuming the fixed quiz handoff", () => {
+    const selection = { term: "Term 1", module: "SAMPLE", week: 1, courseId: "course-a", questionIds: ["one"], setIds: ["set-one"] };
+    launchCourseQuiz(selection);
+    const pending = sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY);
+    for (const conflicting of [
+      { ...questions[0], module: "OTHER", courseId: "course-a" },
+      { ...questions[0], week: 2, courseId: "course-a" },
+      { ...questions[0], week: 0, courseId: "course-a" },
+      { ...questions[0], courseId: "course-b" },
+    ]) {
+      expect(readCourseQuizLaunch([conflicting])).toBeNull();
+      expect(sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY)).toBe(pending);
+    }
+    // Case-normalized explicit agreement remains eligible. Unfiled legacy
+    // records are not proof of scope, but are not invented as contradictions.
+    expect(readCourseQuizLaunch([{ ...questions[0], module: "sample", courseId: "course-a" }])?.questionIds).toEqual(["one"]);
+    expect(readCourseQuizLaunch([{ ...questions[0], module: undefined, week: undefined, courseId: undefined }])?.questionIds).toEqual(["one"]);
+    expect(sessionStorage.getItem(COURSE_QUIZ_LAUNCH_KEY)).toBe(pending);
   });
 
   it("does not accept duplicate, invalid or excessive fixed question IDs", () => {

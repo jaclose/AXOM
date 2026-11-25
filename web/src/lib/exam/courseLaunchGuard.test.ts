@@ -79,6 +79,29 @@ describe("exact Course Tracker practice handoff", () => {
     ]).state).toBe("ready");
   });
 
+  it("reports contradicted original module/week/course filing as review-held rather than ready", () => {
+    store(["q1", "q2"]);
+    const value = JSON.parse(sessionStorage.getItem(KEY)!);
+    value.courseId = "course-a";
+    sessionStorage.setItem(KEY, JSON.stringify(value));
+    const pending = sessionStorage.getItem(KEY);
+    for (const conflicting of [
+      question("q1", { module: "DIFFERENT", week: 2, courseId: "course-a" }),
+      question("q1", { module: "FTCM", week: 3, courseId: "course-a" }),
+      question("q1", { module: "FTCM", week: 0, courseId: "course-a" }),
+      question("q1", { module: "FTCM", week: 2, courseId: "other-course" }),
+    ]) {
+      expect(inspectCourseLaunch([conflicting, question("q2")])).toEqual({
+        state: "pending", term: "Term 4", module: "FTCM", week: 2,
+        total: 2, ready: 1, missing: 0, review: 1, reviewIds: ["q1"],
+      });
+      expect(sessionStorage.getItem(KEY)).toBe(pending);
+    }
+    expect(inspectCourseLaunch([
+      question("q1", { module: "ftcm", week: 2, courseId: "course-a" }), question("q2"),
+    ]).state).toBe("ready");
+  });
+
   it("has no pending state when no handoff exists", () => {
     expect(inspectCourseLaunch([])).toEqual({ state: "none" });
   });
