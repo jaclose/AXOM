@@ -179,6 +179,33 @@ describe.each(["replace", "merge"] as const)("portable %s transaction", (mode) =
     expect(h.maintainAttachments).not.toHaveBeenCalled();
   });
 
+  it.each([undefined, null, false, 0, "", NaN])("does not confirm rollback when its flush rejects with %s", async (reason) => {
+    const h = restoreHarness(mode);
+    h.flush.mockRejectedValueOnce(new Error("target flush refused")).mockRejectedValueOnce(reason);
+
+    await expect(h.run()).rejects.toThrow(/could not confirm the prior workspace rollback.*Prepared images and original files were not cleaned up/);
+    expect(h.replaceAll).toHaveBeenCalledTimes(2);
+    expect(h.flush).toHaveBeenCalledTimes(2);
+    expect(h.assertWritesSince).not.toHaveBeenCalled();
+    expect(h.rollback).not.toHaveBeenCalled();
+    expect(h.recordRestore).not.toHaveBeenCalled();
+    expect(h.maintainAttachments).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, null, false, 0, "", NaN])("does not confirm rollback when its write receipt throws %s", async (reason) => {
+    const h = restoreHarness(mode);
+    h.assertWritesSince.mockImplementationOnce(() => { throw new Error("target receipt refused"); });
+    h.assertWritesSince.mockImplementationOnce(() => { throw reason; });
+
+    await expect(h.run()).rejects.toThrow(/could not confirm the prior workspace rollback.*Prepared images and original files were not cleaned up/);
+    expect(h.replaceAll).toHaveBeenCalledTimes(2);
+    expect(h.flush).toHaveBeenCalledTimes(2);
+    expect(h.assertWritesSince).toHaveBeenCalledTimes(2);
+    expect(h.rollback).not.toHaveBeenCalled();
+    expect(h.recordRestore).not.toHaveBeenCalled();
+    expect(h.maintainAttachments).not.toHaveBeenCalled();
+  });
+
   it("does not report rollback confirmation if a newer edit appears during its flush", async () => {
     const h = restoreHarness(mode);
     h.assertWritesSince.mockImplementationOnce(() => { throw new Error("target receipt refused"); });
