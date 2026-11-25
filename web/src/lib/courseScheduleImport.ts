@@ -15,7 +15,10 @@ export interface ScheduleCandidate {
   sourceLine: number;
   sourceName?: string;
   selected: boolean;
-  duplicate: "exact" | "likely" | "none";
+  duplicate: "exact" | "conflict" | "likely" | "none";
+  /** Bound to the destination, identity and incompatible explicit categories. */
+  conflictKey?: string;
+  confirmedConflictKey?: string;
   problem?: string;
 }
 
@@ -47,12 +50,18 @@ export function parseCourseSchedule(
   return parseDelimitedSchedule(text, existing, sourceName, scopePath);
 }
 
+/** An ambiguous category collision requires a separate, explicit confirmation. */
+export function canImportScheduleCandidate(candidate: ScheduleCandidate): boolean {
+  return !candidate.problem && Boolean(candidate.label.trim()) && candidate.duplicate !== "exact" &&
+    (candidate.duplicate !== "conflict" || Boolean(candidate.conflictKey && candidate.confirmedConflictKey === candidate.conflictKey));
+}
+
 export function scheduleCandidatesToTracker(
   candidates: readonly ScheduleCandidate[],
   path: string,
 ): Array<Omit<TrackerItem, "id" | "updated">> {
   return candidates
-    .filter((candidate) => candidate.selected && candidate.duplicate !== "exact" && !candidate.problem && candidate.label.trim())
+    .filter((candidate) => candidate.selected && canImportScheduleCandidate(candidate))
     .map((candidate) => ({
       path,
       label: candidate.label.trim(),
@@ -74,20 +83,40 @@ export function reconcileScheduleDuplicates(
 ): ScheduleCandidate[] {
   // An identical "IMCQ 1" in a different course is not a duplicate.
   const scoped = scopePath === undefined ? existing : existing.filter((item) => trackerPathKey(item.path) === trackerPathKey(scopePath));
-  const exact = new Set(scoped.map((item) => identity(item.label, item.kind, dateFrom(item.assessmentDate, item.note))));
+  // Unclassified rows retain the conservative legacy duplicate behavior.
+  // Explicit incompatible categories are not proof of the same event.
+  const existingCategories = new Map<string, Set<string>>();
+  const batchCategories = new Map<string, Set<string>>();
+  const seenCategories = new Map<string, Set<string>>();
+  function remember(map: Map<string, Set<string>>, key: string, activity?: CourseActivity) {
+    const categories = map.get(key) ?? new Set<string>();
+    categories.add(activity ?? "");
+    map.set(key, categories);
+  }
+  for (const item of scoped) remember(existingCategories, identity(item.label, item.kind, dateFrom(item.assessmentDate, item.note)), item.activity);
+  for (const row of candidates) {
+    if (normalize(row.label)) remember(batchCategories, identity(row.label, row.kind, row.date), row.activity);
+  }
   const legacyExact = new Set(scoped.filter((item) => item.activity === undefined).map((item) => identity(item.label, item.kind, dateFrom(item.assessmentDate, item.note))));
   const labels = new Set(scoped.map((item) => normalize(item.label)));
-  const seenExact = new Set<string>();
   const seenLabels = new Set<string>();
   return candidates.map((candidate) => {
     const key = identity(candidate.label, candidate.kind, candidate.date);
     const labelKey = normalize(candidate.label);
+    const activity = candidate.activity ?? "";
+    const prior = new Set([...(existingCategories.get(key) ?? []), ...(seenCategories.get(key) ?? [])]);
     const matchesLegacy = candidate.legacyIdentity?.original === key && legacyExact.has(candidate.legacyIdentity.previous);
-    const duplicate = exact.has(key) || seenExact.has(key) || matchesLegacy
-      ? "exact"
+    const exact = matchesLegacy || prior.has(activity) || prior.has("") || (!activity && prior.size > 0);
+    const incompatible = activity ? [...new Set([...(existingCategories.get(key) ?? []), ...(batchCategories.get(key) ?? [])])]
+      .filter((category) => category && category !== activity).sort() : [];
+    const duplicate: ScheduleCandidate["duplicate"] = exact ? "exact" : incompatible.length ? "conflict"
       : labels.has(labelKey) || seenLabels.has(labelKey) ? "likely" : "none";
-    if (labelKey) { seenExact.add(key); seenLabels.add(labelKey); }
-    return { ...candidate, duplicate, selected: duplicate === "exact" ? false : candidate.selected };
+    const conflictKey = duplicate === "conflict"
+      ? JSON.stringify([scopePath === undefined ? null : trackerPathKey(scopePath), key, activity, incompatible]) : undefined;
+    const confirmedConflictKey = conflictKey && candidate.confirmedConflictKey === conflictKey ? conflictKey : undefined;
+    if (labelKey) { remember(seenCategories, key, candidate.activity); seenLabels.add(labelKey); }
+    return { ...candidate, duplicate, conflictKey, confirmedConflictKey,
+      selected: duplicate === "exact" || (duplicate === "conflict" && !confirmedConflictKey) ? false : candidate.selected };
   });
 }
 

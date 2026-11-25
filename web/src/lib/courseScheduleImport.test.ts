@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCourseSchedule, reconcileScheduleDuplicates, scheduleCandidatesToTracker } from "./courseScheduleImport";
+import { canImportScheduleCandidate, parseCourseSchedule, reconcileScheduleDuplicates, scheduleCandidatesToTracker } from "./courseScheduleImport";
 import type { TrackerItem } from "./types";
 import { absenceStanding, isAttended } from "./course-engine/weekView";
 
@@ -141,6 +141,39 @@ describe("course schedule intake", () => {
     expect(scheduleCandidatesToTracker([{ ...rows[0], activity: "imcq" }, { ...rows[1], activity: "esoft" }], path)
       .map((row) => row.activity)).toEqual(["imcq", undefined]);
     expect(scheduleCandidatesToTracker(rows, path).every((row) => row.activity === undefined)).toBe(true);
+  });
+
+  it.each([["IMCQ", "ESoft"], ["ESoft", "IMCQ"]] as const)("holds incompatible %s/%s categories until distinct-event confirmation", (first, second) => {
+    const path = "Term 1/BPM 500/FTM 1/Week 3";
+    const csv = (category: string) => `2026-08-14,Session 1,${category}`;
+    const initial = parseCourseSchedule(csv(first));
+    const existing: TrackerItem[] = scheduleCandidatesToTracker(initial, path).map((row) => ({
+      ...row, id: "existing", updated: "2026-08-14", passes: 2, attendance: "missed" as const,
+    }));
+    const before = JSON.stringify(existing);
+    const [collision] = parseCourseSchedule(csv(second), existing, "schedule.csv", {}, path);
+    expect(collision).toMatchObject({ duplicate: "conflict", selected: false });
+    expect(canImportScheduleCandidate(collision)).toBe(false);
+    expect(scheduleCandidatesToTracker([{ ...collision, selected: true }], path)).toEqual([]);
+    const confirmed = reconcileScheduleDuplicates([{ ...collision, confirmedConflictKey: collision.conflictKey, selected: true }], existing, path);
+    expect(scheduleCandidatesToTracker(confirmed, path)).toHaveLength(1);
+    expect(JSON.stringify(existing)).toBe(before);
+    const [same] = parseCourseSchedule(csv(first), existing, "schedule.csv", {}, path);
+    expect(same).toMatchObject({ duplicate: "exact", selected: false });
+    const [legacy] = parseCourseSchedule(csv(second), [{ ...existing[0], activity: undefined }], "schedule.csv", {}, path);
+    expect(legacy).toMatchObject({ duplicate: "exact", selected: false });
+    const [other] = parseCourseSchedule(csv(second), existing, "schedule.csv", {}, "Term 2/BPM 500");
+    expect(other).toMatchObject({ duplicate: "none", selected: true });
+    const batch = parseCourseSchedule([csv(first), csv(second), csv(first)].join("\n"), [], "schedule.csv", {}, path);
+    expect(batch.map((row) => [row.duplicate, row.selected])).toEqual([["conflict", false], ["conflict", false], ["exact", false]]);
+    const approved = reconcileScheduleDuplicates(batch.map((row) => ({ ...row, confirmedConflictKey: row.conflictKey, selected: true })), [], path);
+    expect(scheduleCandidatesToTracker(approved, path)).toHaveLength(2);
+    const changedDestination = reconcileScheduleDuplicates(approved, [], "Term 2/BPM 500");
+    expect(changedDestination.every((row) => !row.selected)).toBe(true);
+    const nowDuplicate = reconcileScheduleDuplicates(confirmed, [...existing, {
+      ...scheduleCandidatesToTracker(confirmed, path)[0], id: "new-existing", updated: "2026-08-14",
+    }], path);
+    expect(scheduleCandidatesToTracker(nowDuplicate, path)).toEqual([]);
   });
 
   it("keeps a 2,000-row intake linear enough for an ordinary browser interaction", () => {

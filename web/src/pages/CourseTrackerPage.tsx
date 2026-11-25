@@ -35,7 +35,7 @@ import { cardSystemFor, type CardSystem } from "../lib/cardSystem";
 import { TrackerFirstRun } from "../components/tracker/TrackerFirstRun";
 import { SguCourseMapCompletion } from "../components/tracker/SguCourseMapCompletion";
 import { ICON_SIZE } from "../lib/iconSize";
-import { parseCourseSchedule, reconcileScheduleDuplicates, scheduleCandidatesToTracker, type ScheduleCandidate } from "../lib/courseScheduleImport";
+import { canImportScheduleCandidate, parseCourseSchedule, reconcileScheduleDuplicates, scheduleCandidatesToTracker, type ScheduleCandidate } from "../lib/courseScheduleImport";
 import { CourseLibrary } from "../components/tracker/CourseLibrary";
 import type { CourseBook } from "../lib/bookshelf/courseBooks";
 import { CourseTemplateLoader } from "../components/tracker/CourseTemplateLoader";
@@ -705,17 +705,17 @@ function ScheduleImportModal({ defaultPath, onClose }: { defaultPath: string; on
   const counts = review.reduce((result, row) => {
     if (row.problem) result.invalid += 1;
     else if (row.duplicate === "exact") result.existing += 1;
-    else if (row.duplicate === "likely") result.review += 1;
+    else if (row.duplicate === "likely" || (row.duplicate === "conflict" && !canImportScheduleCandidate(row))) result.review += 1;
     else result.ready += 1;
     return result;
   }, { ready: 0, review: 0, existing: 0, invalid: 0 });
 
   function updateRow(index: number, patch: Partial<ScheduleCandidate>) {
-    setReview((current) => reconcileScheduleDuplicates(current.map((candidate, candidateIndex) => candidateIndex === index ? { ...candidate, ...patch } : candidate), store.tracker, path));
+    setReview((current) => reconcileScheduleDuplicates(current.map((candidate, candidateIndex) => candidateIndex === index ? { ...candidate, ...patch } : candidate), store.tracker, path || "Imported schedule"));
   }
   function extractPaste() {
     setErrors([]);
-    setReview(parseCourseSchedule(text, store.tracker, "Pasted schedule", {}, path));
+    setReview(parseCourseSchedule(text, store.tracker, "Pasted schedule", {}, path || "Imported schedule"));
   }
   async function extractFiles(files: FileList | null) {
     if (!files?.length) return;
@@ -728,30 +728,37 @@ function ScheduleImportModal({ defaultPath, onClose }: { defaultPath: string; on
       else if (extension === "docx") extracted = await extractDocxText(await file.arrayBuffer());
       else extracted = extractPlainText(await file.text());
       if (extracted.empty) throw new Error(extracted.warnings[0] ?? "No readable schedule text was found.");
-      const parsed = parseCourseSchedule(extracted.text, store.tracker, file.name, {}, path);
+      const parsed = parseCourseSchedule(extracted.text, store.tracker, file.name, {}, path || "Imported schedule");
       if (!parsed.length) throw new Error("No schedule entries were detected. Check the file format or paste the rows for review.");
       return parsed;
     }));
     const candidates = settled.flatMap((result) => result.status === "fulfilled" ? result.value : []);
     setErrors(settled.flatMap((result, index) => result.status === "rejected" ? [`${files[index].name}: ${result.reason instanceof Error ? result.reason.message : "Could not read file."}`] : []));
-    setReview((current) => reconcileScheduleDuplicates([...current, ...candidates], store.tracker, path));
+    setReview((current) => reconcileScheduleDuplicates([...current, ...candidates], store.tracker, path || "Imported schedule"));
     setBusy(false);
     if (fileRef.current) fileRef.current.value = "";
   }
   function commit() {
-    const items = scheduleCandidatesToTracker(review, path || "Imported schedule");
+    const destination = path || "Imported schedule";
+    const latest = reconcileScheduleDuplicates(review, useStore.getState().tracker, destination);
+    const items = scheduleCandidatesToTracker(latest, destination);
+    if (!items.length || items.length !== importable) {
+      setReview(latest);
+      pushToast({ title: "Schedule review changed", body: "Check the updated duplicate and activity review before importing." });
+      return;
+    }
     store.bulkAddTrackerItems(items);
     pushToast({ title: `${items.length} schedule item${items.length === 1 ? "" : "s"} imported`, body: "Your reviewed items are ready in Course Tracker.", tone: "success" });
     onClose();
   }
-  const importable = review.filter((row) => row.selected && row.duplicate !== "exact" && !row.problem).length;
+  const importable = review.filter((row) => row.selected && canImportScheduleCandidate(row)).length;
   return (
     <Modal title="Import course schedule" onClose={onClose} footer={<><GButton onClick={onClose}>Cancel</GButton>{review.length ? <GButton variant="primary" disabled={!importable || busy} onClick={commit}>Import selected ({importable})</GButton> : <GButton variant="primary" disabled={!text.trim() || busy} onClick={extractPaste}>Review schedule</GButton>}</>}>
       <p className="sub">Add PDF, DOCX, ICS, CSV, TSV, or TXT files—or paste rows. AXOM extracts candidates first; nothing is created until you review.</p>
       <Field label="Tracker destination" value={path} onChange={(event) => {
         const next = event.target.value;
         setPath(next);
-        setReview((current) => reconcileScheduleDuplicates(current, store.tracker, next));
+        setReview((current) => reconcileScheduleDuplicates(current, store.tracker, next || "Imported schedule"));
       }} placeholder="Term/Course/Module" />
       <div className="schedule-source-actions">
         <GButton onClick={() => fileRef.current?.click()} disabled={busy}><Upload size={ICON_SIZE.body} /> {busy ? "Reading files…" : "Add schedule files"}</GButton>
@@ -766,12 +773,12 @@ function ScheduleImportModal({ defaultPath, onClose }: { defaultPath: string; on
         <p className="sub">Check the course activity for each row. Unassigned items do not track attendance. Choose an activity only when it applies to your course; importing does not mark any absence or set an official allowance.</p>
         <div className="schedule-review-summary" aria-label="Schedule import summary">
           <b>{counts.ready} ready</b><span>{counts.review} need review</span><span>{counts.existing} already exist</span><span>{counts.invalid} invalid</span>
-          <GButton size="tiny" onClick={() => setReview((current) => current.map((row) => ({ ...row, selected: !row.problem && row.duplicate !== "exact" })))}>Select importable</GButton>
+          <GButton size="tiny" onClick={() => setReview((current) => current.map((row) => ({ ...row, selected: canImportScheduleCandidate(row) })))}>Select importable</GButton>
           <GButton size="tiny" onClick={() => setReview((current) => current.map((row) => ({ ...row, selected: false })))}>Clear selection</GButton>
         </div>
         <div className="schedule-review-list" aria-label="Schedule review">
           {review.map((row, index) => <div className="schedule-review-row" key={`${row.id}-${index}`}>
-            <input aria-label={`Select ${row.label || `row ${row.sourceLine}`}`} type="checkbox" checked={row.selected} disabled={row.duplicate === "exact" || Boolean(row.problem)} onChange={(event) => updateRow(index, { selected: event.target.checked })} />
+            <input aria-label={`Select ${row.label || `row ${row.sourceLine}`}`} type="checkbox" checked={row.selected} disabled={!canImportScheduleCandidate(row)} onChange={(event) => updateRow(index, { selected: event.target.checked })} />
             <div className="schedule-review-fields">
               <Field label="Date" type="date" value={row.date ?? ""} onChange={(event) => updateRow(index, { date: event.target.value || undefined })} />
               <Field label="Title" value={row.label} onChange={(event) => updateRow(index, { label: event.target.value, problem: event.target.value.trim() ? undefined : "A title is required." })} />
@@ -787,10 +794,18 @@ function ScheduleImportModal({ defaultPath, onClose }: { defaultPath: string; on
                 {COURSE_ACTIVITIES.map((activity) => <option key={activity} value={activity}>{COURSE_ACTIVITY_LABEL[activity]}</option>)}
               </SelectField>
             </div>
-            <small className={`schedule-row-state schedule-row-state--${row.problem ? "invalid" : row.duplicate}`}>
-              {row.problem ?? (row.duplicate === "exact" ? "Already exists" : row.duplicate === "likely" ? "Possible duplicate — compare before importing" : "Ready")}
+            <small className={`schedule-row-state schedule-row-state--${row.problem ? "invalid" : row.duplicate === "conflict" ? "likely" : row.duplicate}`}>
+              {row.problem ?? (row.duplicate === "exact" ? "Already exists" : row.duplicate === "conflict" ? (canImportScheduleCandidate(row) ? "Distinct activity confirmed" : "Conflicting course activity — review required") : row.duplicate === "likely" ? "Possible duplicate — compare before importing" : "Ready")}
               {row.sourceName ? ` · ${row.sourceName}` : ""}
             </small>
+            {row.duplicate === "conflict" && !row.problem && row.conflictKey && <div className="schedule-review-fields">
+              <span className="sub">The same title, date and type has a different explicit activity. Keep the existing item by leaving this unselected, correct the details, or confirm this is a separate event.</span>
+              <GButton size="sm" onClick={() => updateRow(index, canImportScheduleCandidate(row)
+                ? { confirmedConflictKey: undefined, selected: false }
+                : { confirmedConflictKey: row.conflictKey, selected: true })}>
+                {canImportScheduleCandidate(row) ? "Undo distinct activity" : "Confirm distinct activity"}
+              </GButton>
+            </div>}
           </div>)}
         </div>
       </>}

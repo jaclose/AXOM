@@ -65,6 +65,28 @@ test("reviewed schedule activities enable explicit attendance without inventing 
   await expect(page.locator(".week-absences summary")).toContainText("Small group: 1 missed of 3 allowed");
 });
 
+test("conflicting schedule categories require deliberate distinct-event confirmation", async ({ page }) => {
+  await seedOnboarded(page);
+  await page.goto("/#tracker");
+  await page.getByRole("button", { name: "Import schedule" }).click();
+  const dialog = page.getByRole("dialog", { name: "Import course schedule" });
+  await dialog.getByLabel("Tracker destination").fill("Term 1/BPM 500/FTM 1/Week 3");
+  await dialog.getByLabel("Or paste schedule rows").fill("2026-09-01,Synthetic category collision,IMCQ\n2026-09-01,Synthetic category collision,ESoft");
+  await dialog.getByRole("button", { name: "Review schedule" }).click();
+  await expect(dialog.getByText("Conflicting course activity — review required", { exact: false })).toHaveCount(2);
+  await dialog.getByRole("button", { name: "Select importable" }).click();
+  await expect(dialog.getByRole("button", { name: "Import selected (0)" })).toBeDisabled();
+  await dialog.getByRole("button", { name: "Confirm distinct activity" }).first().click();
+  await expect(dialog.getByRole("button", { name: "Import selected (1)" })).toBeEnabled();
+  await dialog.getByRole("button", { name: "Confirm distinct activity" }).click();
+  await expect(dialog.getByRole("button", { name: "Import selected (2)" })).toBeEnabled();
+  await dialog.getByRole("button", { name: "Import selected (2)" }).click();
+  await reloadAfterSave(page);
+  const module = page.locator(".week-overview").getByRole("region", { name: "FTM 1 by week" });
+  await module.getByRole("button", { name: /Week 3/ }).click();
+  await expect(module.getByRole("button", { name: "Missed Synthetic category collision" })).toHaveCount(2);
+});
+
 async function completeOnboarding(page: Page) {
   if (!(await completeSetup(page, "Schedule Intake Test", { ifVisible: true }))) return;
   const later = page.getByRole("button", { name: "Review later" });
