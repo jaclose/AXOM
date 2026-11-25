@@ -44,6 +44,19 @@ describe("portable binary media backup", () => {
     expect(JSON.parse(backup.rawText).courses).toEqual(payload.courses);
   });
 
+  it.each(["json", "zip"])("rejects unusable tracker paths from a %s backup without altering source records", async (format) => {
+    const payload = { terms: [], schemaVersion: SCHEMA_VERSION, tracker: [
+      { id: "valid-tracker", path: "T2/NB3/Lectures", label: "Retain valid" },
+      { id: "invalid-tracker", path: null, label: "Retain invalid" },
+    ] };
+    const file = format === "zip"
+      ? new File([(await createMediaBackupArchive(payload, [])).blob], "invalid-tracker.zip")
+      : new File([JSON.stringify(payload)], "invalid-tracker.json");
+    const backup = await readPortableBackup(file);
+    expect(() => parseImport(backup.rawText)).toThrow("invalid Course Tracker path");
+    expect(JSON.parse(backup.rawText).tracker).toEqual(payload.tracker);
+  });
+
   it.each(["json", "zip"])("rejects future workspace schema in a %s backup before staging media", async (format) => {
     const payload = { terms: [], schemaVersion: SCHEMA_VERSION + 1, futureOnlyRecord: { preserved: true } };
     const file = format === "zip"

@@ -408,6 +408,14 @@ export function parseImport(text: string): NoctyriumState {
       throw new Error("This backup has an invalid course module collection. Keep the original file.");
     }
   }
+  // Tracker paths are consumed as strings by the scope tree. Preserve legacy
+  // grouping strings verbatim, but refuse records without any usable segment.
+  for (const item of data.tracker ?? []) {
+    const path: unknown = item.path;
+    if (typeof path !== "string" || !path.split("/").some(part => part.trim() !== "")) {
+      throw new Error("This backup has an invalid Course Tracker path. Keep the original file.");
+    }
+  }
   const profile = data.profile && typeof data.profile === "object"
     ? data.profile as Record<string, unknown>
     : {};

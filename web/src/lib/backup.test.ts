@@ -42,6 +42,29 @@ describe("portable backup safety", () => {
     expect(parseImport(JSON.stringify({ terms: [] })).courses).toEqual([]);
   });
 
+  it.each([undefined, null, 42, false, {}, [], "", "  ", "/", " / / "].map(path => ({ path })))(
+    "rejects unusable tracker paths %j before projection", ({ path }) => {
+      for (const schemaVersion of [undefined, 31, SCHEMA_VERSION]) {
+        const tracker = [{ id: "invalid-tracker", path, label: "Retain original" }];
+        expect(() => parseImport(JSON.stringify({ terms: [], schemaVersion, tracker })))
+          .toThrow("invalid Course Tracker path");
+      }
+    },
+  );
+
+  it.each(["T2/NB3/Lectures", "Personal reading", " T2 / NB3 ", "T2//NB3"])(
+    "preserves the exact usable tracker path %s, including legacy formatting", path => {
+      const seed = makeSeed();
+      const tracker = [{ ...seed.tracker[0], path }];
+      expect(parseImport(JSON.stringify({ terms: [], tracker })).tracker).toEqual(tracker);
+    },
+  );
+
+  it("accepts omitted and empty legacy tracker collections", () => {
+    expect(parseImport(JSON.stringify({ terms: [] })).tracker).toEqual([]);
+    expect(parseImport(JSON.stringify({ terms: [], tracker: [] })).tracker).toEqual([]);
+  });
+
   it("continues to accept omitted legacy record collections and valid arrays", () => {
     expect(parseImport(JSON.stringify({ terms: [] })).tasks).toEqual([]);
     const seed = makeSeed();
