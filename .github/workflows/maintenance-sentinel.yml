@@ -1,0 +1,49 @@
+name: AXOM Maintenance Sentinel
+
+# Best-effort 30-minute lightweight test. Full source tests remain on AXOM Quality.
+on:
+  schedule:
+    - cron: '11,41 * * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/maintenance-sentinel.yml'
+      - 'scripts/repository-hygiene.mjs'
+      - 'scripts/repository-hygiene.test.mjs'
+      - '.gitignore'
+      - '.nvmrc'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: maintenance-sentinel-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repository-hygiene-unit:
+    name: Repository hygiene unit tests (not release acceptance)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Sparse checkout of versioned test dependencies
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .nvmrc
+            .gitignore
+            scripts/repository-hygiene.mjs
+            scripts/repository-hygiene.test.mjs
+      - name: Use repository Node version (no npm install)
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - name: Report exact source revision
+        run: |
+          git rev-parse HEAD
+          node --version
+      - name: Run actual repository-hygiene unit tests
+        run: node --test scripts/repository-hygiene.test.mjs

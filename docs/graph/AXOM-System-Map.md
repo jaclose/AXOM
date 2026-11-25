@@ -36,6 +36,7 @@ not feature specifications or an agent preload list. [Graph guide](README.md).
 | Governing product/design sources | [Product authority router](../product/README.md) |
 | Impact-appropriate checks and integration gates | [Testing](../operations/testing.md) |
 | Active protection and later cleanup | [Maintenance registry](../operations/repository-audit.md#maintenance-registry) |
+| Maintenance cadence, AI handoffs and hygiene test ownership | [Maintenance lead](../operations/maintenance-lead-v1.md) |
 | Current checkout handoff | [AI state](../AI_STATE.md) |
 
 Existing [architecture](../architecture/README.md), [feature](../features/README.md)
