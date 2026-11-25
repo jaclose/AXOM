@@ -137,6 +137,46 @@ describe("portable binary media backup", () => {
     expect(await (await readSourceOriginal(document.id, document.checksum))?.text()).toBe("first source");
   });
 
+
+  it.each([
+    ["active conflict", "conflict", "active"],
+    ["active reverse conflict", "reverse", "active"],
+    ["deferred conflict", "conflict", "deferred"],
+    ["deferred reverse conflict", "reverse", "deferred"],
+    ["missing checksum", "missing", "active"],
+    ["malformed checksum", "malformed", "active"],
+    ["identical claims", "same", "active"],
+    ["prefixed checksum", "prefix", "deferred"],
+    ["unrelated legacy document", "unrelated", "active"],
+  ])("validates all inbound original claims: %s", async (_, scenario, placement) => {
+    const { default: JSZip } = await import("jszip");
+    const original = new Blob(["inbound original"], { type: "text/plain" });
+    const document: SourceDocument = { id: "inbound", title: "Source", fileName: "source.txt", fileType: "text/plain", uploadedAt: "2026-10-13", rawText: "inbound original", sizeBytes: original.size, checksum: await sha256Hex(await original.arrayBuffer()), tags: [], linkedQuestionSetIds: [], libraryOnly: true };
+    const otherDigest = await sha256Hex("other edition");
+    const other = { ...document, checksum: scenario === "missing" ? undefined : scenario === "malformed" ? 123 : scenario === "prefix" ? `sha256:${document.checksum}` : scenario === "same" ? document.checksum : otherDigest, id: scenario === "unrelated" ? "unrelated" : document.id };
+    const ordered = scenario === "reverse" ? [document, other] : [other, document];
+    const manifest = {
+      _backupFormat: "axom-media-backup", _backupVersion: 2, media: [],
+      documents: placement === "active" ? ordered : [ordered[0]],
+      deferredContent: { documents: placement === "deferred" ? [ordered[1]] : [] },
+      originals: [{ file: "originals/0", documentId: document.id, sha256: document.checksum, byteSize: original.size, mimeType: original.type }],
+    };
+    const zip = new JSZip();
+    zip.file("workspace.json", JSON.stringify(manifest));
+    zip.file("originals/0", new Uint8Array(await original.arrayBuffer()), { createFolders: false });
+    const file = new File([await zip.generateAsync({ type: "arraybuffer" })], "inbound.zip");
+    const prior = { ...document, checksum: otherDigest };
+    await saveSourceOriginal(prior, new Blob(["other edition"], { type: "text/plain" }));
+    if (["same", "prefix", "unrelated"].includes(scenario)) {
+      const backup = await readPortableBackup(file);
+      expect(JSON.parse(backup.rawText)).toEqual(JSON.parse(JSON.stringify(manifest)));
+    } else {
+      await expect(readPortableBackup(file)).rejects.toThrow("invalid or missing original-file");
+    }
+    expect(await readSourceOriginal(document.id, document.checksum)).toBeUndefined();
+    expect(await (await readSourceOriginal(prior.id, prior.checksum))?.text()).toBe("other edition");
+  });
+
   it("round-trips verified originals, retries safely and preserves a newer local edition", async () => {
     const original = new Blob(["original source"], { type: "text/plain" });
     const document: SourceDocument = { id: "source", title: "Source", fileName: "source.txt", fileType: "text/plain", uploadedAt: "2026-10-13", rawText: "original source", sizeBytes: original.size, checksum: await sha256Hex(await original.arrayBuffer()), tags: [], linkedQuestionSetIds: [], libraryOnly: true };

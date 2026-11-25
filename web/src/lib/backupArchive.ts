@@ -190,17 +190,28 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
   const originals = manifest._backupVersion === 2 ? manifest.originals : [];
   if (!Array.isArray(originals)) throw new Error("The backup has no original-file manifest.");
   const ids = new Set<string>(), files = new Set<string>();
-  const documents = new Map([
+  // Every active or deferred claimant must identify the same bytes. A later
+  // document must not hide a conflicting or missing checksum on an earlier one.
+  const documentChecksums = new Map<string, string | null>();
+  for (const doc of [
     ...(Array.isArray(manifest.documents) ? manifest.documents : []),
     ...(Array.isArray(manifest.deferredContent?.documents) ? manifest.deferredContent.documents : []),
-  ].map(doc => [doc?.id, doc]));
+  ]) {
+    if (typeof doc?.id !== "string" || !doc.id) continue;
+    const checksum = typeof doc.checksum === "string" ? doc.checksum.replace(/^sha256:/, "") : null;
+    if (documentChecksums.has(doc.id) && documentChecksums.get(doc.id) !== checksum) {
+      documentChecksums.set(doc.id, null);
+    } else {
+      documentChecksums.set(doc.id, checksum);
+    }
+  }
   // Check integrity before the caller offers to adopt any workspace records.
   for (const item of originals) {
-    if (!item || typeof item.documentId !== "string" || ids.has(item.documentId) || files.has(item.file)
+    if (!item || typeof item.documentId !== "string" || !item.documentId || ids.has(item.documentId) || files.has(item.file)
       || !/^originals\/\d+$/.test(item.file) || !zip.file(item.file) || !/^[a-f0-9]{64}$/.test(item.sha256)
       || !Number.isSafeInteger(item.byteSize) || item.byteSize < 0 || item.byteSize > MAX_ORIGINAL_BYTES
       || typeof item.mimeType !== "string" || item.mimeType.length > 255
-      || documents.get(item.documentId)?.checksum?.replace(/^sha256:/, "") !== item.sha256) throw new Error("The backup contains an invalid or missing original-file record.");
+      || documentChecksums.get(item.documentId) !== item.sha256) throw new Error("The backup contains an invalid or missing original-file record.");
     const bytes = await zip.file(item.file)!.async("uint8array");
     assertRestoreScope();
     if (bytes.byteLength !== item.byteSize || await sha256Hex(bytes) !== item.sha256) throw new Error("An original file failed its backup integrity check. No workspace data has been changed.");
