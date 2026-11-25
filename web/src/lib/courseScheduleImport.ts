@@ -10,6 +10,8 @@ export interface ScheduleCandidate {
   kind: TrackerKind;
   /** Explicit source type or learner-reviewed category; never inferred from the default kind. */
   activity?: CourseActivity;
+  /** Compatibility with rows imported by the previous coarse-type parser. */
+  legacyIdentity?: { original: string; previous: string };
   sourceLine: number;
   sourceName?: string;
   selected: boolean;
@@ -73,13 +75,15 @@ export function reconcileScheduleDuplicates(
   // An identical "IMCQ 1" in a different course is not a duplicate.
   const scoped = scopePath === undefined ? existing : existing.filter((item) => trackerPathKey(item.path) === trackerPathKey(scopePath));
   const exact = new Set(scoped.map((item) => identity(item.label, item.kind, dateFrom(item.assessmentDate, item.note))));
+  const legacyExact = new Set(scoped.filter((item) => item.activity === undefined).map((item) => identity(item.label, item.kind, dateFrom(item.assessmentDate, item.note))));
   const labels = new Set(scoped.map((item) => normalize(item.label)));
   const seenExact = new Set<string>();
   const seenLabels = new Set<string>();
   return candidates.map((candidate) => {
     const key = identity(candidate.label, candidate.kind, candidate.date);
     const labelKey = normalize(candidate.label);
-    const duplicate = exact.has(key) || seenExact.has(key)
+    const matchesLegacy = candidate.legacyIdentity?.original === key && legacyExact.has(candidate.legacyIdentity.previous);
+    const duplicate = exact.has(key) || seenExact.has(key) || matchesLegacy
       ? "exact"
       : labels.has(labelKey) || seenLabels.has(labelKey) ? "likely" : "none";
     if (labelKey) { seenExact.add(key); seenLabels.add(labelKey); }
@@ -96,11 +100,23 @@ function parseDelimitedSchedule(text: string, existing: readonly TrackerItem[], 
     const body = date ? cells.slice(1).join(" ") : line;
     const lastIndex = cells.length - 1;
     const activity = date && cells.length >= 3 ? explicitScheduleActivity(cells[lastIndex]) : undefined;
-    const explicitKindIndex = cells.length >= 3 && (activity || KIND_MAP.some(([pattern]) => pattern.test(cells[lastIndex]))) ? lastIndex : -1;
+    const legacyKindIndex = cells.length >= 3 && KIND_MAP.some(([pattern]) => pattern.test(cells[lastIndex])) ? lastIndex : -1;
+    const explicitKindIndex = activity ? lastIndex : legacyKindIndex;
     const kind = activity ? TRACKER_KIND_FOR_ACTIVITY[activity] : detectKind(explicitKindIndex >= 0 ? cells[explicitKindIndex] : body);
     const label = date && explicitKindIndex >= 0 ? cells.slice(1, explicitKindIndex).join(" ").trim() : cleanLabel(body, kind);
     const problem = label ? undefined : `Line ${index + 1} has no usable title.`;
-    return [{ ...candidate(`${index + 1}`, label, kind, date, index + 1, sourceName, problem), ...(activity ? { activity } : {}) }];
+    // The old parser sometimes retained the type suffix in the title or used
+    // a different coarse kind. Preserve its same-destination duplicate hold
+    // for an unchanged source row rather than creating a second activity.
+    const previousKind = detectKind(legacyKindIndex >= 0 ? cells[legacyKindIndex] : body);
+    const previousLabel = date && legacyKindIndex >= 0 ? cells.slice(1, legacyKindIndex).join(" ").trim() : cleanLabel(body, previousKind);
+    const original = identity(label, kind, date);
+    const previous = identity(previousLabel, previousKind, date);
+    return [{
+      ...candidate(`${index + 1}`, label, kind, date, index + 1, sourceName, problem),
+      ...(activity ? { activity } : {}),
+      ...(activity && original !== previous && previousLabel ? { legacyIdentity: { original, previous } } : {}),
+    }];
   });
   return reconcileScheduleDuplicates(rows, existing, scopePath);
 }

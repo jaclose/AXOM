@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCourseSchedule, scheduleCandidatesToTracker } from "./courseScheduleImport";
+import { parseCourseSchedule, reconcileScheduleDuplicates, scheduleCandidatesToTracker } from "./courseScheduleImport";
 import type { TrackerItem } from "./types";
 import { absenceStanding, isAttended } from "./course-engine/weekView";
 
@@ -109,6 +109,26 @@ describe("course schedule intake", () => {
       { category: "esoft", missed: 1, allowed: 2, remaining: 1 },
     ]);
     expect(parseCourseSchedule("2026-08-14,Case discussion,Small Group", items, "schedule.csv", {}, path)[0]).toMatchObject({ duplicate: "exact", selected: false });
+  });
+
+  it("does not recreate old coarse-type rows when importing the same typed schedule", () => {
+    const path = "Term 1/BPM 500/FTM 1/Week 3";
+    const existing: TrackerItem[] = [
+      { id: "old-1", path, label: "Fluid balance Flipped", kind: "Lecture", passes: 2, ankiPasses: 1, yield: "high", updated: "2026-08-14", note: "Scheduled 2026-08-14" },
+      { id: "old-2", path, label: "Case discussion Small Group", kind: "Lecture", passes: 1, ankiPasses: 0, yield: "none", updated: "2026-08-14", note: "Scheduled 2026-08-14" },
+      { id: "old-3", path, label: "Weekly quiz ESoft", kind: "Assessment", passes: 1, ankiPasses: 0, yield: "none", updated: "2026-08-14", assessmentDate: "2026-08-14" },
+    ];
+    const before = JSON.stringify(existing);
+    const csv = "2026-08-14,Fluid balance,Flipped Lecture\n2026-08-14,Case discussion,Small Group\n2026-08-14,Weekly quiz,ESoft";
+    const rows = parseCourseSchedule(csv, existing, "schedule.csv", {}, path);
+    expect(rows.every((row) => row.duplicate === "exact" && !row.selected)).toBe(true);
+    expect(scheduleCandidatesToTracker(rows, path)).toEqual([]);
+    expect(JSON.stringify(existing)).toBe(before);
+    expect(parseCourseSchedule(csv, existing, "schedule.csv", {}, "Term 2/BPM 500/FTM 1/Week 3").every((row) => row.duplicate === "none" && row.selected)).toBe(true);
+    const [edited] = reconcileScheduleDuplicates([{ ...rows[0], label: "Different event", selected: true }], existing, path);
+    expect(edited).toMatchObject({ duplicate: "none", selected: true });
+    const [classified] = parseCourseSchedule(csv, [{ ...existing[0], activity: "lecture" }], "schedule.csv", {}, path);
+    expect(classified.duplicate).toBe("none");
   });
 
   it("requires explicit category review for ICS and ignores an incompatible category", () => {
