@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseCourseSchedule, scheduleCandidatesToTracker } from "./courseScheduleImport";
 import type { TrackerItem } from "./types";
+import { absenceStanding, isAttended } from "./course-engine/weekView";
 
 describe("course schedule intake", () => {
   it("extracts dated course work conservatively", () => {
@@ -73,6 +74,53 @@ describe("course schedule intake", () => {
     const [row] = parseCourseSchedule("BEGIN:VCALENDAR\nBEGIN:VEVENT\nDTSTART:20260814T080000\nEND:VEVENT\nEND:VCALENDAR", [], "broken.ics");
     expect(row).toMatchObject({ selected: false, sourceName: "broken.ics", problem: "Calendar event 1 has no title." });
     expect(scheduleCandidatesToTracker([row], "T1")).toEqual([]);
+  });
+
+  it("retains explicit CSV activity types without inventing attendance or policy", () => {
+    const rows = parseCourseSchedule([
+      "2026-08-14,Renal clearance,Lecture",
+      "2026-08-14,Fluid balance,Flipped Lecture",
+      "2026-08-14,Case discussion,Small Group",
+      "2026-08-14,Clinical quiz,IMCQ",
+      "2026-08-14,Weekly quiz,ESoft",
+      "2026-08-14,Independent practice,Practice questions",
+      "2026-08-14,Personal review",
+    ].join("\n"));
+    expect(rows.map(({ label, kind, activity }) => [label, kind, activity])).toEqual([
+      ["Renal clearance", "Lecture", "lecture"],
+      ["Fluid balance", "Lecture", "flipped-lecture"],
+      ["Case discussion", "Requirement", "small-group"],
+      ["Clinical quiz", "Assessment", "imcq"],
+      ["Weekly quiz", "Assessment", "esoft"],
+      ["Independent practice", "PQ", "pq"],
+      ["Personal review", "Review Loop", undefined],
+    ]);
+    const path = "Term 1/BPM 500/FTM 1/Week 3";
+    const items: TrackerItem[] = scheduleCandidatesToTracker(rows, path).map((row, index) => ({ ...row, id: String(index), updated: "2026-08-14" }));
+    expect(items.every((item) => item.attendance === undefined && item.passes === 0)).toBe(true);
+    expect(items.map((item) => isAttended(item.activity))).toEqual([true, true, true, true, true, false, false]);
+    const term = { name: "Term 1", absenceAllowances: { lecture: 3, "small-group": 2, imcq: 2, esoft: 2 } };
+    expect(absenceStanding(items, term).every((entry) => entry.missed === 0)).toBe(true);
+    const missed = items.map((item) => isAttended(item.activity) ? { ...item, attendance: "missed" as const } : item);
+    expect(absenceStanding(missed, term)).toEqual([
+      { category: "lecture", missed: 2, allowed: 3, remaining: 1 },
+      { category: "small-group", missed: 1, allowed: 2, remaining: 1 },
+      { category: "imcq", missed: 1, allowed: 2, remaining: 1 },
+      { category: "esoft", missed: 1, allowed: 2, remaining: 1 },
+    ]);
+    expect(parseCourseSchedule("2026-08-14,Case discussion,Small Group", items, "schedule.csv", {}, path)[0]).toMatchObject({ duplicate: "exact", selected: false });
+  });
+
+  it("requires explicit category review for ICS and ignores an incompatible category", () => {
+    const rows = parseCourseSchedule([
+      "BEGIN:VCALENDAR", "BEGIN:VEVENT", "DTSTART:20260814T080000", "SUMMARY:IMCQ 2", "END:VEVENT",
+      "BEGIN:VEVENT", "DTSTART:20260815T080000", "SUMMARY:Lecture cancellation", "END:VEVENT", "END:VCALENDAR",
+    ].join("\r\n"));
+    expect(rows.every((row) => row.activity === undefined)).toBe(true);
+    const path = "Term 1/BPM 500/FTM 1/Week 3";
+    expect(scheduleCandidatesToTracker([{ ...rows[0], activity: "imcq" }, { ...rows[1], activity: "esoft" }], path)
+      .map((row) => row.activity)).toEqual(["imcq", undefined]);
+    expect(scheduleCandidatesToTracker(rows, path).every((row) => row.activity === undefined)).toBe(true);
   });
 
   it("keeps a 2,000-row intake linear enough for an ordinary browser interaction", () => {

@@ -1,12 +1,15 @@
 import { isIcsCalendar, parseIcsEvents, type IcsParseOptions } from "./icsCalendar";
 import type { TrackerItem, TrackerKind } from "./types";
 import { trackerPathKey } from "./pathUtils";
+import { COURSE_ACTIVITIES, COURSE_ACTIVITY_LABEL, TRACKER_KIND_FOR_ACTIVITY, isCourseActivity, type CourseActivity } from "./course-engine/activity";
 
 export interface ScheduleCandidate {
   id: string;
   date?: string;
   label: string;
   kind: TrackerKind;
+  /** Explicit source type or learner-reviewed category; never inferred from the default kind. */
+  activity?: CourseActivity;
   sourceLine: number;
   sourceName?: string;
   selected: boolean;
@@ -52,6 +55,8 @@ export function scheduleCandidatesToTracker(
       path,
       label: candidate.label.trim(),
       kind: candidate.kind,
+      ...(isCourseActivity(candidate.activity) && TRACKER_KIND_FOR_ACTIVITY[candidate.activity] === candidate.kind
+        ? { activity: candidate.activity } : {}),
       passes: 0,
       ankiPasses: 0,
       yield: "none",
@@ -90,11 +95,12 @@ function parseDelimitedSchedule(text: string, existing: readonly TrackerItem[], 
     const date = parseDate(cells[0]);
     const body = date ? cells.slice(1).join(" ") : line;
     const lastIndex = cells.length - 1;
-    const explicitKindIndex = cells.length >= 3 && KIND_MAP.some(([pattern]) => pattern.test(cells[lastIndex])) ? lastIndex : -1;
-    const kind = detectKind(explicitKindIndex >= 0 ? cells[explicitKindIndex] : body);
+    const activity = date && cells.length >= 3 ? explicitScheduleActivity(cells[lastIndex]) : undefined;
+    const explicitKindIndex = cells.length >= 3 && (activity || KIND_MAP.some(([pattern]) => pattern.test(cells[lastIndex]))) ? lastIndex : -1;
+    const kind = activity ? TRACKER_KIND_FOR_ACTIVITY[activity] : detectKind(explicitKindIndex >= 0 ? cells[explicitKindIndex] : body);
     const label = date && explicitKindIndex >= 0 ? cells.slice(1, explicitKindIndex).join(" ").trim() : cleanLabel(body, kind);
     const problem = label ? undefined : `Line ${index + 1} has no usable title.`;
-    return [candidate(`${index + 1}`, label, kind, date, index + 1, sourceName, problem)];
+    return [{ ...candidate(`${index + 1}`, label, kind, date, index + 1, sourceName, problem), ...(activity ? { activity } : {}) }];
   });
   return reconcileScheduleDuplicates(rows, existing, scopePath);
 }
@@ -138,6 +144,14 @@ function splitRow(line: string): string[] {
   }
   cells.push(value.trim());
   return cells;
+}
+
+// Only an exact, separately supplied type cell supplies a category. An ICS
+// title or free-form label may describe personal study, a cancellation or
+// a reminder. Those rows stay unclassified until the learner chooses.
+function explicitScheduleActivity(value: string): CourseActivity | undefined {
+  const type = normalize(value);
+  return COURSE_ACTIVITIES.find((activity) => normalize(activity) === type || normalize(COURSE_ACTIVITY_LABEL[activity]) === type);
 }
 
 function detectKind(value: string): TrackerKind { return KIND_MAP.find(([pattern]) => pattern.test(value))?.[1] ?? "Lecture"; }

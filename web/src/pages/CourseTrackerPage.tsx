@@ -43,6 +43,7 @@ import { SGU_CURRICULUM } from "../lib/curricula";
 import { buildCurriculumCoverage, type CurriculumCoverage } from "../lib/course-engine/curriculumCoverage";
 import { buildAcademicTemplateCatalog } from "../lib/course-engine/academicCatalog";
 import { canonicalModuleKey } from "../lib/course-engine/vocabulary";
+import { COURSE_ACTIVITIES, COURSE_ACTIVITY_LABEL, TRACKER_KIND_FOR_ACTIVITY, isCourseActivity } from "../lib/course-engine/activity";
 import { launchCourseQuiz } from "../lib/course-engine/quizLaunch";
 import { verifyCollectionForCourse } from "../lib/course-engine/verifiedPracticeLinks";
 import { legacyCourseFilingProposals, moveTrackerCourseFiling, type CourseFilingProposal } from "../lib/course-engine/courseFiling";
@@ -762,6 +763,7 @@ function ScheduleImportModal({ defaultPath, onClose }: { defaultPath: string; on
       <div aria-live="polite" className="sr-only">{busy ? "Reading schedule files" : review.length ? `${counts.ready} ready, ${counts.review} need review, ${counts.existing} already exist, ${counts.invalid} invalid` : ""}</div>
       {errors.length > 0 && <div className="schedule-import-errors" role="alert"><b>Some files could not be read. Your other files are still available.</b>{errors.map((error) => <span key={error}>{error}</span>)}</div>}
       {review.length > 0 && <>
+        <p className="sub">Check the course activity for each row. Unassigned items do not track attendance. Choose an activity only when it applies to your course; importing does not mark any absence or set an official allowance.</p>
         <div className="schedule-review-summary" aria-label="Schedule import summary">
           <b>{counts.ready} ready</b><span>{counts.review} need review</span><span>{counts.existing} already exist</span><span>{counts.invalid} invalid</span>
           <GButton size="tiny" onClick={() => setReview((current) => current.map((row) => ({ ...row, selected: !row.problem && row.duplicate !== "exact" })))}>Select importable</GButton>
@@ -773,7 +775,17 @@ function ScheduleImportModal({ defaultPath, onClose }: { defaultPath: string; on
             <div className="schedule-review-fields">
               <Field label="Date" type="date" value={row.date ?? ""} onChange={(event) => updateRow(index, { date: event.target.value || undefined })} />
               <Field label="Title" value={row.label} onChange={(event) => updateRow(index, { label: event.target.value, problem: event.target.value.trim() ? undefined : "A title is required." })} />
-              <SelectField label="Type" value={row.kind} onChange={(event) => updateRow(index, { kind: event.target.value as TrackerKind })}>{KINDS.map((kind) => <option key={kind}>{kind}</option>)}</SelectField>
+              <SelectField label="Type" value={row.kind} onChange={(event) => {
+                const kind = event.target.value as TrackerKind;
+                updateRow(index, { kind, activity: row.activity && TRACKER_KIND_FOR_ACTIVITY[row.activity] === kind ? row.activity : undefined });
+              }}>{KINDS.map((kind) => <option key={kind}>{kind}</option>)}</SelectField>
+              <SelectField label="Course activity" value={row.activity ?? ""} onChange={(event) => {
+                const activity = event.target.value;
+                updateRow(index, isCourseActivity(activity) ? { activity, kind: TRACKER_KIND_FOR_ACTIVITY[activity] } : { activity: undefined });
+              }}>
+                <option value="">Unassigned</option>
+                {COURSE_ACTIVITIES.map((activity) => <option key={activity} value={activity}>{COURSE_ACTIVITY_LABEL[activity]}</option>)}
+              </SelectField>
             </div>
             <small className={`schedule-row-state schedule-row-state--${row.problem ? "invalid" : row.duplicate}`}>
               {row.problem ?? (row.duplicate === "exact" ? "Already exists" : row.duplicate === "likely" ? "Possible duplicate — compare before importing" : "Ready")}
