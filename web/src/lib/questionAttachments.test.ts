@@ -492,8 +492,8 @@ describe("portable backup payloads", () => {
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
       });
-      const raw = async (mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest<unknown>) =>
-        new Promise<unknown>((resolve, reject) => {
+      const raw = async <T>(mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest<T>) =>
+        new Promise<T>((resolve, reject) => {
           const tx = db.transaction(ATTACHMENT_STORE_NAME, mode);
           const request = action(tx.objectStore(ATTACHMENT_STORE_NAME));
           tx.oncomplete = () => resolve(request.result);
