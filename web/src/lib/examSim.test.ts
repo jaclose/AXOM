@@ -295,6 +295,48 @@ describe("explicit simulation recovery", () => {
     }
   });
 
+  it.each(["none", "scoped", "pointer", "legacy"] as const)("requires fresh-session discovery on explicit exit (%s refusal)", (copy) => {
+    const pointerKey = `${EXAM_SIM_SUSPENDED_KEY}:run-id`;
+    const target = copy === "scoped" ? scopedKey : copy === "pointer" ? pointerKey : EXAM_SIM_SUSPENDED_KEY;
+    const set = Storage.prototype.setItem;
+    const refusal = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key: string, value: string) {
+      if (copy !== "none" && this === (copy === "pointer" ? sessionStorage : localStorage) && key === target) return;
+      set.call(this, key, value);
+    });
+    const options = { requireFreshSessionDiscovery: true };
+    try {
+      if (copy === "legacy") {
+        expect(() => writeSuspendedBlock(block, options)).toThrow(/reopen in a new tab/);
+        expect(localStorage.getItem(scopedKey)).toBe(JSON.stringify(block));
+        expect(inspectSuspendedBlock()).toEqual({ status: "present", block });
+        expect(inspectSuspendedBlock(false)).toEqual({ status: "unreadable" });
+        expect(sessionStorage.getItem(pointerKey)).toBe(block.runId);
+      } else {
+        writeSuspendedBlock(block, options);
+        expect(inspectSuspendedBlock(false)).toEqual({ status: "present", block });
+      }
+    } finally {
+      refusal.mockRestore();
+    }
+    writeSuspendedBlock(block, options);
+    sessionStorage.clear();
+    expect(inspectSuspendedBlock()).toEqual({ status: "present", block });
+  });
+
+  it("does not acknowledge a second run as durably discoverable behind a distinct legacy run", () => {
+    const other = { ...block, runId: "other", notes: "unrelated" };
+    const options = { requireFreshSessionDiscovery: true };
+    writeSuspendedBlock(other, options);
+    sessionStorage.clear();
+    expect(() => writeSuspendedBlock(block, options)).toThrow(/reopen in a new tab/);
+    expect(inspectSuspendedBlock()).toEqual({ status: "present", block });
+    expect(localStorage.getItem(scopedKey)).toBe(JSON.stringify(block));
+    expect(localStorage.getItem(EXAM_SIM_SUSPENDED_KEY)).toBe(JSON.stringify(other));
+    expect(localStorage.getItem(`${EXAM_SIM_SUSPENDED_KEY}:run:other`)).toBe(JSON.stringify(other));
+    sessionStorage.clear();
+    expect(inspectSuspendedBlock()).toEqual({ status: "present", block: other });
+  });
+
   it.each([false, true])("does not acknowledge a new run behind a refused stale pointer (legacy exists=%s)", (withLegacy) => {
     const other = { ...block, runId: "other", notes: "unrelated" };
     const otherKey = `${EXAM_SIM_SUSPENDED_KEY}:run:other`;

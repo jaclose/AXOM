@@ -251,9 +251,9 @@ function sameSuspendedSnapshot(left: SuspendedBlock, right: SuspendedBlock): boo
 
 /** Setup actions must distinguish verified absence from unavailable or conflicting
  * recovery. Do not silently select orphaned runs or rewrite recovery on read. */
-export function inspectSuspendedBlock(): SuspendedRecoveryRead {
+export function inspectSuspendedBlock(useSessionPointer = true): SuspendedRecoveryRead {
   try {
-    const remembered = sessionStorage.getItem(EXAM_SIM_RUN_ID_KEY);
+    const remembered = useSessionPointer ? sessionStorage.getItem(EXAM_SIM_RUN_ID_KEY) : null;
     const scoped = remembered ? readCheckedSuspendedCopy(suspendedRunKey(remembered)) : undefined;
     if (scoped && scoped.runId !== remembered) return { status: "unreadable" };
     const legacy = readCheckedSuspendedCopy(EXAM_SIM_SUSPENDED_KEY);
@@ -321,7 +321,10 @@ export function discardSuspendedBlock(expected: SuspendedBlock): boolean {
   }
 }
 
-export function writeSuspendedBlock(block: SuspendedBlock | null): void {
+export function writeSuspendedBlock(
+  block: SuspendedBlock | null,
+  { requireFreshSessionDiscovery = false }: { requireFreshSessionDiscovery?: boolean } = {},
+): void {
   if (!block) {
     try {
       const remembered = sessionStorage.getItem(EXAM_SIM_RUN_ID_KEY);
@@ -339,13 +342,20 @@ export function writeSuspendedBlock(block: SuspendedBlock | null): void {
   if (!validated) {
     throw new Error("This exam recovery contains invalid data. Keep this window open; the previous recovery has not been changed.");
   }
+  // A user-initiated Save & exit must be discoverable even after this tab
+  // closes. Interim resume/finalization still permits session-local recovery.
+  // Do not clear or rewrite the session pointer to simulate a fresh session.
+  const discoverable = () => {
+    const current = inspectSuspendedBlock();
+    if (current.status !== "present" || !sameSuspendedSnapshot(current.block, validated)) return false;
+    if (!requireFreshSessionDiscovery) return true;
+    const fresh = inspectSuspendedBlock(false);
+    return fresh.status === "present" && sameSuspendedSnapshot(fresh.block, validated);
+  };
   try {
     if (!validated.runId) {
       localStorage.setItem(EXAM_SIM_SUSPENDED_KEY, serialized);
-      if (localStorage.getItem(EXAM_SIM_SUSPENDED_KEY) === serialized) {
-        const recovery = inspectSuspendedBlock();
-        if (recovery.status === "present" && sameSuspendedSnapshot(recovery.block, validated)) return;
-      }
+      if (localStorage.getItem(EXAM_SIM_SUSPENDED_KEY) === serialized && discoverable()) return;
       throw new Error("The browser did not retain the suspended exam.");
     }
 
@@ -374,13 +384,12 @@ export function writeSuspendedBlock(block: SuspendedBlock | null): void {
     // A retained copy is not sufficient: setup must discover this exact snapshot.
     // A stale pointer or divergent mirror can otherwise acknowledge an exam
     // that the canonical reader will reject. Leave both copies for safe retry.
-    if (legacySaved || (scopedSaved && pointerSaved)) {
-      const recovery = inspectSuspendedBlock();
-      if (recovery.status === "present" && sameSuspendedSnapshot(recovery.block, validated)) return;
-    }
+    if ((legacySaved || (scopedSaved && pointerSaved)) && discoverable()) return;
     throw new Error("The browser did not retain the suspended exam.");
   } catch {
-    throw new Error("Your exam could not be saved. Keep this window open and try again, or finish the block to save your answers.");
+    throw new Error(requireFreshSessionDiscovery
+      ? "AXOM could not verify that this exam can reopen in a new tab. Keep this window open and try again, or finish the block to save your answers."
+      : "Your exam could not be saved. Keep this window open and try again, or finish the block to save your answers.");
   }
 }
 

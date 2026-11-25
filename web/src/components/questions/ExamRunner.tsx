@@ -1181,7 +1181,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     if (!simRun) throw new Error("This exam run is no longer open.");
     const recovery = { ...block, runId: simRun.runId, sourceEvidenceV1: simRun.sourceEvidenceV1 };
     try {
-      writeSuspendedBlock(recovery);
+      writeSuspendedBlock(recovery, { requireFreshSessionDiscovery: true });
     } catch (error) {
       pushToast({ title: "Exam is still open", body: error instanceof Error ? error.message : "Could not save the exam. Try again.", tone: "warn" });
       throw error;

@@ -77,6 +77,37 @@ describe("ExamRunner simulation", () => {
     expect((screen.getAllByRole("radio", { name: "A. Alpha" })[0] as HTMLInputElement).checked).toBe(true);
   });
 
+  it("keeps a first suspension open if only its tab-local recovery is discoverable", () => {
+    sessionStorage.clear();
+    const onClose = vi.fn();
+    render(<ExamRunner mode="exam" onClose={onClose} />);
+    fireEvent.click(screen.getByRole("radio", { name: /USMLE \/ NBME/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Start exam block/ }));
+    fireEvent.click(screen.getAllByRole("radio", { name: "B. Beta" })[0]);
+    const set = Storage.prototype.setItem;
+    const refusal = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key: string, value: string) {
+      if (this === localStorage && key === EXAM_SIM_SUSPENDED_KEY) return;
+      set.call(this, key, value);
+    });
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Save & exit" }));
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByRole("dialog", { name: /simulation/ })).toBeTruthy();
+      expect(inspectSuspendedBlock()).toMatchObject({ status: "present", block: { items: expect.any(Object) } });
+      expect(inspectSuspendedBlock(false)).toEqual({ status: "unreadable" });
+      expect(useStore.getState().quizSessions).toHaveLength(0);
+    } finally {
+      refusal.mockRestore();
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Save & exit" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    sessionStorage.clear();
+    const reopened = inspectSuspendedBlock();
+    expect(reopened.status).toBe("present");
+    if (reopened.status !== "present") throw new Error("Expected fresh-session recovery");
+    expect(Object.values(reopened.block.items).some(item => item.answerKey === "B")).toBe(true);
+  });
+
   it("retains final recovery and retries one stable run without duplicate attempts", async () => {
     const flush = vi.spyOn(localVault, "flushLocalVaultWrites")
       .mockRejectedValueOnce(new Error("Synthetic vault refusal"))
