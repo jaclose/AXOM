@@ -561,7 +561,7 @@ export interface QuestionAttachmentExportPayload extends QuestionImageAttachment
 export interface StagedQuestionAttachmentRestore {
   restored: number;
   skipped: number;
-  /** Remove only blob keys this restore inserted. Existing bytes are immutable. */
+  /** Compatibility hook: abandonment retains staged bytes; references may already be durable in another tab. */
   rollback: () => Promise<void>;
 }
 
@@ -632,7 +632,7 @@ function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
  * Stage portable-backup images before adopting their workspace metadata.
  * Blob keys are immutable identities here: matching existing bytes are reused,
  * while a different payload for an occupied key aborts without overwriting it.
- * Rollback is consequently bounded to keys inserted by this exact operation.
+ * Staged bytes are retained on failure or abandonment: another workspace may reference them.
  */
 export async function stageQuestionAttachmentPayloads(
   payloads: readonly QuestionAttachmentExportPayload[],
@@ -647,77 +647,68 @@ export async function stageQuestionAttachmentPayloads(
     }
   }
 
-  const inserted = new Map<string, QuestionAttachmentBlobRecord>();
   let restored = 0;
   let skipped = 0;
-
-  const rollback = async () => {
-    const failures: string[] = [];
-    for (const [blobKey, staged] of inserted) {
-      try {
-        const current = await getQuestionAttachmentBlob(blobKey, { localOnly: true, scope });
-        if (!current) continue;
-        const [currentBytes, stagedBytes] = await Promise.all([
-          current.blob.arrayBuffer().then(buffer => new Uint8Array(buffer)),
-          staged.blob.arrayBuffer().then(buffer => new Uint8Array(buffer)),
-        ]);
-        if (current.mimeType !== staged.mimeType || current.questionId !== staged.questionId
-          || current.updatedAt !== staged.updatedAt || !equalBytes(currentBytes, stagedBytes)) {
-          failures.push(blobKey);
-          continue;
-        }
-        await deleteQuestionAttachmentBlobs([blobKey], { scope });
-      } catch {
-        failures.push(blobKey);
-      }
-    }
-    if (failures.length) {
-      throw new Error(`AXOM could not confirm cleanup for ${failures.length} staged image attachment${failures.length === 1 ? "" : "s"}.`);
-    }
-  };
-
-  try {
-    for (const payload of payloads) {
-      const target = surviving.get(payload.blobKey);
-      if (!target) { skipped += 1; continue; }
-      const bytes = base64ToBytes(payload.base64);
-      if (!bytes || bytes.byteLength === 0 || bytes.byteLength > MAX_QUESTION_ATTACHMENT_BYTES
-        || bytes.byteLength !== payload.byteSize || bytes.byteLength !== target.byteSize
-        || payload.mimeType !== target.mimeType) {
-        throw new Error("A backup image failed validation. No existing image was overwritten.");
-      }
-
-      const existing = await getQuestionAttachmentBlob(payload.blobKey, { localOnly: true, scope });
-      if (existing) {
-        const existingBytes = new Uint8Array(await existing.blob.arrayBuffer());
-        if (existing.mimeType !== payload.mimeType || !equalBytes(existingBytes, bytes)) {
-          throw new Error("A backup image uses an existing storage key with different bytes. No existing image was overwritten.");
-        }
-        skipped += 1;
-        continue;
-      }
-
-      const record: QuestionAttachmentBlobRecord = {
-        blob: new Blob([bytes.buffer as ArrayBuffer], { type: payload.mimeType }),
-        mimeType: payload.mimeType,
-        byteSize: bytes.byteLength,
-        questionId: target.questionId,
-        updatedAt: payload.updatedAt,
-      };
-      await putQuestionAttachmentBlob(payload.blobKey, record, { scope });
-      inserted.set(payload.blobKey, record);
-      restored += 1;
+  const verifyExisting = async (existing: QuestionAttachmentBlobRecord | undefined, bytes: Uint8Array, mimeType: string) => {
+    if (!existing || existing.mimeType !== mimeType || existing.byteSize !== bytes.byteLength
+      || existing.blob?.size !== bytes.byteLength
+      || !equalBytes(new Uint8Array(await existing.blob.arrayBuffer()), bytes)) {
+      throw new Error("A backup image uses an existing storage key with different bytes or unreadable data. No existing image was overwritten.");
     }
     assertScope(scope);
-    return { restored, skipped, rollback };
-  } catch (error) {
-    try {
-      await rollback();
-    } catch (rollbackError) {
-      throw new Error(`Image staging failed, and cleanup could not be confirmed after ${error instanceof Error ? error.message : "an image write failed"}. ${rollbackError instanceof Error ? rollbackError.message : "Keep this tab open and retry."}`, { cause: rollbackError });
+  };
+  // For add receipts inspect the actual scoped row, not a legacy fallback.
+  const readScoped = (blobKey: string) => withAttachmentStore<QuestionAttachmentBlobRecord | undefined>("readonly", (store) => {
+    assertScope(scope);
+    return store.get(scopedBlobKey(scope, blobKey));
+  });
+
+  for (const payload of payloads) {
+    const target = surviving.get(payload.blobKey);
+    if (!target) { skipped += 1; continue; }
+    const bytes = base64ToBytes(payload.base64);
+    if (!bytes || bytes.byteLength === 0 || bytes.byteLength > MAX_QUESTION_ATTACHMENT_BYTES
+      || bytes.byteLength !== payload.byteSize || bytes.byteLength !== target.byteSize
+      || payload.mimeType !== target.mimeType) {
+      throw new Error("A backup image failed validation. No existing image was overwritten.");
     }
-    throw error;
+
+    const existing = await getQuestionAttachmentBlob(payload.blobKey, { localOnly: true, scope });
+    if (existing) {
+      await verifyExisting(existing, bytes, payload.mimeType);
+      skipped += 1;
+      continue;
+    }
+
+    const record: QuestionAttachmentBlobRecord = {
+      blob: new Blob([bytes.buffer as ArrayBuffer], { type: payload.mimeType }),
+      mimeType: payload.mimeType,
+      byteSize: bytes.byteLength,
+      questionId: target.questionId,
+      updatedAt: payload.updatedAt,
+    };
+    try {
+      await withAttachmentStore("readwrite", (store) => {
+        assertScope(scope);
+        return store.add(record, scopedBlobKey(scope, payload.blobKey));
+      });
+    } catch (error) {
+      if (attachmentErrorName(error) !== "ConstraintError") throw error;
+      // A competing tab may have added this key after our initial read.
+      // Never replace the winner, even when its bytes cannot be verified.
+      assertScope(scope);
+      await verifyExisting(await readScoped(payload.blobKey), bytes, payload.mimeType);
+      skipped += 1;
+      continue;
+    }
+    assertScope(scope);
+    await verifyExisting(await readScoped(payload.blobKey), bytes, payload.mimeType);
+    restored += 1;
   }
+  assertScope(scope);
+  // A concurrent workspace may already reference any staged key. Neither
+  // failure nor abandonment proves that deleting these bytes is safe.
+  return { restored, skipped, rollback: () => Promise.resolve() };
 }
 
 /** Write imported payload bytes for every attachment the merged/restored state
