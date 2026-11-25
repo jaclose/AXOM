@@ -160,10 +160,61 @@ describe("Suspended exam source recovery", () => {
     try {
       fireEvent.click(screen.getByRole("button", { name: /Start exam block/ }));
       expect(screen.queryByRole("dialog", { name: /simulation/ })).toBeNull();
+      expect(screen.getByRole("alert").textContent).toContain("Suspended exam recovery needs attention");
+      expect((screen.getByRole("button", { name: /Start exam block/ }) as HTMLButtonElement).disabled).toBe(true);
     } finally {
       read?.mockRestore();
     }
-    if (kind === "malformed") expect(localStorage.getItem(EXAM_SIM_SUSPENDED_KEY)).toBe("{broken");
+    if (kind === "malformed") {
+      expect(localStorage.getItem(EXAM_SIM_SUSPENDED_KEY)).toBe("{broken");
+      // External repair in this fixture only.
+      localStorage.removeItem(EXAM_SIM_SUSPENDED_KEY);
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Retry recovery check" }));
+    expect(screen.queryByText("Suspended exam recovery needs attention")).toBeNull();
+    expect((screen.getByRole("button", { name: /Start exam block/ }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByRole("dialog", { name: /simulation/ })).toBeNull();
+  });
+
+  it("shows unreadable recovery on initial setup and only enables simulation after a verified retry", () => {
+    localStorage.setItem(EXAM_SIM_SUSPENDED_KEY, "{broken");
+    render(<ExamRunner mode="exam" onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("radio", { name: /USMLE \/ NBME/ }));
+    const start = screen.getByRole("button", { name: /Start exam block/ }) as HTMLButtonElement;
+    expect(screen.getByRole("alert").textContent).toContain("Suspended exam recovery needs attention");
+    expect(start.disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Discard" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry recovery check" }));
+    expect(start.disabled).toBe(true);
+    expect(localStorage.getItem(EXAM_SIM_SUSPENDED_KEY)).toBe("{broken");
+
+    const restored = savedBlock("repaired-run");
+    // Simulate external recovery repair, not a UI discard.
+    localStorage.removeItem(EXAM_SIM_SUSPENDED_KEY);
+    writeSuspendedBlock(restored);
+    fireEvent.click(screen.getByRole("button", { name: "Retry recovery check" }));
+    expect(screen.queryByText("Suspended exam recovery needs attention")).toBeNull();
+    expect(start.disabled).toBe(false);
+    expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: /simulation/ })).toBeNull();
+    expect(readSuspendedBlock()).toEqual(restored);
+  });
+
+  it("retains orphan recovery bytes and permits unrelated native practice", () => {
+    const orphan = savedBlock("orphan-retry");
+    const key = `${EXAM_SIM_SUSPENDED_KEY}:run:orphan-retry`;
+    localStorage.setItem(key, JSON.stringify(orphan));
+    render(<ExamRunner mode="exam" onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("radio", { name: /USMLE \/ NBME/ }));
+    const start = screen.getByRole("button", { name: /Start exam block/ }) as HTMLButtonElement;
+    expect(start.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Retry recovery check" }));
+    expect(start.disabled).toBe(true);
+    expect(localStorage.getItem(key)).toBe(JSON.stringify(orphan));
+    fireEvent.click(screen.getByRole("radio", { name: /AXOM native/ }));
+    expect(start.disabled).toBe(false);
+    expect(screen.queryByRole("button", { name: "Discard" })).toBeNull();
+    expect(localStorage.getItem(key)).toBe(JSON.stringify(orphan));
   });
 
   it.each(["same-run", "different-run"] as const)("requires renewed consent to resume a changed snapshot (%s)", (kind) => {
