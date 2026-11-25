@@ -673,12 +673,27 @@ export async function stageQuestionAttachmentPayloads(
       throw new Error("A backup image failed validation. No existing image was overwritten.");
     }
 
-    const existing = await getQuestionAttachmentBlob(payload.blobKey, { localOnly: true, scope });
-    if (existing) {
+    const existing = await readScoped(payload.blobKey);
+    assertScope(scope);
+    if (existing !== undefined) {
       await verifyExisting(existing, bytes, payload.mimeType);
       skipped += 1;
       continue;
     }
+
+    // Legacy bytes may be shadowed by a concurrent scoped insertion while
+    // resolving ownership or decoding the blob. Verify the legacy record,
+    // then promote via the same atomic add/readback path as a new image.
+    if (await readLegacyLocalBinaryOwner() === scope.owner) {
+      assertScope(scope);
+      const legacy = await withAttachmentStore<QuestionAttachmentBlobRecord | undefined>("readonly", (store) => {
+        assertScope(scope);
+        return store.get(payload.blobKey);
+      });
+      assertScope(scope);
+      if (legacy !== undefined) await verifyExisting(legacy, bytes, payload.mimeType);
+    }
+    assertScope(scope);
 
     const record: QuestionAttachmentBlobRecord = {
       blob: new Blob([bytes.buffer as ArrayBuffer], { type: payload.mimeType }),
