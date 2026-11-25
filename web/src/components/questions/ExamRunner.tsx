@@ -1104,8 +1104,12 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     const checkpoint = getVaultWriteCheckpoint();
     try {
       s.commitQuizRun({
+        // Simulation starts with ready questions; an undefined verdict here means
+        // the original source evidence could not be verified. Keep that answer
+        // (and its flag) in the session, not in a replacement question's mastery,
+        // attempt history or review schedule. Valid flag-only attempts still project.
         attempts: validatedAnswers
-          .filter((a) => a.answerKey || a.flagged)
+          .filter((a) => a.correct !== undefined && (a.answerKey || a.flagged))
           .map((a) => ({ questionId: a.questionId, attempt: attemptFor(a, {}, "simulation", result.id) })),
         session: result,
       });

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { QuestionRecord } from "../../lib/questions";
+import { applyAttempt, type QuestionRecord } from "../../lib/questions";
 import { makeSeed } from "../../lib/seed";
 import { useStore } from "../../lib/store";
 import { readSuspendedBlock, writeSuspendedBlock } from "../../lib/examSim";
@@ -257,6 +257,12 @@ describe("Simulation preserves original source evidence across recovery", () => 
         fireEvent.click(screen.getByRole("button", { name: "Resume" }));
         expect(readSuspendedBlock()?.sourceEvidenceV1).toEqual({});
       }
+      // A valid attempt against the live revision must survive stale recovery.
+      const current = useStore.getState().questions[0];
+      const prior = applyAttempt(current, {
+        answerKey: current.correctKey, status: "correct", mode: "tutor", quizSessionId: "prior-current-version",
+      }, new Date("2026-11-23T12:00:00Z"));
+      await act(async () => { useStore.setState({ questions: [prior] }); });
       const dialog = screen.getByRole("dialog", { name: /UWorld-style.*simulation/ });
       if (mode === "tutor") {
         const feedback = within(dialog).getByRole("region", { name: "Explanation" });
@@ -272,6 +278,14 @@ describe("Simulation preserves original source evidence across recovery", () => 
       expect(session.answers[0].answerKey).toBe("B");
       expect(session.answers[0].correct).toBe(change === "unchanged" ? true : undefined);
       expect(session.score).toMatchObject({ scored: change === "unchanged" ? 1 : 0, total: 1 });
+      const storedQuestion = useStore.getState().questions[0];
+      if (change === "unchanged") {
+        expect(storedQuestion.attempts).toHaveLength(2);
+        expect(storedQuestion.attempts[0]).toEqual(prior.attempts[0]);
+        expect(storedQuestion.attempts[1]).toMatchObject({ quizSessionId: session.id, status: "correct", answerKey: "B" });
+      } else {
+        expect(storedQuestion).toEqual(prior);
+      }
       expect(readSuspendedBlock()).toBeUndefined();
       fireEvent.click(screen.getByRole("button", { name: "Review in the exam interface" }));
       const explanation = screen.getByRole("region", { name: "Explanation" });
@@ -282,6 +296,64 @@ describe("Simulation preserves original source evidence across recovery", () => 
       expect(useStore.getState().quizSessions[0]).toEqual(session);
     },
   );
+});
+
+describe("Simulation history is distinct from current-question attempts", () => {
+  const cases = [
+    ["valid", true], ["valid", false], ["stale", true], ["stale", false],
+  ] as const;
+  it.each(cases)("preserves flag-only and unanswered history without invalid attribution (%s, flagged=%s)", async (evidence, flagged) => {
+    const original = q("q1");
+    await act(async () => { useStore.setState({ questions: [original] }); });
+    render(<ExamRunner mode="exam" onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("radio", { name: /UWorld-style/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Start exam block/ }));
+    const sim = screen.getByRole("dialog", { name: "UWorld-style exam simulation" });
+    if (flagged) fireEvent.click(within(sim).getByRole("button", { name: "Mark item for review" }));
+
+    const current = evidence === "stale" ? { ...original, stem: "Replacement stem" } : original;
+    const prior = applyAttempt(current, {
+      answerKey: "B", status: "correct", mode: "tutor", quizSessionId: "prior-current-version",
+    }, new Date("2026-11-23T12:00:00Z"));
+    await act(async () => { useStore.setState({ questions: [prior] }); });
+
+    // Exercise retry of an evidence-invalid flagged row after the first save was
+    // not acknowledged. The session stays recoverable; no attempt is attributed.
+    const flush = evidence === "stale" && flagged
+      ? vi.spyOn(localVault, "flushLocalVaultWrites")
+        .mockRejectedValueOnce(new Error("Synthetic vault refusal"))
+        .mockResolvedValueOnce(undefined)
+      : undefined;
+    try {
+      fireEvent.click(within(sim).getByRole("button", { name: /End Block/ }));
+      fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "End Block" }));
+      if (flush) {
+        const warning = await screen.findByRole("alert");
+        expect(readSuspendedBlock()?.items.q1.marked).toBe(true);
+        expect(useStore.getState().questions[0]).toEqual(prior);
+        const firstRun = useStore.getState().quizSessions[0];
+        fireEvent.click(within(warning).getByRole("button", { name: "Retry save" }));
+        await waitFor(() => expect(screen.getByText("Block results")).toBeTruthy());
+        expect(useStore.getState().quizSessions[0].id).toBe(firstRun.id);
+      }
+      await waitFor(() => expect(screen.getByText("Block results")).toBeTruthy());
+      const state = useStore.getState();
+      expect(state.quizSessions).toHaveLength(1);
+      expect(state.quizSessions[0].answers[0]).toMatchObject({
+        flagged, correct: evidence === "valid" ? false : undefined,
+      });
+      expect(state.quizSessions[0].answers[0].answerKey).toBeUndefined();
+      if (evidence === "valid" && flagged) {
+        expect(state.questions[0].attempts).toHaveLength(2);
+        expect(state.questions[0].attempts[1]).toMatchObject({ quizSessionId: state.quizSessions[0].id, status: "incorrect" });
+      } else {
+        expect(state.questions[0]).toEqual(prior);
+      }
+      expect(readSuspendedBlock()).toBeUndefined();
+    } finally {
+      flush?.mockRestore();
+    }
+  });
 });
 
 describe("Six-choice simulation keyboard", () => {
