@@ -34,6 +34,9 @@ export interface ScheduleCandidate {
   conflictClaims?: ScheduleConflictClaim[];
   confirmedConflictKey?: string;
   problem?: string;
+  /** A malformed source row must be corrected and reparsed. */
+  sourceProblem?: string;
+  rawInput?: string;
 }
 
 const KIND_MAP: Array<[RegExp, TrackerKind]> = [
@@ -66,7 +69,8 @@ export function parseCourseSchedule(
 
 /** An ambiguous category collision requires a separate, explicit confirmation. */
 export function canImportScheduleCandidate(candidate: ScheduleCandidate): boolean {
-  return !candidate.problem && Boolean(candidate.label.trim()) && candidate.duplicate !== "exact" &&
+  return !candidate.problem && !candidate.sourceProblem && Boolean(candidate.label.trim()) &&
+    (candidate.date === undefined || isCalendarDate(candidate.date)) && candidate.duplicate !== "exact" &&
     (candidate.duplicate !== "conflict" || Boolean(candidate.conflictKey && candidate.confirmedConflictKey === candidate.conflictKey));
 }
 
@@ -159,15 +163,31 @@ export function reconcileScheduleDuplicates(
 }
 
 function parseDelimitedSchedule(text: string, existing: readonly TrackerItem[], sourceName?: string, scopePath?: string): ScheduleCandidate[] {
-  const rows = text.split(/\r?\n/).flatMap((raw, index) => {
+  const lines = text.split(/\r?\n/);
+  const first = lines.find((line) => line.trim())?.trim() ?? "";
+  const declaredSeparator = /\.tsv$/i.test(sourceName ?? "") || /^date\t/i.test(first) ? "\t"
+    : /\.csv$/i.test(sourceName ?? "") || /^date,/i.test(first) ? "," : undefined;
+  const rows = lines.flatMap((raw, index) => {
     const line = raw.trim();
     if (!line || /^date[,\t]/i.test(line)) return [];
-    const cells = splitRow(line);
+    // A comma in a free-form title does not itself establish a structured row.
+    const datePrefix = raw.match(/^\s*"?(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}\/\d{1,2}\/\d{2,4})"? *([,\t])/);
+    const separator = declaredSeparator ?? datePrefix?.[1];
+    function held(reason: string) {
+      const problem = "Line " + (index + 1) + ": " + reason;
+      return [{ ...candidate(String(index + 1), "", "Lecture", undefined, index + 1, sourceName, problem), sourceProblem: problem, rawInput: raw }];
+    }
+    const cells = separator ? splitRow(raw, separator) : [line];
+    if (!cells) return held("Malformed quoted fields. Correct the source row and review again.");
+    if (separator && (cells.length < 2 || cells.length > 3)) return held("Expected date, title and optional type. Correct the source row and review again.");
     const date = parseDate(cells[0]);
+    if (separator && !date) return held("Invalid calendar date. Correct the source row and review again.");
+    if (separator && !cells[1]) return held("A title is required. Correct the source row and review again.");
     const body = date ? cells.slice(1).join(" ") : line;
     const lastIndex = cells.length - 1;
     const activity = date && cells.length >= 3 ? explicitScheduleActivity(cells[lastIndex]) : undefined;
     const legacyKindIndex = cells.length >= 3 && KIND_MAP.some(([pattern]) => pattern.test(cells[lastIndex])) ? lastIndex : -1;
+    if (separator && cells.length === 3 && cells[2] && !activity && legacyKindIndex < 0) return held("Unrecognized type. Correct the source row and review again.");
     const explicitKindIndex = activity ? lastIndex : legacyKindIndex;
     const kind = activity ? TRACKER_KIND_FOR_ACTIVITY[activity] : detectKind(explicitKindIndex >= 0 ? cells[explicitKindIndex] : body);
     const label = date && explicitKindIndex >= 0 ? cells.slice(1, explicitKindIndex).join(" ").trim() : cleanLabel(body, kind);
@@ -212,19 +232,30 @@ function candidate(id: string, label: string, kind: TrackerKind, date: string | 
   };
 }
 
-function splitRow(line: string): string[] {
-  const separator = line.includes("\t") ? "\t" : ",";
-  if (separator === "\t") return line.split(/\t+/).map((cell) => cell.trim());
+// Single-line CSV and TSV share positional, quoted-field semantics.
+function splitRow(line: string, separator: string): string[] | undefined {
   const cells: string[] = [];
   let value = "";
   let quoted = false;
+  let closed = false;
   for (let index = 0; index < line.length; index += 1) {
     const char = line[index];
-    if (char === '"' && line[index + 1] === '"' && quoted) { value += '"'; index += 1; }
-    else if (char === '"') quoted = !quoted;
-    else if (char === "," && !quoted) { cells.push(value.trim()); value = ""; }
-    else value += char;
+    if (quoted) {
+      if (char === '"' && line[index + 1] === '"') { value += '"'; index += 1; }
+      else if (char === '"') { quoted = false; closed = true; }
+      else value += char;
+    } else if (char === separator) {
+      cells.push(value.trim());
+      value = "";
+      closed = false;
+    } else if (closed) {
+      if (char !== " ") return undefined;
+    } else if (char === '"') {
+      if (value.trim()) return undefined;
+      quoted = true;
+    } else value += char;
   }
+  if (quoted) return undefined;
   cells.push(value.trim());
   return cells;
 }
@@ -239,12 +270,22 @@ function explicitScheduleActivity(value: string): CourseActivity | undefined {
 
 function detectKind(value: string): TrackerKind { return KIND_MAP.find(([pattern]) => pattern.test(value))?.[1] ?? "Lecture"; }
 function cleanLabel(value: string, kind: TrackerKind) { return value.replace(/^\d{4}-\d{1,2}-\d{1,2}[,\t\s-]*/i, "").replace(new RegExp(`\\b${kind.replace(" ", "[ -]?")}\\b`, "ig"), "").replace(/^[,\s:-]+|[,\s:-]+$/g, "").trim(); }
+function isCalendarDate(value: string): boolean {
+  const match = typeof value === "string" ? value.match(/^(\d{4})-(\d{2})-(\d{2})$/) : undefined;
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return year > 0 && month >= 1 && month <= 12 && day >= 1 && day <= days[month - 1];
+}
 function parseDate(value: string): string | undefined {
   const iso = value.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-  if (iso) return `${iso[1]}-${iso[2].padStart(2, "0")}-${iso[3].padStart(2, "0")}`;
-  const us = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
-  if (us) return `${us[3].length === 2 ? `20${us[3]}` : us[3]}-${us[1].padStart(2, "0")}-${us[2].padStart(2, "0")}`;
-  return undefined;
+  const us = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
+  const date = iso ? iso[1] + "-" + iso[2].padStart(2, "0") + "-" + iso[3].padStart(2, "0")
+    : us ? (us[3].length === 2 ? "20" + us[3] : us[3]) + "-" + us[1].padStart(2, "0") + "-" + us[2].padStart(2, "0") : undefined;
+  return date && isCalendarDate(date) ? date : undefined;
 }
 function provenanceNote(candidate: ScheduleCandidate): string | undefined {
   const parts = [candidate.date ? `Scheduled ${candidate.date}` : "", candidate.sourceName ? `Imported from ${candidate.sourceName}` : ""].filter(Boolean);

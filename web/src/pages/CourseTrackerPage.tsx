@@ -783,7 +783,7 @@ function ScheduleImportModal({ defaultPath, onClose }: { defaultPath: string; on
             <input aria-label={`Select ${row.label || `row ${row.sourceLine}`}`} type="checkbox" checked={row.selected} disabled={!canImportScheduleCandidate(row)} onChange={(event) => updateRow(index, { selected: event.target.checked })} />
             <div className="schedule-review-fields">
               <Field label="Date" type="date" value={row.date ?? ""} onChange={(event) => updateRow(index, { date: event.target.value || undefined })} />
-              <Field label="Title" value={row.label} onChange={(event) => updateRow(index, { label: event.target.value, problem: event.target.value.trim() ? undefined : "A title is required." })} />
+              <Field label="Title" value={row.label} onChange={(event) => updateRow(index, { label: event.target.value, problem: row.sourceProblem ?? (event.target.value.trim() ? undefined : "A title is required.") })} />
               <SelectField label="Type" value={row.kind} onChange={(event) => {
                 const kind = event.target.value as TrackerKind;
                 updateRow(index, { kind, activity: row.activity && TRACKER_KIND_FOR_ACTIVITY[row.activity] === kind ? row.activity : undefined });
@@ -800,6 +800,7 @@ function ScheduleImportModal({ defaultPath, onClose }: { defaultPath: string; on
               {row.problem ?? (row.duplicate === "exact" ? "Already exists" : row.duplicate === "conflict" ? (canImportScheduleCandidate(row) ? "Distinct activity confirmed" : "Conflicting course activity — review required") : row.duplicate === "likely" ? "Possible duplicate — compare before importing" : "Ready")}
               {row.sourceName ? ` · ${row.sourceName}` : ""}
             </small>
+            {row.rawInput !== undefined && <small className="sub" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>Source row {row.sourceLine}: {row.rawInput}</small>}
             {row.duplicate === "conflict" && !row.problem && row.conflictKey && <div className="schedule-review-fields">
               <span className="sub">The same title, date and type has a different explicit activity. Compare the following records before confirming a separate event. Leaving this unselected preserves the existing items.</span>
               <ul aria-label="Conflicting records" className="sub">

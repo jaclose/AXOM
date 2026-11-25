@@ -213,6 +213,59 @@ describe("course schedule intake", () => {
     expect(reconcileScheduleDuplicates([batch[0]], [], path)[0].selected).toBe(false);
   });
 
+  it.each([
+    "2026-11-25\t\tIMCQ",
+    "2026-11-25,\"Session 1,IMCQ",
+    "2026-11-25\t\"\"\tIMCQ",
+    "2026-11-25,\"Session 1\"x,IMCQ",
+    "2026-11-25\t\tSession 1\tIMCQ",
+    "2026-11-25,Session,IMCQ,Extra",
+    "2026-02-29,Session,IMCQ",
+    "1900-02-29,Session,IMCQ",
+    "2026-04-31,Session,IMCQ",
+    "2026-13-01,Session,IMCQ",
+    "2026-01-00,Session,IMCQ",
+    "0000-01-01,Session,IMCQ",
+    "2/29/26,Session,IMCQ",
+    "2/28/026,Session,IMCQ",
+    "2026-11-25,Session,UnknownType",
+  ])("holds malformed structured input %s", (input) => {
+    const [row] = parseCourseSchedule(input);
+    expect(row).toMatchObject({ selected: false, rawInput: input, sourceProblem: expect.any(String) });
+    expect(scheduleCandidatesToTracker([{ ...row, selected: true, label: "Forced", problem: undefined }], "T1")).toEqual([]);
+  });
+
+  it.each([
+    ["2026-11-25,Session,IMCQ","Session","imcq","2026-11-25"],
+    ["2026-11-25\tSession\tIMCQ","Session","imcq","2026-11-25"],
+    ["2026-11-25,\"Acid, base\",Lecture","Acid, base","lecture","2026-11-25"],
+    ["2026-11-25\t\"Acid\tbase\"\tLecture","Acid\tbase","lecture","2026-11-25"],
+    ["2026-11-25,\"Session \"\"one\"\"\",IMCQ","Session \"one\"","imcq","2026-11-25"],
+    ["2026-11-25,Session","Session",null,"2026-11-25"],
+    ["2026-11-25,Session,","Session",null,"2026-11-25"],
+    ["2026-11-25\tSession\t","Session",null,"2026-11-25"],
+    ["2000-02-29,Session,IMCQ","Session","imcq","2000-02-29"],
+    ["2/29/24,Session,IMCQ","Session","imcq","2024-02-29"],
+    ["Renal, physiology","Renal, physiology",null,null],
+  ] as const)("preserves valid input %s", (input, label, activity, date) => {
+    const [row] = parseCourseSchedule(input);
+    expect(row).toMatchObject({ selected: true, label });
+    expect(row.activity).toBe(activity ?? undefined);
+    expect(row.date).toBe(date ?? undefined);
+    expect(scheduleCandidatesToTracker([row], "T1")).toHaveLength(1);
+  });
+
+  it("refuses impossible edited dates at projection without rejecting undated rows", () => {
+    const [row] = parseCourseSchedule("2026-11-25,Session,IMCQ");
+    for (const date of ["2026-02-29","2026-13-01","2026-1-1","","0000-01-01"]) {
+      expect(scheduleCandidatesToTracker([{ ...row, date, selected: true }], "T1")).toEqual([]);
+    }
+    expect(scheduleCandidatesToTracker([{ ...row, date: "2028-02-29" }], "T1")[0].assessmentDate).toBe("2028-02-29");
+    expect(scheduleCandidatesToTracker([{ ...row, date: undefined }], "T1")).toHaveLength(1);
+    const [invalid] = parseCourseSchedule("date,title,type\n,Session,IMCQ", [], "schedule.csv");
+    expect(invalid.selected).toBe(false);
+  });
+
   it("keeps a 2,000-row intake linear enough for an ordinary browser interaction", () => {
     const input = Array.from({ length: 2_000 }, (_, index) => `2026-09-${String(index % 28 + 1).padStart(2, "0")},Synthetic Lecture ${index + 1},Lecture`).join("\n");
     const started = performance.now();
