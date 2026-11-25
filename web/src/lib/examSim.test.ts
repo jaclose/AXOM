@@ -88,6 +88,65 @@ describe("explicit simulation recovery", () => {
     expect(localStorage.getItem(scopedKey)).toBe(JSON.stringify(block));
   });
 
+  it.each([
+    ["missing index", { index: undefined }],
+    ["fractional index", { index: 0.5 }],
+    ["negative index", { index: -1 }],
+    ["out-of-range index", { index: 1 }],
+    ["invalid elapsed time", { elapsedMs: "invalid" }],
+    ["negative elapsed time", { elapsedMs: -1 }],
+    ["nonfinite elapsed time", { elapsedMs: Infinity }],
+    ["invalid time limit", { timeLimitSeconds: "90" }],
+    ["invalid notes", { notes: {} }],
+    ["invalid timestamp", { startedAt: "invalid" }],
+    ["invalid strike list", { items: { a: { ...items.a, struck: {} } } }],
+    ["invalid strike key", { items: { a: { ...items.a, struck: [5] } } }],
+    ["invalid answer", { items: { a: { ...items.a, answerKey: 1 } } }],
+    ["invalid item seconds", { items: { a: { ...items.a, seconds: "5" } } }],
+    ["negative item seconds", { items: { a: { ...items.a, seconds: -1 } } }],
+    ["invalid mark", { items: { a: { ...items.a, marked: "false" } } }],
+    ["invalid visited state", { items: { a: { ...items.a, visited: 0 } } }],
+    ["invalid submitted state", { items: { a: { ...items.a, submitted: "false" } } }],
+    ["null item", { items: { a: null } }],
+    ["out-of-pool item", { items: { z: items.a } }],
+    ["duplicate pool IDs", { poolIds: ["a", "a"] }],
+    ["prototype pool ID", { poolIds: ["a", "constructor"] }],
+    ["invalid evidence map", { sourceEvidenceV1: [] }],
+    ["invalid evidence value", { sourceEvidenceV1: { a: 4 } }],
+  ] as const)("holds matching malformed mirrors without changing bytes (%s)", (_name, patch) => {
+    writeSuspendedBlock(block);
+    const raw = JSON.stringify({ ...block, ...patch });
+    localStorage.setItem(scopedKey, raw);
+    localStorage.setItem(EXAM_SIM_SUSPENDED_KEY, raw);
+    const pointer = sessionStorage.getItem(`${EXAM_SIM_SUSPENDED_KEY}:run-id`);
+    expect(inspectSuspendedBlock()).toEqual({ status: "unreadable" });
+    expect(discardSuspendedBlock(JSON.parse(raw) as SuspendedBlock)).toBe(false);
+    expect(localStorage.getItem(scopedKey)).toBe(raw);
+    expect(localStorage.getItem(EXAM_SIM_SUSPENDED_KEY)).toBe(raw);
+    expect(sessionStorage.getItem(`${EXAM_SIM_SUSPENDED_KEY}:run-id`)).toBe(pointer);
+  });
+
+  it("accepts sparse legacy recovery with fractional time and optional fields absent", () => {
+    const legacy = {
+      ...block, runId: undefined, poolIds: ["a", "b"],
+      items: { a: { ...items.a, seconds: 40.5 } },
+    };
+    const raw = JSON.stringify(legacy);
+    localStorage.setItem(EXAM_SIM_SUSPENDED_KEY, raw);
+    expect(inspectSuspendedBlock()).toEqual({ status: "present", block: JSON.parse(raw) });
+    expect(localStorage.getItem(EXAM_SIM_SUSPENDED_KEY)).toBe(raw);
+  });
+
+  it("accepts valid tutor recovery with source evidence and optional timing", () => {
+    const tutor: SuspendedBlock = {
+      ...block, mode: "tutor", timeLimitSeconds: 180,
+      sourceEvidenceV1: { a: "a".repeat(64) },
+      items: { a: { ...items.a, submitted: true } },
+    };
+    writeSuspendedBlock(tutor);
+    expect(inspectSuspendedBlock()).toEqual({ status: "present", block: tutor });
+  });
+
   it("holds an orphan or divergent same-run copy without rewriting either", () => {
     localStorage.setItem(scopedKey, JSON.stringify(block));
     expect(inspectSuspendedBlock()).toEqual({ status: "unreadable" });

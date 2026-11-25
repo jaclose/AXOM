@@ -134,13 +134,39 @@ export interface SuspendedBlock {
   suspendedAt: string;
 }
 
+/** V1 snapshots are untrusted browser data. Sparse items and the documented
+ * optional legacy fields are valid; malformed values must not reach the engine
+ * or be silently normalized and rewritten by a resume. */
 function parseSuspendedBlock(raw: string | null): SuspendedBlock | undefined {
   try {
     const value = JSON.parse(raw ?? "null") as SuspendedBlock | null;
     if (!value || value.version !== 1 || !Array.isArray(value.poolIds) || !value.poolIds.length
-      || value.poolIds.some((id) => typeof id !== "string" || !id)
+      || value.poolIds.some((id) => typeof id !== "string" || !id
+        || Object.prototype.hasOwnProperty.call(Object.prototype, id))
+      || new Set(value.poolIds).size !== value.poolIds.length
       || (value.runId !== undefined && (typeof value.runId !== "string" || !value.runId))
-      || !(value.skin in EXAM_SKINS)) return undefined;
+      || !Object.prototype.hasOwnProperty.call(EXAM_SKINS, value.skin)
+      || (value.mode !== "exam" && value.mode !== "tutor")
+      || !Number.isInteger(value.index) || value.index < 0 || value.index >= value.poolIds.length
+      || !Number.isFinite(value.elapsedMs) || value.elapsedMs < 0
+      || (value.timeLimitSeconds !== undefined && (!Number.isFinite(value.timeLimitSeconds) || value.timeLimitSeconds <= 0))
+      || typeof value.notes !== "string"
+      || typeof value.startedAt !== "string" || !Number.isFinite(Date.parse(value.startedAt))
+      || typeof value.suspendedAt !== "string" || !Number.isFinite(Date.parse(value.suspendedAt))
+      || !value.items || typeof value.items !== "object" || Array.isArray(value.items)) return undefined;
+
+    const pool = new Set(value.poolIds);
+    for (const [id, item] of Object.entries(value.items)) {
+      if (!pool.has(id) || !item || typeof item !== "object" || Array.isArray(item)
+        || (item.answerKey !== undefined && (typeof item.answerKey !== "string" || !item.answerKey))
+        || typeof item.marked !== "boolean" || typeof item.visited !== "boolean"
+        || (item.submitted !== undefined && typeof item.submitted !== "boolean")
+        || !Array.isArray(item.struck) || item.struck.some((key) => typeof key !== "string" || !key)
+        || !Number.isFinite(item.seconds) || item.seconds < 0) return undefined;
+    }
+    if (value.sourceEvidenceV1 !== undefined
+      && (!value.sourceEvidenceV1 || typeof value.sourceEvidenceV1 !== "object" || Array.isArray(value.sourceEvidenceV1)
+        || Object.entries(value.sourceEvidenceV1).some(([id, fingerprint]) => !pool.has(id) || typeof fingerprint !== "string"))) return undefined;
     return value;
   } catch {
     return undefined;
