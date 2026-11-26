@@ -299,6 +299,36 @@ describe("course schedule intake", () => {
     expect(scheduleCandidatesToTracker(parseCourseSchedule('2026-11-25,"Session ""one""",IMCQ'), "T1")[0].label).toBe('Session "one"');
   });
 
+  it.each([
+    ["header only \",\" undefined", "\"date\",\"title\",\"type\"", undefined, [], 0],
+    ["valid \",\" undefined", "\"date\",\"title\",\"type\"\n2026-11-27,Real,IMCQ", undefined, ["Real"], 0],
+    ["malformed multiline \",\" undefined", "\"date\",\"title\",\"type\"\nunknown,\"Start\n2026-11-26,Embedded,IMCQ\nEnd\",Lecture\n2026-11-27,Real,IMCQ", undefined, ["Real"], 1],
+    ["unclosed \",\" undefined", "\"date\",\"title\",\"type\"\nunknown,\"Start\n2026-11-27,Real,IMCQ", undefined, [], 1],
+    ["header only \",\" schedule.csv", "\"date\",\"title\",\"type\"", "schedule.csv", [], 0],
+    ["valid \",\" schedule.csv", "\"date\",\"title\",\"type\"\n2026-11-27,Real,IMCQ", "schedule.csv", ["Real"], 0],
+    ["malformed multiline \",\" schedule.csv", "\"date\",\"title\",\"type\"\nunknown,\"Start\n2026-11-26,Embedded,IMCQ\nEnd\",Lecture\n2026-11-27,Real,IMCQ", "schedule.csv", ["Real"], 1],
+    ["unclosed \",\" schedule.csv", "\"date\",\"title\",\"type\"\nunknown,\"Start\n2026-11-27,Real,IMCQ", "schedule.csv", [], 1],
+    ["header only \"\\t\" undefined", "\"date\"\t\"title\"\t\"type\"", undefined, [], 0],
+    ["valid \"\\t\" undefined", "\"date\"\t\"title\"\t\"type\"\n2026-11-27\tReal\tIMCQ", undefined, ["Real"], 0],
+    ["malformed multiline \"\\t\" undefined", "\"date\"\t\"title\"\t\"type\"\nunknown\t\"Start\n2026-11-26\tEmbedded\tIMCQ\nEnd\"\tLecture\n2026-11-27\tReal\tIMCQ", undefined, ["Real"], 1],
+    ["unclosed \"\\t\" undefined", "\"date\"\t\"title\"\t\"type\"\nunknown\t\"Start\n2026-11-27\tReal\tIMCQ", undefined, [], 1],
+    ["header only \"\\t\" schedule.tsv", "\"date\"\t\"title\"\t\"type\"", "schedule.tsv", [], 0],
+    ["valid \"\\t\" schedule.tsv", "\"date\"\t\"title\"\t\"type\"\n2026-11-27\tReal\tIMCQ", "schedule.tsv", ["Real"], 0],
+    ["malformed multiline \"\\t\" schedule.tsv", "\"date\"\t\"title\"\t\"type\"\nunknown\t\"Start\n2026-11-26\tEmbedded\tIMCQ\nEnd\"\tLecture\n2026-11-27\tReal\tIMCQ", "schedule.tsv", ["Real"], 1],
+    ["unclosed \"\\t\" schedule.tsv", "\"date\"\t\"title\"\t\"type\"\nunknown\t\"Start\n2026-11-27\tReal\tIMCQ", "schedule.tsv", [], 1],
+    ["unquoted header", "date,title,type\n2026-11-27,Real,IMCQ", undefined, ["Real"], 0],
+    ["free text", "Renal, physiology\nA \"quoted\" title", undefined, ["Renal, physiology","A \"quoted\" title"], 0],
+    ["header malformed", "\"date\",\"title\",\"type\",\"extra\"\n2026-11-27,Real,IMCQ", undefined, ["Real"], 1],
+    ["mixed quotes", "\"DATE\",title,\"TYPE\"\n2026-11-27,Real,IMCQ", undefined, ["Real"], 0],
+    ["two-column", "\"date\",\"title\"\n2026-11-27,Real", undefined, ["Real"], 0],
+    ["BOM and blank lines", "\n﻿\"date\",\"title\",\"type\"\r\n2026-11-27,Real,IMCQ", undefined, ["Real"], 0],
+  ] as const)("recognizes structured schedule headers: %s", (_name, input, sourceName, labels, heldCount) => {
+    const rows = parseCourseSchedule(input, [], sourceName);
+    expect(rows.filter((row) => row.sourceProblem)).toHaveLength(heldCount);
+    expect(scheduleCandidatesToTracker(rows, "T1").map((row) => row.label)).toEqual(labels);
+    expect(rows.filter((row) => row.sourceProblem).every((row) => !row.selected)).toBe(true);
+  });
+
   it("keeps a 2,000-row intake linear enough for an ordinary browser interaction", () => {
     const input = Array.from({ length: 2_000 }, (_, index) => `2026-09-${String(index % 28 + 1).padStart(2, "0")},Synthetic Lecture ${index + 1},Lecture`).join("\n");
     const started = performance.now();

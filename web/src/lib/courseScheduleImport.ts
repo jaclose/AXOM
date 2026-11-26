@@ -165,8 +165,10 @@ export function reconcileScheduleDuplicates(
 function parseDelimitedSchedule(text: string, existing: readonly TrackerItem[], sourceName?: string, scopePath?: string): ScheduleCandidate[] {
   const lines = text.split("\n");
   const first = lines.find((line) => line.trim())?.trim() ?? "";
-  const declaredSeparator = /\.tsv$/i.test(sourceName ?? "") || /^date\t/i.test(first) ? "\t"
-    : /\.csv$/i.test(sourceName ?? "") || /^date,/i.test(first) ? "," : undefined;
+  // Explicit file format takes precedence; pasted headers use the same
+  // first-field grammar whether date is quoted or unquoted.
+  const declaredSeparator = /\.tsv$/i.test(sourceName ?? "") ? "\t"
+    : /\.csv$/i.test(sourceName ?? "") ? "," : scheduleHeaderSeparator(first);
   // Frame structured records before admitting any physical line. Multiline
   // fields are not supported by splitRow; hold the whole affected record
   // instead of letting date-shaped continuation text become an activity.
@@ -174,7 +176,7 @@ function parseDelimitedSchedule(text: string, existing: readonly TrackerItem[], 
   for (let index = 0; index < lines.length;) {
     const firstLine = lines[index].replace(/\r$/, "");
     const datePrefix = firstLine.match(/^\s*"?(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}\/\d{1,2}\/\d{2,4})"? *([,\t])/);
-    const separator = declaredSeparator ?? datePrefix?.[1];
+    const separator = declaredSeparator ?? scheduleHeaderSeparator(firstLine) ?? datePrefix?.[1];
     let endIndex = index;
     let open = Boolean(separator) && quoteContinues(firstLine);
     while (open && endIndex + 1 < lines.length) {
@@ -186,7 +188,7 @@ function parseDelimitedSchedule(text: string, existing: readonly TrackerItem[], 
   }
   const rows = records.flatMap(({ raw, index, endIndex, separator }) => {
     const line = raw.trim();
-    if (index === endIndex && (!line || /^date[,\t]/i.test(line))) return [];
+    if (index === endIndex && !line) return [];
     function held(reason: string) {
       const location = index === endIndex ? "Line " + (index + 1) : "Lines " + (index + 1) + "-" + (endIndex + 1);
       const problem = location + ": " + reason;
@@ -196,6 +198,9 @@ function parseDelimitedSchedule(text: string, existing: readonly TrackerItem[], 
     const cells = separator ? splitRow(raw, separator) : [line];
     if (!cells) return held("Malformed quoted fields. Correct the source row and review again.");
     if (separator && (cells.length < 2 || cells.length > 3)) return held("Expected date, title and optional type. Correct the source row and review again.");
+    // Only a complete decoded header is metadata. Malformed header-like
+    // records remain held by ordinary structured admission.
+    if (separator && isScheduleHeader(cells)) return [];
     const date = parseDate(cells[0]);
     if (separator && !date) return held("Invalid calendar date. Correct the source row and review again.");
     if (separator && !cells[1]) return held("A title is required. Correct the source row and review again.");
@@ -246,6 +251,16 @@ function candidate(id: string, label: string, kind: TrackerKind, date: string | 
     duplicate: "none",
     problem,
   };
+}
+
+function scheduleHeaderSeparator(line: string): string | undefined {
+  return line.match(/^[ \uFEFF]*(?:"date"|date) *([,\t])/i)?.[1];
+}
+
+function isScheduleHeader(cells: readonly string[]): boolean {
+  return (cells.length === 2 || cells.length === 3) &&
+    cells[0].toLowerCase() === "date" && /^(title|label)$/i.test(cells[1]) &&
+    (cells.length === 2 || /^(type|kind)$/i.test(cells[2]));
 }
 
 // Conservative boundary scanner: even malformed quote placement cannot

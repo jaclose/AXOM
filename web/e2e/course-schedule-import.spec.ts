@@ -140,6 +140,12 @@ test("quoted multiline schedule fragments cannot create standalone attendance ev
   await paste.fill('2026-11-25,"Start\n2026-11-26,Embedded synthetic event,IMCQ');
   await dialog.getByRole("button", { name: "Replace review with pasted rows" }).click();
   await expect(dialog.getByRole("button", { name: "Import selected (0)" })).toBeDisabled();
+  await paste.fill('"date","title","type"\nunknown,"Start\n2026-11-26,Embedded synthetic event,IMCQ\nEnd",Lecture\n2026-11-27,Real synthetic event,IMCQ');
+  await dialog.getByRole("button", { name: "Replace review with pasted rows" }).click();
+  await expect(dialog.getByText("1 invalid", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("1 ready", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Lines 2-4:", { exact: false })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Import selected (1)" })).toBeEnabled();
   await paste.fill("2026-11-27,Real synthetic event,IMCQ");
   await dialog.getByRole("button", { name: "Replace review with pasted rows" }).click();
   await dialog.getByRole("button", { name: "Import selected (1)" }).click();
