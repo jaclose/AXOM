@@ -190,7 +190,7 @@ export async function persistPortableRestore(input: {
       const rollbackAdopted = services.getState();
       await services.flush();
       assertAccount();
-      if (services.getState() !== rollbackAdopted) throw new Error("The workspace changed while the prior state was saving.");
+      if (services.getState() !== rollbackAdopted) throw new Error("The workspace changed while the prior state was saving.", { cause: targetError });
       services.assertWritesSince(rollbackCheckpoint);
     } catch (error) {
       workspaceRollbackFailed = true;
@@ -200,7 +200,7 @@ export async function persistPortableRestore(input: {
     // Even a successful prior-state write cannot establish that another tab
     // has no references to these bytes. Retain them instead of attempting cleanup.
     if (workspaceRollbackFailed) {
-      throw new Error(`The recovered workspace could not be confirmed on disk, and AXOM could not confirm the prior workspace rollback. Keep this tab open and export the workspace before retrying. Prepared images and original files were not cleaned up. Save error: ${errorText(targetError)} Rollback error: ${errorText(workspaceRollbackError)}`, { cause: targetError });
+      throw new Error(`The recovered workspace could not be confirmed on disk, and AXOM could not confirm the prior workspace rollback. Keep this tab open and export the workspace before retrying. Prepared images and original files were not cleaned up. Save error: ${errorText(targetError)} Rollback error: ${errorText(workspaceRollbackError)}`, { cause: new AggregateError([targetError, workspaceRollbackError], "Recovery save and rollback failed") });
     }
     throw new Error(`The recovered workspace was not confirmed saved. Your prior workspace was restored and confirmed on this device. ${errorText(targetError)} Prepared images and original files may remain cached.`, { cause: targetError });
   }
