@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CORONA_WAVES, MAX_SWELL, SILENT, coronaShape, follow, followTime, orbPose, readBands } from "./orbMotion";
+import { CORONA_WAVES, MAX_SWELL, SILENT, coronaShape, follow, followTime, orbPose, readBands, spectrumSpoke, onsetStrength } from "./orbMotion";
 
 describe("how the orb answers sound", () => {
   it("is still and unlit in silence", () => {
@@ -52,5 +52,25 @@ describe("how the orb answers sound", () => {
     expect(bright[4]).toBeGreaterThan(bright[0]);
     expect(coronaShape({ bass: 9, mid: 9, high: 9, level: 9 }).reduce((sum, value) => sum + value, 0)).toBeLessThanOrEqual(1);
     expect(coronaShape(SILENT)).toHaveLength(CORONA_WAVES.length);
+  });
+});
+
+describe("resonant orb spectral geometry", () => {
+  it("maps actual FFT energy into bounded, mirrored radial spokes", () => {
+    const bins = new Uint8Array(256);
+    bins.fill(220, 2, 12);
+    const responses = Array.from({ length: 96 }, (_, index) => spectrumSpoke(bins, index, 96));
+    expect(responses.some((value) => value > 0.25)).toBe(true);
+    expect(responses.every((value) => Number.isFinite(value) && value >= 0 && value <= 1)).toBe(true);
+    expect(spectrumSpoke(bins, 12, 96)).toBeCloseTo(spectrumSpoke(bins, 84, 96));
+    expect(spectrumSpoke(new Uint8Array(256), 12, 96)).toBe(0);
+  });
+
+  it("detects isolated musical onsets but not static volume or silence", () => {
+    expect(onsetStrength(0.9, 0.25)).toBeGreaterThan(onsetStrength(0.55, 0.5));
+    expect(onsetStrength(0.4, 0.4)).toBe(0);
+    expect(onsetStrength(0.1, 0.7)).toBe(0);
+    expect(onsetStrength(9, -9)).toBe(1);
+    expect(onsetStrength(Number.NaN, 0)).toBe(0);
   });
 });

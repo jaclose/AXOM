@@ -107,3 +107,31 @@ export function followTime(current: number, target: number, elapsed: number, att
   const tau = target > current ? attack : release;
   return current + (target - current) * (1 - Math.exp(-Math.max(0, elapsed) / Math.max(0.001, tau)));
 }
+
+/**
+ * Logarithmic spectral ray energy. The left and right halves of the halo
+ * mirror one another, so isolated FFT peaks form coherent symmetrical
+ * structures instead of a random or jittering ring.
+ *
+ * Only byte-domain analyser data is used. Nothing here claims to measure
+ * brainwave frequencies or affects the audio output.
+ */
+export function spectrumSpoke(frequency: ArrayLike<number>, index: number, count: number): number {
+  if (frequency.length < 3 || !Number.isFinite(index) || !Number.isFinite(count) || count < 2) return 0;
+  const span = Math.max(2, Math.floor(count));
+  const wrapped = ((Math.floor(index) % span) + span) % span;
+  const across = 2 * Math.min(wrapped / span, 1 - wrapped / span);
+  const maxBin = Math.max(2, Math.floor((frequency.length - 1) * 0.82));
+  const bin = Math.max(1, Math.min(frequency.length - 2, Math.round(Math.pow(maxBin, across))));
+  const peak = Math.max(frequency[bin] || 0, (frequency[bin - 1] || 0) * 0.65, (frequency[bin + 1] || 0) * 0.65);
+  return Math.min(1, Math.max(0, peak / 255 * 1.2));
+}
+
+/**
+ * Audio onset above a slow average. Only the field's physical displacement
+ * responds quickly; brightness stays on the slow envelope to avoid flashing.
+ */
+export function onsetStrength(level: number, rollingLevel: number): number {
+  if (!Number.isFinite(level) || !Number.isFinite(rollingLevel)) return 0;
+  return Math.min(1, Math.max(0, (level - Math.max(0, rollingLevel) - 0.055) * 2.8));
+}

@@ -22,6 +22,7 @@ import { SpotifySection } from "../components/soundscapes/SpotifySection";
 import { SoundscapeOpener } from "../components/soundscapes/SoundscapeOpener";
 import { ForYouRow } from "../components/soundscapes/ForYouRow";
 import { MainSound } from "../components/soundscapes/MainSound";
+import { SoundscapeImmersiveTimer } from "../components/soundscapes/SoundscapeImmersiveTimer";
 import { YourSounds } from "../components/soundscapes/YourSounds";
 import { PinButton } from "../components/soundscapes/PinButton";
 import { forYouOrder, preferFirst } from "../lib/soundscapes/taste";
@@ -82,6 +83,7 @@ export function SoundscapesPage() {
           preset={hero}
           animate={status === "playing" || focused !== null || previewScene !== null}
           reactive={status === "playing" && presetId === heroId}
+          immersive={fullscreen}
           orb
           className="soundscape-hero-visual"
           label={`${hero.name} visual`}
@@ -90,6 +92,7 @@ export function SoundscapesPage() {
         <button type="button" className="soundscape-fullscreen" onClick={toggleFullscreen} aria-label={fullscreen ? "Exit full screen" : "Full screen"} title={fullscreen ? "Exit full screen (Esc)" : "Full screen: just the scene"}>
           {fullscreen ? <Minimize2 size={ICON_SIZE.body} aria-hidden="true" /> : <Maximize2 size={ICON_SIZE.body} aria-hidden="true" />}
         </button>
+        {fullscreen && <SoundscapeImmersiveTimer />}
         <div className="soundscape-hero-copy">
           <span className="soundscape-kicker"><AudioWaveform size={ICON_SIZE.body} aria-hidden="true" /> Soundscapes</span>
           <h2>{heroVersion.label}</h2>

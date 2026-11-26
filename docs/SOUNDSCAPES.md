@@ -61,6 +61,29 @@ on theme or palette change. Renderers (`visuals.ts`) are deliberately slow. No
 luminance change repeats faster than about every 2 s, so a 40 Hz preset never
 becomes 40 Hz flicker (WCAG 2.3.1).
 
+### Resonant Orb and immersive focus
+
+The Soundscapes hero renders the canonical AXOM Orb PNG unmodified, inside a
+layered scene-color-aware field. Three independent continuous coronas, inclined
+orbits, audio-frequency filaments and travelling glints use the existing Web
+Audio analyser. Actual bass/mid/high bands and short onset impulses affect
+geometry; overall light output changes only through a slow envelope to avoid
+rapid flashing. The analyser is read only: no audio manipulation or inferred
+"brain state" is claimed. Idle and paused states do not run animation frames;
+reduced motion draws a still composition. Hidden or offscreen canvases pause.
+
+Fullscreen uses the actual display pixel ratio, capped to 7680 × 4320 rendered
+canvas pixels (8K UHD) rather than generating an oversized supersampled image.
+Previews retain their lower-cost pixel ratio. The underlying original Orb image
+is currently 512 px and scene videos retain their own source resolution: a
+high-resolution canvas does not create 8K photographic detail from these assets.
+
+An existing Pomodoro sprint or active/paused study session appears in a quiet,
+central, permanently visible fullscreen timer glass. It follows the canonical
+state, phase, elapsed/remaining time and pause/resume action; it creates no
+second timer or study event. No timer appears if no session was started, and
+the timer remains visible when the rest of the fullscreen controls fade.
+
 ### Scenes
 
 Scenes are looping video clips (`web/src/data/scenes.json`, files in

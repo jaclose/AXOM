@@ -8,7 +8,7 @@ import { sceneForTaste } from "../../lib/soundscapes/taste";
 import { useSoundscape } from "../../lib/soundscapes/store";
 
 /** The visual for a preset: its chosen video scene (with the pulse ring) or the generative shader. */
-export function SoundscapeStage({ preset, animate, reactive = false, ring = true, orb = false, className = "", label, sceneOverride }: {
+export function SoundscapeStage({ preset, animate, reactive = false, ring = true, orb = false, immersive = false, className = "", label, sceneOverride }: {
   preset: SoundscapePreset;
   /** Temporarily show another scene (hover preview in the background picker). */
   sceneOverride?: string | null;
@@ -17,6 +17,8 @@ export function SoundscapeStage({ preset, animate, reactive = false, ring = true
   ring?: boolean;
   /** The large stage: a sound-reactive orb in the scene's colours instead of the plain ring. */
   orb?: boolean;
+  /** Uses the display's native pixels in fullscreen, capped to 8K UHD. */
+  immersive?: boolean;
   className?: string;
   label?: string;
 }) {
@@ -34,10 +36,10 @@ export function SoundscapeStage({ preset, animate, reactive = false, ring = true
     <div className={`soundscape-stage ${scene ? "has-scene" : ""} ${className}`} role={label ? "img" : undefined} aria-label={label}>
       {scene
         ? <ScenePlayer scene={scene} animate={animate} />
-        : <SoundscapeVisual visual={look.visual} overlay={look.overlay} overlayMix={look.overlayMix} animate={animate} reactive={reactive} />}
+        : <SoundscapeVisual visual={look.visual} overlay={look.overlay} overlayMix={look.overlayMix} animate={animate} reactive={reactive} immersive={immersive} />}
       {scene && <div className="scene-vignette" />}
       {orb
-        ? <SoundOrb tint={preset.significance?.tint} active={animate && status === "playing"} reactive={reactive} />
+        ? <SoundOrb tint={preset.significance?.tint} active={animate && status === "playing"} reactive={reactive} immersive={immersive} />
         : ring && <PulseRing tint={preset.significance?.tint} active={animate} />}
     </div>
   );
