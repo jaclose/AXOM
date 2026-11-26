@@ -368,6 +368,57 @@ describe("portable binary media backup", () => {
     });
   });
 
+  describe.each([1, 2])("ZIP version %s physical record consistency", version => {
+    it.each(["store", "deflate", "stream-store", "stream-deflate", "flags", "method", "crc", "compressed-size", "size", "stream-crc", "descriptor-signature", "descriptor-crc", "descriptor-size", "hidden-member"] as const)("validates %s without changing existing media", async scenario => {
+      const { default: JSZip } = await import("jszip");
+      const zip = new JSZip();
+      zip.file("workspace.json", JSON.stringify({ _backupFormat: "axom-media-backup", _backupVersion: version, media: [], originals: [] }));
+      zip.file("media/0", "AXOM", { createFolders: false });
+      const streamFiles = scenario.startsWith("stream-") || scenario.startsWith("descriptor-");
+      let bytes = new Uint8Array(await zip.generateAsync({ type: "arraybuffer", streamFiles, compression: scenario.includes("deflate") ? "DEFLATE" : "STORE" }));
+      const view = new DataView(bytes.buffer);
+      const end = bytes.length - 22, start = view.getUint32(end + 16, true);
+      for (let cursor = start; cursor < end;) {
+        const length = view.getUint16(cursor + 28, true);
+        const name = String.fromCharCode(...bytes.subarray(cursor + 46, cursor + 46 + length));
+        const local = view.getUint32(cursor + 42, true);
+        const next = cursor + 46 + length + view.getUint16(cursor + 30, true) + view.getUint16(cursor + 32, true);
+        if (name === "media/0") {
+          const descriptor = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true) + view.getUint32(cursor + 20, true);
+          if (scenario === "flags") view.setUint16(local + 6, view.getUint16(local + 6, true) ^ 8, true);
+          if (scenario === "method") view.setUint16(local + 8, 8, true);
+          if (scenario === "crc" || scenario === "stream-crc") view.setUint32(local + 14, view.getUint32(cursor + 16, true) ^ 1, true);
+          if (scenario === "compressed-size") view.setUint32(local + 18, 3, true);
+          if (scenario === "size") view.setUint32(local + 22, 3, true);
+          if (scenario === "descriptor-signature") view.setUint32(descriptor, 0, true);
+          if (scenario === "descriptor-crc") view.setUint32(descriptor + 4, view.getUint32(descriptor + 4, true) ^ 1, true);
+          if (scenario === "descriptor-size") view.setUint32(descriptor + 12, 3, true);
+          if (scenario === "hidden-member") {
+            // Remove only the directory record; the full local member survives.
+            const shortened = new Uint8Array(bytes.length - (next - cursor));
+            shortened.set(bytes.subarray(0, cursor));
+            shortened.set(bytes.subarray(next), cursor);
+            const footer = new DataView(shortened.buffer), newEnd = shortened.length - 22;
+            footer.setUint16(newEnd + 8, 1, true);
+            footer.setUint16(newEnd + 10, 1, true);
+            footer.setUint32(newEnd + 12, view.getUint32(end + 12, true) - (next - cursor), true);
+            bytes = shortened;
+          }
+          break;
+        }
+        cursor = next;
+      }
+      await putQuestionAttachmentBlob(attachment.blobKey, { blob: new Blob(["SAFE"]), mimeType: "image/png", byteSize: 4, questionId: "held-question", updatedAt: attachment.updatedAt });
+      const file = new File([bytes.buffer], "record-consistency.zip");
+      if (["store", "deflate", "stream-store", "stream-deflate"].includes(scenario)) {
+        expect(JSON.parse((await readPortableBackup(file)).rawText).media).toEqual([]);
+      } else {
+        await expect(readPortableBackup(file)).rejects.toThrow("invalid or ambiguous ZIP member records");
+      }
+      expect(await (await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true }))!.blob.text()).toBe("SAFE");
+    });
+  });
+
   it("rejects unrelated ZIPs and missing media before allowing a workspace restore", async () => {
     const { default: JSZip } = await import("jszip");
     const zip = new JSZip(); zip.file("catalog.json", "{}");

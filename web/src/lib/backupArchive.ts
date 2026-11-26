@@ -83,6 +83,7 @@ function assertPhysicalZipMembers(bytes: Uint8Array) {
   if (start + u32(end + 12) !== end) throw invalid();
   let cursor = start, expanded = 0;
   const names = new Set<string>();
+  const members: { local: number; dataEnd: number; descriptor: boolean; crc: number; compressed: number; size: number }[] = [];
   for (let i = 0; i < count; i++) {
     if (cursor + 46 > end || u32(cursor) !== 0x02014b50 || u16(cursor + 34) !== 0) throw invalid();
     const nameLength = u16(cursor + 28), extraLength = u16(cursor + 30), commentLength = u16(cursor + 32);
@@ -115,12 +116,44 @@ function assertPhysicalZipMembers(bytes: Uint8Array) {
     if (expanded > MAX_ARCHIVE_BYTES) throw new BackupArchiveLimitError("The expanded backup exceeds the safety limit.");
     // JSZip reads the local-header filename, not only the central name.
     const local = u32(cursor + 42);
+    const flags = u16(cursor + 8), method = u16(cursor + 10);
+    const crc = u32(cursor + 16), compressed = u32(cursor + 20);
     if (local + 30 > start || u32(local) !== 0x04034b50 || u16(local + 26) !== nameLength
-      || local + 30 + nameLength + u16(local + 28) + u32(cursor + 20) > start) throw invalid();
+      || u16(local + 6) !== flags || u16(local + 8) !== method
+      || (method !== 0 && method !== 8) || (method === 0 && compressed !== size)) throw invalid();
+    const dataEnd = local + 30 + nameLength + u16(local + 28) + compressed;
+    if (dataEnd > start) throw invalid();
     for (let j = 0; j < nameLength; j++) if (bytes[local + 30 + j] !== bytes[nameStart + j]) throw invalid();
+    const descriptor = (flags & 8) !== 0;
+    // Streaming headers can omit the final CRC and sizes. Any populated
+    // value must still agree with the directory and the trailing descriptor.
+    const agrees = (actual: number, expected: number) => actual === expected || (descriptor && actual === 0);
+    if (!agrees(u32(local + 14), crc) || !agrees(u32(local + 18), compressed)
+      || !agrees(u32(local + 22), size)) throw invalid();
+    members.push({ local, dataEnd, descriptor, crc, compressed, size });
     cursor = next;
   }
   if (cursor !== end) throw invalid();
+  // AXOM portable backups have no executable prefix, padding, or unindexed
+  // local members. Sort by physical position, not central-directory order.
+  // This detects hidden records and overlaps without scanning payload bytes
+  // for signatures (which can legitimately occur inside a file).
+  members.sort((a, b) => a.local - b.local);
+  if ((members[0]?.local ?? start) !== 0) throw invalid();
+  for (let i = 0; i < members.length; i++) {
+    const { dataEnd, descriptor, crc, compressed, size } = members[i];
+    const boundary = members[i + 1]?.local ?? start;
+    if (!descriptor) {
+      if (dataEnd !== boundary) throw invalid();
+      continue;
+    }
+    const length = boundary - dataEnd;
+    if (length !== 12 && length !== 16) throw invalid();
+    const offset = dataEnd + (length === 16 ? 4 : 0);
+    if ((length === 16 && u32(dataEnd) !== 0x08074b50)
+      || u32(offset) !== crc || u32(offset + 4) !== compressed
+      || u32(offset + 8) !== size) throw invalid();
+  }
 }
 
 const FORMAT = "axom-media-backup";
