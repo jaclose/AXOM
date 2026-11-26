@@ -224,8 +224,40 @@ function mergeById(
   imported: Array<Record<string, unknown>>,
   idKey: string,
 ): Array<Record<string, unknown>> {
-  const stamp = (r: Record<string, unknown>) =>
-    String(r.updatedAt ?? r.updated ?? r.createdAt ?? r.created ?? "");
+  // Compare explicit ISO instants, not timestamp spellings. Keep sub-millisecond
+  // precision from database exports instead of truncating it through Date.parse.
+  const stamp = (record: Record<string, unknown>) => {
+    const raw = record.updatedAt ?? record.updated ?? record.createdAt ?? record.created;
+    if (raw === undefined || raw === null || raw === "") return { seconds: -Infinity, fraction: "" };
+    const match = typeof raw === "string"
+      ? /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|[+-]\d{2}:?\d{2})$/.exec(raw)
+      : null;
+    if (match && match[0] === raw) {
+      const [, year, month, day, hour, minute, second = "00", fraction = "", zone] = match;
+      const y = Number(year);
+      const m = Number(month);
+      const leap = y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0);
+      const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+      const seconds = Date.parse(year + "-" + month + "-" + day + "T" + hour + ":" + minute + ":" + second + zone) / 1000;
+      if (m >= 1 && m <= 12 && Number(day) >= 1 && Number(day) <= days[m - 1]
+        && Number(hour) < 24 && Number(minute) < 60 && Number(second) < 60 && Number.isFinite(seconds)) {
+        return { seconds, fraction: fraction.replace(/0+$/, "") };
+      }
+    }
+    throw new Error("This merge contains competing records with an invalid or unzoned timestamp. Keep both original workspaces.");
+  };
+  const compare = (left: Record<string, unknown>, right: Record<string, unknown>) => {
+    const a = stamp(left);
+    const b = stamp(right);
+    if (a.seconds !== b.seconds) return a.seconds < b.seconds ? -1 : 1;
+    return a.fraction === b.fraction ? 0 : a.fraction < b.fraction ? -1 : 1;
+  };
+  // JSON object member order is not data; array order is. Preserve the input
+  // records and treat different timestamp spellings at one instant as a tie,
+  // not evidence that either conflicting record is newer.
+  const canonical = (record: Record<string, unknown>) => JSON.stringify(record, (_key, value: unknown) =>
+    isRecord(value) ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value);
+  const equivalent = (left: Record<string, unknown>, right: Record<string, unknown>) => canonical(left) === canonical(right);
   // Resolve each side before comparing them. Otherwise an older duplicate
   // later in the imported list can hide a newer record before the local
   // comparison. Equal latest timestamps with distinct contents on one side
@@ -237,10 +269,12 @@ function mergeById(
       const id = String(record[idKey] ?? "");
       if (!id) continue;
       const prior = result.get(id);
-      if (!prior || stamp(record) > stamp(prior)) {
+      if (prior && equivalent(record, prior)) continue;
+      const order = prior ? compare(record, prior) : 1;
+      if (order > 0) {
         result.set(id, record);
         ambiguous.delete(id);
-      } else if (stamp(record) === stamp(prior) && JSON.stringify(record) !== JSON.stringify(prior)) {
+      } else if (order === 0) {
         ambiguous.add(id);
       }
     }
@@ -252,7 +286,7 @@ function mergeById(
   const byId = latestById(imported);
   for (const [id, record] of latestById(current)) {
     const other = byId.get(id);
-    byId.set(id, !other || stamp(record) >= stamp(other) ? record : other);
+    byId.set(id, !other || equivalent(record, other) || compare(record, other) >= 0 ? record : other);
   }
   // Keep unkeyed records from both sides rather than dropping them.
   const unkeyed = [...current, ...imported].filter((r) => !String(r[idKey] ?? ""));

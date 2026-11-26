@@ -549,6 +549,80 @@ describe("portable backup safety", () => {
   });
 
 
+
+  it.each([
+    ["tasks", "id"], ["logs", "id"], ["dayPlans", "dayKey"], ["dailyArchives", "date"],
+  ] as const)("orders explicit timestamp instants in %s without changing the stored representation", (collection, identity) => {
+    const parse = (records: Array<Record<string, unknown>>) =>
+      parseImport(JSON.stringify({ terms: [], [collection]: records }));
+    const pairs = [
+      ["2026-11-25T05:30:00Z", "2026-11-25T01:00:00-05:00"],
+      ["2026-11-25T05:30:00.1234Z", "2026-11-25T05:30:00.123456Z"],
+      ["2026-11-25T05:30:00Z", "2026-11-25T05:30:00.1Z"],
+      ["2026-11-25T03:30:00Z", "2026-11-24T23:30:00-05:00"],
+      [undefined, "2026-11-25T05:30:00Z"],
+    ] as const;
+    for (const [earlier, later] of pairs) {
+      const older = { [identity]: "fixture", ...(earlier === undefined ? {} : { updatedAt: earlier }), value: "old" };
+      const newer = { [identity]: "fixture", updatedAt: later, value: "new" };
+      for (const ordered of [[older, newer], [newer, older]]) {
+        const local = parse([ordered[0]]);
+        const imported = parse([ordered[1]]);
+        const duplicates = parse(ordered);
+        const snapshot = JSON.stringify([local, imported, duplicates]);
+        expect(mergeStates(local, imported)[collection]).toEqual([newer]);
+        expect(mergeStates(parse([]), duplicates)[collection]).toEqual([newer]);
+        expect(mergeStates(duplicates, parse([]))[collection]).toEqual([newer]);
+        expect(JSON.stringify([local, imported, duplicates])).toBe(snapshot);
+      }
+    }
+  });
+
+  it.each([
+    ["tasks", "id"], ["logs", "id"], ["dayPlans", "dayKey"], ["dailyArchives", "date"],
+  ] as const)("handles equivalent instants and structural equality in %s", (collection, identity) => {
+    const parse = (records: Array<Record<string, unknown>>) =>
+      parseImport(JSON.stringify({ terms: [], [collection]: records }));
+    const first = { [identity]: "fixture", updatedAt: "2026-11-25T05:30:00.100Z", value: { a: 1, b: { x: 2, y: 3 } } };
+    const reordered = { value: { b: { y: 3, x: 2 }, a: 1 }, updatedAt: first.updatedAt, [identity]: "fixture" };
+    const conflict = { ...first, updatedAt: "2026-11-25T00:30:00.1-05:00", value: "different" };
+    for (const ordered of [[first, reordered], [reordered, first]]) {
+      expect(mergeStates(parse([]), parse(ordered))[collection]).toEqual([first]);
+    }
+    for (const ordered of [[first, conflict], [conflict, first]]) {
+      expect(mergeStates(parse([ordered[0]]), parse([ordered[1]]))[collection]).toEqual([ordered[0]]);
+      const duplicates = parse(ordered);
+      const snapshot = JSON.stringify(duplicates);
+      expect(() => mergeStates(parse([]), duplicates)).toThrow("conflicting records with the same identity and timestamp");
+      expect(() => mergeStates(duplicates, parse([]))).toThrow("conflicting records with the same identity and timestamp");
+      expect(JSON.stringify(duplicates)).toBe(snapshot);
+    }
+    const arrays = [{ ...first, value: [1, 2] }, { ...first, value: [2, 1] }];
+    expect(() => mergeStates(parse([]), parse(arrays))).toThrow("conflicting records with the same identity and timestamp");
+  });
+
+  it.each([
+    ["tasks", "id"], ["logs", "id"], ["dayPlans", "dayKey"], ["dailyArchives", "date"],
+  ] as const)("refuses incomparable competing timestamps in %s without dropping legacy records", (collection, identity) => {
+    const parse = (records: Array<Record<string, unknown>>) =>
+      parseImport(JSON.stringify({ terms: [], [collection]: records }));
+    const good = { [identity]: "fixture", updatedAt: "2026-11-25T05:30:00Z", value: "valid" };
+    for (const invalid of ["2026-11-25T05:30:00", "2026-02-30T00:00:00Z", "2026-11-25", "bad", 42,
+      "2026-11-25T24:00:00Z", "2026-11-25T05:30:00+99:00", "2026-11-25T05:30:00Z\n", "2025-02-29T00:00:00Z"]) {
+      const bad = { ...good, updatedAt: invalid, value: "legacy" };
+      expect(mergeStates(parse([]), parse([bad]))[collection]).toEqual([bad]);
+      expect(mergeStates(parse([]), parse([bad, { ...bad }]))[collection]).toEqual([bad]);
+      for (const ordered of [[bad, good], [good, bad]]) {
+        const local = parse([ordered[0]]);
+        const imported = parse([ordered[1]]);
+        const snapshot = JSON.stringify([local, imported]);
+        expect(() => mergeStates(local, imported)).toThrow("invalid or unzoned timestamp");
+        expect(() => mergeStates(parse([]), parse(ordered))).toThrow("invalid or unzoned timestamp");
+        expect(JSON.stringify([local, imported])).toBe(snapshot);
+      }
+    }
+  });
+
   it.each([
     ["tasks", "id"], ["logs", "id"], ["dayPlans", "dayKey"], ["dailyArchives", "date"],
   ] as const)("resolves same-side duplicate chronology in %s before comparing workspaces", (collection, identity) => {
