@@ -6,7 +6,7 @@ import { readSourceOriginal, saveSourceOriginal } from "./decode/sources";
 import type { SourceDocument } from "./library";
 import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent } from "./questionAttachmentScope";
 import {
-  ATTACHMENT_EXPORT_KEY, MAX_QUESTION_ATTACHMENT_BYTES, blobToBase64,
+  ATTACHMENT_EXPORT_KEY, MAX_QUESTION_ATTACHMENT_BYTES, base64ToBytes, blobToBase64,
   extractQuestionAttachmentPayloads, getQuestionAttachmentBlob, stageQuestionAttachmentPayloads,
   type QuestionImageAttachment, type QuestionAttachmentExportPayload, type AttachmentReadOptions,
   type StagedQuestionAttachmentRestore,
@@ -247,7 +247,23 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
   if (!file.name.toLowerCase().endsWith(".zip")) {
     const rawText = await file.text();
     assertRestoreScope();
-    const payloads = extractQuestionAttachmentPayloads(JSON.parse(rawText));
+    const parsed: unknown = JSON.parse(rawText);
+    const payloads = extractQuestionAttachmentPayloads(parsed);
+    // Metadata-only legacy exports may omit the field, but a present malformed
+    // declaration is not an intentional omission. Validate every declared image,
+    // including those that may not survive a later merge, before staging any.
+    if (parsed && typeof parsed === "object" && Object.prototype.hasOwnProperty.call(parsed, ATTACHMENT_EXPORT_KEY)) {
+      const declared = (parsed as Record<string, unknown>)[ATTACHMENT_EXPORT_KEY];
+      if (!Array.isArray(declared) || declared.length !== payloads.length) {
+        throw new Error("The backup contains an invalid image payload declaration.");
+      }
+      for (const payload of payloads) {
+        const bytes = base64ToBytes(payload.base64);
+        if (!bytes || bytes.byteLength === 0 || bytes.byteLength !== payload.byteSize || bytes.byteLength > MAX_QUESTION_ATTACHMENT_BYTES) {
+          throw new Error("The backup contains an invalid image payload declaration.");
+        }
+      }
+    }
     return { rawText, restoreMedia: async refs => {
       assertRestoreScope();
       return stageQuestionAttachmentPayloads(payloads, refs, scope);
@@ -347,7 +363,11 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
       if (bytes.length > MAX_QUESTION_ATTACHMENT_BYTES) throw new Error("A backup image exceeds the safety limit.");
       const base64 = await blobToBase64(new Blob([bytes as BlobPart]));
       assertRestoreScope();
-      payloads.push(...extractQuestionAttachmentPayloads({ [ATTACHMENT_EXPORT_KEY]: [{ ...item.metadata, base64 }] }));
+      const [payload] = extractQuestionAttachmentPayloads({ [ATTACHMENT_EXPORT_KEY]: [{ ...item.metadata, base64 }] });
+      if (!payload || bytes.byteLength === 0 || bytes.byteLength !== payload.byteSize) {
+        throw new Error("The backup contains an invalid image payload declaration.");
+      }
+      payloads.push(payload);
     }
     return stageQuestionAttachmentPayloads(payloads, references, scope);
   } };

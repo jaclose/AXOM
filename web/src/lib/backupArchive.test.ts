@@ -132,6 +132,55 @@ describe("portable binary media backup", () => {
     expect(await backup.restoreMedia(refs)).toMatchObject({ restored: 1, skipped: 0 });
   });
 
+
+  it.each(["object", "null", "null-entry", "empty-base64", "invalid-base64", "short", "long", "missing-question", "invalid-mime", "mixed"] as const)("rejects explicitly malformed JSON image declarations (%s) before staging", async scenario => {
+    const valid = { ...attachment, questionId: "held-question", base64: "QVhPTQ==" };
+    const invalid = scenario === "null-entry" ? null
+      : { ...valid, ...(scenario === "empty-base64" || scenario === "mixed" ? { base64: "" }
+        : scenario === "invalid-base64" ? { base64: "!!!" }
+        : scenario === "short" ? { base64: "QQ==" }
+        : scenario === "long" ? { base64: "QUJDREU=" }
+        : scenario === "missing-question" ? { questionId: "" }
+        : { mimeType: "text/plain" }) };
+    const field = scenario === "object" ? valid : scenario === "null" ? null
+      : scenario === "mixed" ? [valid, invalid] : [invalid];
+    await putQuestionAttachmentBlob(attachment.blobKey, { blob: new Blob(["SAFE"]), mimeType: "image/png", byteSize: 4, questionId: "held-question", updatedAt: attachment.updatedAt });
+    const file = new File([JSON.stringify({ [ATTACHMENT_EXPORT_KEY]: field })], "invalid-payload.json");
+    await expect(readPortableBackup(file)).rejects.toThrow("invalid image payload declaration");
+    expect(await (await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true }))!.blob.text()).toBe("SAFE");
+  });
+
+  it.each([false, true])("preserves legacy JSON with absent or empty declarations (present: %s)", async present => {
+    const file = new File([JSON.stringify(present ? { [ATTACHMENT_EXPORT_KEY]: [] } : {})], "metadata-only.json");
+    const backup = await readPortableBackup(file);
+    expect(await backup.restoreMedia(refs)).toMatchObject({ restored: 0, skipped: 0 });
+  });
+
+  describe.each([1, 2])("ZIP version %s declared payload integrity", version => {
+    it.each(["empty", "short", "long", "valid"] as const)("checks %s bytes before the first staging write", async scenario => {
+      const { default: JSZip } = await import("jszip");
+      const fresh = { ...attachment, id: "fresh", blobKey: "fresh-image" };
+      const references = [...refs, { id: "fresh-question", attachments: [fresh] }];
+      const zip = new JSZip();
+      zip.file("workspace.json", JSON.stringify({ _backupFormat: "axom-media-backup", _backupVersion: version, originals: [], media: [
+        { file: "media/0", metadata: { ...fresh, questionId: "fresh-question" } },
+        { file: "media/1", metadata: { ...attachment, questionId: "held-question" } },
+      ] }));
+      zip.file("media/0", "AXOM", { createFolders: false });
+      zip.file("media/1", scenario === "empty" ? "" : scenario === "short" ? "A" : scenario === "long" ? "ABCDE" : "SAFE", { createFolders: false });
+      await putQuestionAttachmentBlob(attachment.blobKey, { blob: new Blob(["SAFE"]), mimeType: "image/png", byteSize: 4, questionId: "held-question", updatedAt: attachment.updatedAt });
+      const backup = await readPortableBackup(new File([await zip.generateAsync({ type: "arraybuffer" })], "payload.zip"));
+      if (scenario === "valid") {
+        expect(await backup.restoreMedia(references)).toMatchObject({ restored: 1, skipped: 1 });
+        expect(await (await getQuestionAttachmentBlob(fresh.blobKey, { localOnly: true }))!.blob.text()).toBe("AXOM");
+      } else {
+        await expect(backup.restoreMedia(references)).rejects.toThrow("invalid image payload declaration");
+        expect(await getQuestionAttachmentBlob(fresh.blobKey, { localOnly: true })).toBeUndefined();
+      }
+      expect(await (await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true }))!.blob.text()).toBe("SAFE");
+    });
+  });
+
   it("never overwrites existing bytes when a portable backup reuses their blob key", async () => {
     await putQuestionAttachmentBlob(attachment.blobKey, {
       blob: new Blob(["SAFE"]), mimeType: "image/png", byteSize: 4,
