@@ -548,6 +548,53 @@ describe("portable backup safety", () => {
     expect(merged.questions.find((question) => question.id === "q2")?.stem).toBe("New question");
   });
 
+
+  it.each([
+    ["tasks", "id"], ["logs", "id"], ["dayPlans", "dayKey"], ["dailyArchives", "date"],
+  ] as const)("resolves same-side duplicate chronology in %s before comparing workspaces", (collection, identity) => {
+    const record = (value: string, updatedAt: string) => ({ [identity]: "fixture", value, updatedAt });
+    const older = record("older", "2026-11-24T00:00:00Z");
+    const middle = record("middle", "2026-11-25T00:00:00Z");
+    const latest = record("latest", "2026-11-26T00:00:00Z");
+    const parse = (records: Array<Record<string, unknown>>) =>
+      parseImport(JSON.stringify({ terms: [], [collection]: records }));
+    for (const records of [[latest, older], [older, latest]]) {
+      const local = parse([middle]);
+      const imported = parse(records);
+      const snapshot = JSON.stringify([local, imported]);
+      expect(mergeStates(local, imported)[collection]).toEqual([latest]);
+      expect(mergeStates(imported, local)[collection]).toEqual([latest]);
+      expect(mergeStates(parse([]), imported)[collection]).toEqual([latest]);
+      expect(JSON.stringify([local, imported])).toBe(snapshot);
+    }
+    expect(mergeStates(parse([latest]), parse([{ ...latest, value: "other side" }]))[collection]).toEqual([latest]);
+    expect(mergeStates(parse([]), parse([latest, { ...latest }]))[collection]).toEqual([latest]);
+    const unkeyed = { value: "legacy" };
+    const distinct = { ...older, [identity]: "other" };
+    expect(mergeStates(parse([distinct, unkeyed]), parse([latest, unkeyed]))[collection])
+      .toEqual([latest, distinct, unkeyed, unkeyed]);
+  });
+
+  it.each([
+    ["tasks", "id"], ["logs", "id"], ["dayPlans", "dayKey"], ["dailyArchives", "date"],
+  ] as const)("refuses ambiguous latest duplicates in %s without changing inputs", (collection, identity) => {
+    const first = { [identity]: "fixture", updatedAt: "2026-11-25T00:00:00Z", value: "first" };
+    const second = { ...first, value: "second" };
+    const newest = { ...first, updatedAt: "2026-11-26T00:00:00Z", value: "newest" };
+    const parse = (records: Array<Record<string, unknown>>) =>
+      parseImport(JSON.stringify({ terms: [], [collection]: records }));
+    for (const records of [[first, second], [second, first]]) {
+      const local = parse([]);
+      const imported = parse(records);
+      const snapshot = JSON.stringify([local, imported]);
+      expect(() => mergeStates(local, imported)).toThrow("conflicting records with the same identity and timestamp");
+      expect(() => mergeStates(imported, local)).toThrow("conflicting records with the same identity and timestamp");
+      expect(JSON.stringify([local, imported])).toBe(snapshot);
+      expect(mergeStates(local, parse([...records, newest]))[collection]).toEqual([newest]);
+      expect(mergeStates(local, parse([newest, ...records]))[collection]).toEqual([newest]);
+    }
+  });
+
   it("keeps unlocks and the selected blueprint lane through export and import", () => {
     const state = makeSeed();
     state.profile.unlocks = ["again"];

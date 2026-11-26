@@ -226,14 +226,31 @@ function mergeById(
 ): Array<Record<string, unknown>> {
   const stamp = (r: Record<string, unknown>) =>
     String(r.updatedAt ?? r.updated ?? r.createdAt ?? r.created ?? "");
-  const byId = new Map<string, Record<string, unknown>>();
-  for (const record of imported) {
-    const id = String(record[idKey] ?? "");
-    if (id) byId.set(id, record);
-  }
-  for (const record of current) {
-    const id = String(record[idKey] ?? "");
-    if (!id) continue;
+  // Resolve each side before comparing them. Otherwise an older duplicate
+  // later in the imported list can hide a newer record before the local
+  // comparison. Equal latest timestamps with distinct contents on one side
+  // have no reliable ordering; refuse that merge without adopting anything.
+  const latestById = (records: Array<Record<string, unknown>>) => {
+    const result = new Map<string, Record<string, unknown>>();
+    const ambiguous = new Set<string>();
+    for (const record of records) {
+      const id = String(record[idKey] ?? "");
+      if (!id) continue;
+      const prior = result.get(id);
+      if (!prior || stamp(record) > stamp(prior)) {
+        result.set(id, record);
+        ambiguous.delete(id);
+      } else if (stamp(record) === stamp(prior) && JSON.stringify(record) !== JSON.stringify(prior)) {
+        ambiguous.add(id);
+      }
+    }
+    if (ambiguous.size) {
+      throw new Error("This merge contains conflicting records with the same identity and timestamp. Keep both original workspaces.");
+    }
+    return result;
+  };
+  const byId = latestById(imported);
+  for (const [id, record] of latestById(current)) {
     const other = byId.get(id);
     byId.set(id, !other || stamp(record) >= stamp(other) ? record : other);
   }
