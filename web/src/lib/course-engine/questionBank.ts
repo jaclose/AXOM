@@ -38,6 +38,7 @@ export interface BankModule {
   key: string;
   module: string;
   term: string;
+  termKey: string;
   course: string;
   courseId?: string;
   weeks: BankWeek[];
@@ -241,10 +242,14 @@ export function buildCourseQuestionBank(
     // but never choose one conflicting term by catalog order.
     const termMatches = course ? terms.filter((item) => item.id === course.termId) : [];
     const term = termMatches.length > 1 ? "Term assignment needs review"
-      : termMatches[0]?.name ?? "Not yet assigned";
+      : termMatches[0] ? (termMatches[0].name.trim() || "Unnamed term") : "Not yet assigned";
+    // Identity and presentation are deliberately separate: custom names may
+    // duplicate another term or a status label, but must not broaden a filter.
+    const termKey = termMatches.length > 1 ? "status:ambiguous"
+      : termMatches[0] ? `term:${termMatches[0].id}` : "status:unassigned";
     const key = JSON.stringify([course?.id ?? scope.courseId ?? "unassigned", canonicalModuleKey(scope.module ?? "")]);
     const branch = modules.get(key) ?? {
-      key, term, course: course?.name || course?.code || "Choose a course when filing",
+      key, term, termKey, course: course?.name || course?.code || "Choose a course when filing",
       courseId: course?.id, module: scope.module ?? "Unfiled & mixed", weeks: [],
     };
     const weekKey = `${key}|${scope.week ?? "mixed"}`;
@@ -272,6 +277,10 @@ export function buildCourseQuestionBank(
   }
   return [...modules.values()].sort((a, b) => {
     if (!!a.courseId !== !!b.courseId) return a.courseId ? -1 : 1;
-    return `${a.term}/${a.course}/${a.module}`.localeCompare(`${b.term}/${b.course}/${b.module}`, undefined, { numeric: true });
+    return a.term.localeCompare(b.term, undefined, { numeric: true })
+      || a.termKey.localeCompare(b.termKey)
+      || a.course.localeCompare(b.course, undefined, { numeric: true })
+      || (a.courseId ?? "").localeCompare(b.courseId ?? "")
+      || a.module.localeCompare(b.module, undefined, { numeric: true });
   });
 }

@@ -114,8 +114,14 @@ export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPract
     setLimit(12);
   }, [scopeKey]);
 
-  const termsAvailable = [...new Set(branches.map((branch) => branch.term))];
-  const termBranches = termFilter ? branches.filter((branch) => branch.term === termFilter) : branches;
+  const termsAvailable = [...new Map(branches.map((branch) => [branch.termKey, branch.term])).entries()];
+  const duplicateTermLabels = new Set(termsAvailable.filter(([key, label]) =>
+    termsAvailable.some(([otherKey, otherLabel]) => key !== otherKey && label === otherLabel)).map(([, label]) => label));
+  function termLabel(key: string, label: string) {
+    if (!duplicateTermLabels.has(label) || !key.startsWith("term:")) return label;
+    return `${label} (ID: ${key.slice(5)})`;
+  }
+  const termBranches = termFilter ? branches.filter((branch) => branch.termKey === termFilter) : branches;
   const courseOptions = [...new Map(termBranches.map((branch) => [courseIdentity(branch), branch.course])).entries()];
   const visibleBranches = courseFilter
     ? termBranches.filter((branch) => courseIdentity(branch) === courseFilter)
@@ -194,7 +200,7 @@ export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPract
     {detailInvalidated && <p className="qb-collection-warning" role="status">The opened collection no longer matches the verified academic view. Review its source filing in the Question Bank before practicing.</p>}
     {branches.length > 0 && <div className="qb-academic-filters" role="group" aria-label="Academic question bank filters">
       <label>Term<select aria-label="Filter by term" value={termFilter} onChange={(event) => { setTermFilter(event.target.value); setCourseFilter(""); setChosen(undefined); setLimit(12); }}>
-        <option value="">All terms</option>{termsAvailable.map((term) => <option key={term} value={term}>{term}</option>)}
+        <option value="">All terms</option>{termsAvailable.map(([key, label]) => <option key={key} value={key}>{termLabel(key, label)}</option>)}
       </select></label>
       <label>Course<select aria-label="Filter by course" value={courseFilter} onChange={(event) => { setCourseFilter(event.target.value); setChosen(undefined); setLimit(12); }}>
         <option value="">All courses</option>{courseOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
@@ -214,8 +220,8 @@ export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPract
       <nav className="cb-outline" aria-label="Course outline">
         <p className="cb-outline-label">Course outline</p>
         {visibleBranches.map((item, index) => <div className="cb-branch" key={item.key}>
-          {(index === 0 || visibleBranches[index - 1].term !== item.term) && <p className="cb-term">{item.term}</p>}
-          {(index === 0 || visibleBranches[index - 1].course !== item.course || visibleBranches[index - 1].term !== item.term) && <p className="cb-course">{item.course}</p>}
+          {(index === 0 || visibleBranches[index - 1].termKey !== item.termKey) && <p className="cb-term">{termLabel(item.termKey, item.term)}</p>}
+          {(index === 0 || courseIdentity(visibleBranches[index - 1]) !== courseIdentity(item) || visibleBranches[index - 1].termKey !== item.termKey) && <p className="cb-course">{item.course}</p>}
           <button className="cb-module" aria-expanded={branch?.key === item.key} onClick={() => { setChosen(item.weeks[0] ? { key: item.weeks[0].key, scopeKey } : undefined); setQuery(""); setLimit(12); }}>
             <ChevronRight size={14} aria-hidden="true" className={branch?.key === item.key ? "cb-rotated" : ""} /><b>{item.module}</b><span>{item.weeks.length} weeks</span>
           </button>

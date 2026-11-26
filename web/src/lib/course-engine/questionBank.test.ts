@@ -491,6 +491,9 @@ describe("installed term label integrity", () => {
           const first = bank.find((entry) => entry.courseId === "c1");
           const independent = bank.find((entry) => entry.courseId === "c2");
           expect(first?.term).toBe(variant.label);
+          expect(first?.termKey).toBe(variant.label === "Term 1" ? "term:t1"
+            : variant.label === "Not yet assigned" ? "status:unassigned" : "status:ambiguous");
+          expect(independent?.termKey).toBe("term:t2");
           expect(first?.weeks[0]).toMatchObject({ week: 2, questionIds: ["q1"], ready: 1, attempted: 1 });
           expect(independent?.term).toBe("Term 2");
           expect(independent?.weeks[0]).toMatchObject({ week: 3, questionIds: ["q2"], ready: 1, attempted: 1 });

@@ -67,17 +67,54 @@ describe("CourseBankBrowser academic navigation", () => {
     const filter = screen.getByRole("combobox", { name: "Filter by term" });
     expect(within(filter).queryByRole("option", { name: "Term 4" })).toBeNull();
     expect(within(filter).queryByRole("option", { name: "Conflicting term" })).toBeNull();
-    await user.selectOptions(filter, "Term assignment needs review");
+    await user.selectOptions(filter, "status:ambiguous");
     expect(screen.queryByText("School PQ 1")).toBeNull();
     expect(screen.getByRole("button", { name: "Practice week" }).textContent).toContain("1 ready");
     await user.click(screen.getByRole("button", { name: "Practice week" }));
     expect(onPractice).toHaveBeenLastCalledWith([state.questionSets[0]]);
-    await user.selectOptions(filter, "Term 2");
+    await user.selectOptions(filter, "term:t2");
     expect(screen.queryByText("IMCQ 1")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Practice week" }));
     expect(onPractice).toHaveBeenLastCalledWith([state.questionSets[3]]);
     expect(onPractice).toHaveBeenCalledTimes(2);
     expect([state.terms, state.courses, state.questionSets, state.questions]).toEqual(snapshot);
+  });
+
+  it.each([
+    { name: "Same term", other: "Same term", extra: "none" },
+    { name: "Not yet assigned", other: "Term 4", extra: "missing" },
+    { name: "Term assignment needs review", other: "Term 4", extra: "ambiguous" },
+    { name: "", other: "Term 4", extra: "none" },
+  ])("selects term identities rather than labels ($name)", async ({ name, other, extra }) => {
+    const user = userEvent.setup();
+    for (const reversed of [false, true]) {
+      state.terms = [{ id: "t2", name }, { id: "t4", name: other }] as Term[];
+      if (extra === "missing") state.terms = state.terms.filter((term) => term.id !== "t4");
+      if (extra === "ambiguous") state.terms.push({ ...state.terms[1] });
+      if (reversed) {
+        state.terms.reverse();
+        state.courses.reverse();
+        state.questionSets.reverse();
+      }
+      const snapshot = structuredClone([state.terms, state.courses, state.questionSets, state.questions]);
+      const onPractice = vi.fn();
+      const mounted = render(<CourseBankBrowser onPractice={onPractice} />);
+      const filter = screen.getByRole("combobox", { name: "Filter by term" }) as HTMLSelectElement;
+      expect([...filter.options].map((option) => option.value)).toHaveLength(3);
+      expect(new Set([...filter.options].map((option) => option.value)).size).toBe(3);
+      const expectedOther = extra === "missing" ? "status:unassigned"
+        : extra === "ambiguous" ? "status:ambiguous" : "term:t4";
+      await user.selectOptions(filter, "term:t2");
+      expect(screen.queryByText("IMCQ 1")).toBeNull();
+      await user.click(screen.getByRole("button", { name: "Practice week" }));
+      expect(onPractice).toHaveBeenLastCalledWith([state.questionSets.find((entry) => entry.id === "pq")]);
+      await user.selectOptions(filter, expectedOther);
+      expect(screen.queryByText("School PQ 1")).toBeNull();
+      await user.click(screen.getByRole("button", { name: "Practice week" }));
+      expect(onPractice).toHaveBeenLastCalledWith([state.questionSets.find((entry) => entry.id === "imcq")]);
+      expect([state.terms, state.courses, state.questionSets, state.questions]).toEqual(snapshot);
+      mounted.unmount();
+    }
   });
 
   it("identifies image-linked questions without previewing source or answer images", () => {
@@ -137,7 +174,7 @@ describe("CourseBankBrowser academic navigation", () => {
   it("composes term, course, collection type, readiness and search without leaking other courses", async () => {
     const user = userEvent.setup();
     render(<CourseBankBrowser onPractice={vi.fn()} />);
-    await user.selectOptions(screen.getByRole("combobox", { name: "Filter by term" }), "Term 4");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Filter by term" }), "term:t4");
     await user.selectOptions(screen.getByRole("combobox", { name: "Filter by course" }), "c4");
     await user.selectOptions(screen.getByRole("combobox", { name: "Filter by collection type" }), "IMCQ");
     await user.selectOptions(screen.getByRole("combobox", { name: "Filter by readiness" }), "review-suggested");
@@ -205,7 +242,7 @@ describe("CourseBankBrowser ambiguous curriculum scope", () => {
     expect(screen.getByRole("alert").textContent).toContain("Multiple courses contain Neuro");
     expect(screen.getByRole("heading", { name: "Select an academic week" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Practice week" })).toBeNull();
-    await user.selectOptions(screen.getByRole("combobox", { name: "Filter by term" }), "Term 4");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Filter by term" }), "term:t4");
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.getByText("IMCQ 1")).toBeTruthy();
   });
@@ -324,7 +361,7 @@ describe("CourseBankBrowser repeated Tracker handoffs", () => {
   it("clears an old term filter when a different explicit Tracker handoff arrives", async () => {
     const user = userEvent.setup();
     const view = render(<CourseBankBrowser initialScope={{ courseId: "c4", module: "Neuro", week: 1 }} onPractice={vi.fn()} />);
-    await user.selectOptions(screen.getByRole("combobox", { name: "Filter by term" }), "Term 2");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Filter by term" }), "term:t2");
     expect(screen.getByRole("combobox", { name: "Filter by term" }).getAttribute("value")).toBeNull();
     view.rerender(<CourseBankBrowser initialScope={{ courseId: "c2", module: "Biomolecules", week: 1 }} onPractice={vi.fn()} />);
     expect(screen.getByText("School PQ 1")).toBeTruthy();
