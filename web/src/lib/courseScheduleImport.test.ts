@@ -4,6 +4,49 @@ import type { TrackerItem } from "./types";
 import { absenceStanding, isAttended } from "./course-engine/weekView";
 
 describe("course schedule intake", () => {
+
+  it.each([
+    ["Lab", ""], ["Review Loop", ""], ["Assessment", ""],
+    ["Clinical Lab Methods", ""], ["Renal Lecture", ""],
+    ["Cardiac Lab", ","], ["Reading: Chapter 5", ""],
+    ["Clinical Lab Methods", ",Lab"],
+  ])("preserves the structured title %s with type suffix %s", (label, suffix) => {
+    const input = `2026-11-25,${label}${suffix}`;
+    for (const source of [undefined, "schedule.csv"]) {
+      const [row] = parseCourseSchedule(input, [], source);
+      expect(row).toMatchObject({ label, selected: true });
+      expect(scheduleCandidatesToTracker([row], "T1")[0].label).toBe(label);
+    }
+  });
+
+  it("retains a quoted TSV title and ordinary free-form behavior", () => {
+    const [row] = parseCourseSchedule('2026-11-25\t"Clinical Lab, Methods"\t', [], "schedule.tsv");
+    expect(row).toMatchObject({ label: "Clinical Lab, Methods", selected: true, kind: "Lab" });
+    expect(parseCourseSchedule("Clinical Lab Methods")[0].label).toBe("Clinical  Methods");
+  });
+
+  it("preserves distinct structured titles and prevents duplicate reimport", () => {
+    const path = "Term 1/BPM 500/FTM 1/Week 3";
+    const input = "2026-11-25,Renal Lecture\n2026-11-25,Renal";
+    const rows = parseCourseSchedule(input, [], "schedule.csv", {}, path);
+    const projected = scheduleCandidatesToTracker(rows, path);
+    expect(projected.map((row) => row.label)).toEqual(["Renal Lecture", "Renal"]);
+    const existing: TrackerItem[] = projected.map((row, index) => ({
+      ...row, id: String(index), updated: "2026-11-25", passes: index + 1,
+    }));
+    const before = JSON.stringify(existing);
+    expect(parseCourseSchedule(input, existing, "schedule.csv", {}, path).every((row) => row.duplicate === "exact" && !row.selected)).toBe(true);
+    expect(JSON.stringify(existing)).toBe(before);
+    // Old unclassified imports lost the word Lecture. Do not silently
+    // recreate a possibly identical event or rewrite its saved progress.
+    const legacy = existing.filter((row) => row.label === "Renal");
+    const [held] = parseCourseSchedule("2026-11-25,Renal Lecture", legacy, "schedule.csv", {}, path);
+    expect(held).toMatchObject({ label: "Renal Lecture", duplicate: "exact", selected: false });
+    expect(scheduleCandidatesToTracker([{ ...held, selected: true }], path)).toEqual([]);
+    expect(parseCourseSchedule("2026-11-25,Renal Lecture", legacy, "schedule.csv", {}, "Other term")[0].selected).toBe(true);
+    expect(JSON.stringify(existing)).toBe(before);
+  });
+
   it("extracts dated course work conservatively", () => {
     const rows = parseCourseSchedule("2026-08-14,Renal Physiology,Lecture\n2026-08-14,Renal DLA,DLA\n2026-08-20,IMCQ 2,Assessment");
     expect(rows.map((row) => [row.date, row.kind])).toEqual([

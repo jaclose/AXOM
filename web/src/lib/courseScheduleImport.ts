@@ -216,10 +216,11 @@ function parseDelimitedSchedule(text: string, existing: readonly TrackerItem[], 
     if (separator && cells.length === 3 && cells[2] && !activity && legacyKindIndex < 0) return held("Unrecognized type. Correct the source row and review again.");
     const explicitKindIndex = activity ? lastIndex : legacyKindIndex;
     const kind = activity ? TRACKER_KIND_FOR_ACTIVITY[activity] : detectKind(explicitKindIndex >= 0 ? cells[explicitKindIndex] : body);
-    const label = date && explicitKindIndex >= 0 ? cells.slice(1, explicitKindIndex).join(" ").trim() : cleanLabel(body, kind);
+    // The decoded title cell is authoritative, even when kind is inferred.
+    const label = separator ? cells[1] : date && explicitKindIndex >= 0 ? cells.slice(1, explicitKindIndex).join(" ").trim() : cleanLabel(body, kind);
     const problem = label ? undefined : `Line ${index + 1} has no usable title.`;
-    // The old parser sometimes retained the type suffix in the title or used
-    // a different coarse kind. Preserve its same-destination duplicate hold
+    // The old parser sometimes stripped title words, retained the type suffix,
+    // or used a different coarse kind. Preserve its same-destination duplicate hold
     // for an unchanged source row rather than creating a second activity.
     const previousKind = detectKind(legacyKindIndex >= 0 ? cells[legacyKindIndex] : body);
     const previousLabel = date && legacyKindIndex >= 0 ? cells.slice(1, legacyKindIndex).join(" ").trim() : cleanLabel(body, previousKind);
@@ -228,7 +229,7 @@ function parseDelimitedSchedule(text: string, existing: readonly TrackerItem[], 
     return [{
       ...candidate(`${index + 1}`, label, kind, date, index + 1, sourceName, problem),
       ...(activity ? { activity } : {}),
-      ...(activity && original !== previous && previousLabel ? { legacyIdentity: { original, previous } } : {}),
+      ...((activity || separator) && original !== previous && previousLabel ? { legacyIdentity: { original, previous } } : {}),
     }];
   });
   return reconcileScheduleDuplicates(rows, existing, scopePath);

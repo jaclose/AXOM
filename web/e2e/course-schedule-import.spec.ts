@@ -160,6 +160,31 @@ test("quoted multiline schedule fragments cannot create standalone attendance ev
   await expect(module.getByRole("button", { name: "Missed Embedded synthetic event" })).toHaveCount(0);
 });
 
+
+test("structured titles survive review, import, reload and duplicate reimport", async ({ page }) => {
+  await seedOnboarded(page);
+  await page.goto("/#tracker");
+  await page.getByRole("button", { name: "Import schedule" }).click();
+  const dialog = page.getByRole("dialog", { name: "Import course schedule" });
+  const path = "Term 1/BPM 500";
+  const raw = "2026-11-25,Synthetic Renal Lecture\n2026-11-25,Synthetic Renal";
+  await dialog.getByLabel("Tracker destination").fill(path);
+  await dialog.getByLabel("Or paste schedule rows").fill(raw);
+  await dialog.getByRole("button", { name: "Review schedule" }).click();
+  await expect(dialog.getByLabel("Title").nth(0)).toHaveValue("Synthetic Renal Lecture");
+  await expect(dialog.getByLabel("Title").nth(1)).toHaveValue("Synthetic Renal");
+  await dialog.getByRole("button", { name: "Import selected (2)" }).click();
+  await reloadAfterSave(page);
+  await expect(page.locator(".dr-label").getByText("Synthetic Renal Lecture", { exact: true })).toBeVisible();
+  await expect(page.locator(".dr-label").getByText("Synthetic Renal", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Import schedule" }).click();
+  await dialog.getByLabel("Tracker destination").fill(path);
+  await dialog.locator('input[type="file"]').setInputFiles({
+    name: "title-fidelity.csv", mimeType: "text/csv", buffer: Buffer.from(raw),
+  });
+  await expect(dialog.getByRole("button", { name: "Import selected (0)" })).toBeDisabled();
+});
+
 async function completeOnboarding(page: Page) {
   if (!(await completeSetup(page, "Schedule Intake Test", { ifVisible: true }))) return;
   const later = page.getByRole("button", { name: "Review later" });
