@@ -89,6 +89,36 @@ describe("portable binary media backup", () => {
     expect(await (await getQuestionAttachmentBlob(attachment.blobKey))!.blob.text()).toBe("AXOM");
   });
 
+  it.each(["record-size", "blob-size", "record-mime", "blob-mime", "shared-size", "shared-mime", "valid", "shared-valid"] as const)("reports ZIP export coverage accurately (%s)", async scenario => {
+    const record = {
+      blob: new Blob([scenario === "blob-size" ? "A" : "AXOM"], { type: scenario === "blob-mime" ? "image/jpeg" : "image/png" }),
+      mimeType: scenario === "record-mime" ? "image/jpeg" as const : attachment.mimeType,
+      byteSize: scenario === "record-size" ? 3 : 4,
+      questionId: "held-question", updatedAt: attachment.updatedAt,
+    };
+    await putQuestionAttachmentBlob(attachment.blobKey, record);
+    const independent = { ...attachment, id: "independent", blobKey: "independent" };
+    await putQuestionAttachmentBlob(independent.blobKey, { ...record, blob: new Blob(["KEEP"]), byteSize: 4, mimeType: "image/png" });
+    const second = { ...attachment, id: "other-use",
+      ...(scenario === "shared-size" ? { byteSize: 3 } : scenario === "shared-mime" ? { mimeType: "image/jpeg" as const } : {}) };
+    const shared = scenario.startsWith("shared-");
+    const references = [...refs, ...(shared ? [{ id: "other-question", attachments: [second] }] : []),
+      { id: "independent-question", attachments: [independent] }];
+    const complete = scenario === "valid" || scenario === "shared-valid";
+    for (const ordered of [references, [...references].reverse()]) {
+      const payload = { questions: ordered };
+      const result = await createMediaBackupArchive(payload, ordered);
+      expect(result.missingBlobKeys).toEqual(complete ? [] : [attachment.blobKey]);
+      expect(result.attachmentCount).toBe(complete ? 2 : 1);
+      const backup = await readPortableBackup(new File([result.blob], "coverage.zip"));
+      expect(JSON.parse(backup.rawText).questions).toEqual(ordered);
+      const manifest = JSON.parse(backup.rawText).media;
+      expect(manifest.map((entry: { metadata: { blobKey: string } }) => entry.metadata.blobKey).sort())
+        .toEqual((complete ? [attachment.blobKey, independent.blobKey] : [independent.blobKey]).sort());
+      expect(await (await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true }))!.blob.text()).toBe(scenario === "blob-size" ? "A" : "AXOM");
+    }
+  });
+
   it("counts actual ZIP entries and reserves a manifest entry", async () => {
     await putQuestionAttachmentBlob(attachment.blobKey, { blob: new Blob(["AXOM"]), mimeType: "image/png", byteSize: 4, questionId: "held-question", updatedAt: attachment.updatedAt });
     await expect(createMediaBackupArchive({}, refs, [], {}, { maxEntries: 1 })).rejects.toThrow("Too many files");

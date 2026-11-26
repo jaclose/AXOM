@@ -6,7 +6,7 @@ import { readSourceOriginal, saveSourceOriginal } from "./decode/sources";
 import type { SourceDocument } from "./library";
 import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent } from "./questionAttachmentScope";
 import {
-  ATTACHMENT_EXPORT_KEY, MAX_QUESTION_ATTACHMENT_BYTES, base64ToBytes, blobToBase64,
+  ATTACHMENT_EXPORT_KEY, MAX_QUESTION_ATTACHMENT_BYTES, QUESTION_ATTACHMENT_TYPES, base64ToBytes, blobToBase64,
   extractQuestionAttachmentPayloads, getQuestionAttachmentBlob, stageQuestionAttachmentPayloads,
   type QuestionImageAttachment, type QuestionAttachmentExportPayload, type AttachmentReadOptions,
   type StagedQuestionAttachmentRestore,
@@ -159,8 +159,21 @@ function assertPhysicalZipMembers(bytes: Uint8Array) {
 const FORMAT = "axom-media-backup";
 export const LARGE_MEDIA_BACKUP_BYTES = 128 * 1024 * 1024;
 
-function mediaReferences(references: References) {
-  return [...new Map(references.flatMap(q => (q.attachments ?? []).map(a => [a.blobKey, { ...a, questionId: q.id }] as const))).values()];
+function mediaReferences(references: References, conflictingKeys?: Set<string>) {
+  const byKey = new Map<string, Omit<QuestionAttachmentExportPayload, "base64">>();
+  for (const question of references) {
+    for (const attachment of question.attachments ?? []) {
+      const metadata = { ...attachment, questionId: question.id };
+      const prior = byKey.get(metadata.blobKey);
+      if (!hasExactMediaDeclaration(metadata) || !QUESTION_ATTACHMENT_TYPES.includes(metadata.mimeType)
+        || (prior && (prior.byteSize !== metadata.byteSize || prior.mimeType !== metadata.mimeType))) {
+        conflictingKeys?.add(metadata.blobKey);
+      }
+      // Keep existing last-reference provenance for consistent shared bytes.
+      byKey.set(metadata.blobKey, metadata);
+    }
+  }
+  return [...byKey.values()];
 }
 export function mediaBackupBytes(references: References): number {
   return mediaReferences(references).reduce((n, a) => n + a.byteSize, 0);
@@ -182,13 +195,23 @@ export async function createMediaBackupArchive(payload: Record<string, unknown>,
     assertEntrySize(size, limit);
     assertArchiveBudget(binaryEntries + 2, expanded + size, budget);
   };
-  for (const metadata of mediaReferences(references)) {
+  // A last-reference-wins map alone can conceal contradictory metadata.
+  // Keep partial backups available, but never count such a key as covered.
+  const conflictingKeys = new Set<string>();
+  for (const metadata of mediaReferences(references, conflictingKeys)) {
     try {
+      if (conflictingKeys.has(metadata.blobKey)) throw new Error("Conflicting image metadata");
       const record = await getQuestionAttachmentBlob(metadata.blobKey, options);
       if (!record) throw new Error("Missing image");
       checkBinary(record.blob.size, MAX_QUESTION_ATTACHMENT_BYTES);
+      if (record.byteSize !== metadata.byteSize || record.blob.size !== metadata.byteSize
+        || record.mimeType !== metadata.mimeType
+        || (record.blob.type && record.blob.type !== metadata.mimeType)) {
+        throw new Error("Image bytes do not match backup metadata");
+      }
       const bytes = new Uint8Array(await record.blob.arrayBuffer());
       checkBinary(bytes.byteLength, MAX_QUESTION_ATTACHMENT_BYTES);
+      if (bytes.byteLength !== metadata.byteSize) throw new Error("Image bytes do not match backup metadata");
       const file = `media/${media.length}`;
       zip.file(file, bytes, { createFolders: false }); media.push({ file, metadata });
       expanded += bytes.byteLength; binaryEntries++;
