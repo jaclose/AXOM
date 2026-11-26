@@ -325,6 +325,49 @@ describe("portable binary media backup", () => {
     });
   });
 
+  describe.each([1, 2])("ZIP version %s physical member identity", version => {
+    it.each(["duplicate-media", "duplicate-workspace", "alias-first", "alias-last", "local-name", "count", "expanded", "valid"] as const)("checks %s before the ZIP map can collapse members", async scenario => {
+      const { default: JSZip } = await import("jszip");
+      const zip = new JSZip();
+      const manifest = JSON.stringify({ _backupFormat: "axom-media-backup", _backupVersion: version, media: [{ file: "media/0", metadata: { ...attachment, questionId: "held-question" } }], originals: [] });
+      const alias = "media/../workspace.json";
+      if (scenario === "alias-first") zip.file(alias, manifest, { createFolders: false });
+      zip.file("workspace.json", manifest);
+      if (scenario === "alias-last") zip.file(alias, manifest, { createFolders: false });
+      zip.file("media/0", "AXOM", { createFolders: false });
+      zip.file("media/1", "DIFF", { createFolders: false });
+      if (scenario === "duplicate-workspace") zip.file("workspacE.json", manifest, { createFolders: false });
+      const bytes = new Uint8Array(await zip.generateAsync({ type: "arraybuffer" }));
+      const view = new DataView(bytes.buffer);
+      const end = bytes.length - 22, start = view.getUint32(end + 16, true);
+      for (let cursor = start; cursor < end;) {
+        const length = view.getUint16(cursor + 28, true);
+        const name = String.fromCharCode(...bytes.subarray(cursor + 46, cursor + 46 + length));
+        const local = view.getUint32(cursor + 42, true);
+        if (scenario === "duplicate-media" && name === "media/1") {
+          bytes[cursor + 46 + 6] = 48; bytes[local + 30 + 6] = 48;
+        }
+        if (scenario === "duplicate-workspace" && name === "workspacE.json") {
+          bytes[cursor + 46 + 8] = 101; bytes[local + 30 + 8] = 101;
+        }
+        if (scenario === "local-name" && name === "media/1") bytes[local + 30 + 6] = 48;
+        if (scenario === "expanded" && name === "media/1") view.setUint32(cursor + 24, 0x7fffffff, true);
+        cursor += 46 + length + view.getUint16(cursor + 30, true) + view.getUint16(cursor + 32, true);
+      }
+      if (scenario === "count") {
+        view.setUint16(end + 8, 30001, true); view.setUint16(end + 10, 30001, true);
+      }
+      const file = new File([bytes.buffer], "physical.zip");
+      await putQuestionAttachmentBlob(attachment.blobKey, { blob: new Blob(["SAFE"]), mimeType: "image/png", byteSize: 4, questionId: "held-question", updatedAt: attachment.updatedAt });
+      if (scenario === "valid") {
+        expect(JSON.parse((await readPortableBackup(file)).rawText).media).toHaveLength(1);
+      } else {
+        await expect(readPortableBackup(file)).rejects.toThrow(/ZIP member records|Too many files|safety limit/);
+      }
+      expect(await (await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true }))!.blob.text()).toBe("SAFE");
+    });
+  });
+
   it("rejects unrelated ZIPs and missing media before allowing a workspace restore", async () => {
     const { default: JSZip } = await import("jszip");
     const zip = new JSZip(); zip.file("catalog.json", "{}");

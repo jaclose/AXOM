@@ -63,6 +63,66 @@ function uniqueBackupOriginals(documents: readonly SourceDocument[], payload: Re
   if (matched.size !== originals.size) throw new Error("An original-file identity is missing from the backup workspace.");
   return [...originals.values()];
 }
+// JSZip collapses physical member names into a map, so its file count and
+// unsafeOriginalName cannot detect an earlier overwritten member. Admit only
+// bounded, unambiguous single-disk ZIP records before invoking that parser.
+// AXOM's v1/v2 writer uses ordinary ZIP, ASCII paths and no Unicode path extras.
+function assertPhysicalZipMembers(bytes: Uint8Array) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const invalid = () => new Error("The backup contains invalid or ambiguous ZIP member records.");
+  const u16 = (offset: number) => view.getUint16(offset, true);
+  const u32 = (offset: number) => view.getUint32(offset, true);
+  let end = bytes.length - 22;
+  const earliest = Math.max(0, end - 65535);
+  while (end >= earliest && u32(end) !== 0x06054b50) end--;
+  if (end < earliest || end + 22 + u16(end + 20) !== bytes.length
+    || u16(end + 4) !== 0 || u16(end + 6) !== 0 || u16(end + 8) !== u16(end + 10)) throw invalid();
+  const count = u16(end + 10);
+  if (count > MAX_ARCHIVE_ENTRIES) throw new BackupArchiveLimitError("Too many files in this backup.");
+  const start = u32(end + 16);
+  if (start + u32(end + 12) !== end) throw invalid();
+  let cursor = start, expanded = 0;
+  const names = new Set<string>();
+  for (let i = 0; i < count; i++) {
+    if (cursor + 46 > end || u32(cursor) !== 0x02014b50 || u16(cursor + 34) !== 0) throw invalid();
+    const nameLength = u16(cursor + 28), extraLength = u16(cursor + 30), commentLength = u16(cursor + 32);
+    const nameStart = cursor + 46, extraStart = nameStart + nameLength, extraEnd = extraStart + extraLength;
+    const next = extraEnd + commentLength;
+    if (!nameLength || next > end) throw invalid();
+    let name = "";
+    for (let j = nameStart; j < extraStart; j++) {
+      const byte = bytes[j];
+      if (byte < 32 || byte > 126 || byte === 92) throw invalid();
+      name += String.fromCharCode(byte);
+    }
+    // Reject traversal, empty segments and file/directory aliases, regardless
+    // of archive order. No normalization of user-supplied member identities.
+    const identity = name.endsWith("/") ? name.slice(0, -1) : name;
+    if (identity.split("/").some(part => !part || part === "." || part === "..") || names.has(identity)) throw invalid();
+    names.add(identity);
+    // Unicode path extras can override the raw name in JSZip. ZIP64 is not
+    // needed within AXOM's entry and byte limits and is not emitted by AXOM.
+    for (let extra = extraStart; extra < extraEnd;) {
+      if (extra + 4 > extraEnd) throw invalid();
+      const type = u16(extra), length = u16(extra + 2);
+      if (type === 0x7075 || type === 0x0001 || extra + 4 + length > extraEnd) throw invalid();
+      extra += 4 + length;
+    }
+    const size = u32(cursor + 24);
+    const limit = name === "workspace.json" || /^originals\/\d+$/.test(name) ? MAX_ORIGINAL_BYTES : MAX_QUESTION_ATTACHMENT_BYTES;
+    assertEntrySize(size, limit);
+    expanded += size;
+    if (expanded > MAX_ARCHIVE_BYTES) throw new BackupArchiveLimitError("The expanded backup exceeds the safety limit.");
+    // JSZip reads the local-header filename, not only the central name.
+    const local = u32(cursor + 42);
+    if (local + 30 > start || u32(local) !== 0x04034b50 || u16(local + 26) !== nameLength
+      || local + 30 + nameLength + u16(local + 28) + u32(cursor + 20) > start) throw invalid();
+    for (let j = 0; j < nameLength; j++) if (bytes[local + 30 + j] !== bytes[nameStart + j]) throw invalid();
+    cursor = next;
+  }
+  if (cursor !== end) throw invalid();
+}
+
 const FORMAT = "axom-media-backup";
 export const LARGE_MEDIA_BACKUP_BYTES = 128 * 1024 * 1024;
 
@@ -166,7 +226,9 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
   if (file.size > MAX_ARCHIVE_BYTES) throw new Error("This backup exceeds the 2 GB archive limit.");
   const archiveBytes = await file.arrayBuffer();
   assertRestoreScope();
-  const zip = await JSZip.loadAsync(new Uint8Array(archiveBytes));
+  const bytes = new Uint8Array(archiveBytes);
+  assertPhysicalZipMembers(bytes);
+  const zip = await JSZip.loadAsync(bytes);
   assertRestoreScope();
   if (Object.keys(zip.files).length > MAX_ARCHIVE_ENTRIES) throw new Error("Too many files in this backup.");
   let expanded = 0;
