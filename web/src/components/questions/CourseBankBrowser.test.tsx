@@ -85,6 +85,7 @@ describe("CourseBankBrowser academic navigation", () => {
     { name: "Not yet assigned", other: "Term 4", extra: "missing" },
     { name: "Term assignment needs review", other: "Term 4", extra: "ambiguous" },
     { name: "", other: "Term 4", extra: "none" },
+    { name: "All terms", other: "Term 4", extra: "none" },
   ])("selects term identities rather than labels ($name)", async ({ name, other, extra }) => {
     const user = userEvent.setup();
     for (const reversed of [false, true]) {
@@ -102,6 +103,7 @@ describe("CourseBankBrowser academic navigation", () => {
       const filter = screen.getByRole("combobox", { name: "Filter by term" }) as HTMLSelectElement;
       expect([...filter.options].map((option) => option.value)).toHaveLength(3);
       expect(new Set([...filter.options].map((option) => option.value)).size).toBe(3);
+      expect(new Set([...filter.options].map((option) => option.textContent)).size).toBe(3);
       const expectedOther = extra === "missing" ? "status:unassigned"
         : extra === "ambiguous" ? "status:ambiguous" : "term:t4";
       await user.selectOptions(filter, "term:t2");
@@ -115,6 +117,23 @@ describe("CourseBankBrowser academic navigation", () => {
       expect([state.terms, state.courses, state.questionSets, state.questions]).toEqual(snapshot);
       mounted.unmount();
     }
+  });
+
+  it("distinguishes same-name course headings and options within one term", async () => {
+    const user = userEvent.setup();
+    state.courses = state.courses.map((entry) => ({ ...entry, termId: "t2", name: "Same course" }));
+    const onPractice = vi.fn();
+    render(<CourseBankBrowser onPractice={onPractice} />);
+    const outline = screen.getByRole("navigation", { name: "Course outline" });
+    expect(within(outline).getByText("Same course (ID: c2)")).toBeTruthy();
+    expect(within(outline).getByText("Same course (ID: c4)")).toBeTruthy();
+    const filter = screen.getByRole("combobox", { name: "Filter by course" });
+    expect(within(filter).getByRole("option", { name: "Same course (ID: c2)" })).toBeTruthy();
+    expect(within(filter).getByRole("option", { name: "Same course (ID: c4)" })).toBeTruthy();
+    await user.selectOptions(filter, "c4");
+    expect(screen.queryByText("School PQ 1")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Practice week" }));
+    expect(onPractice).toHaveBeenLastCalledWith([state.questionSets[0]]);
   });
 
   it("identifies image-linked questions without previewing source or answer images", () => {

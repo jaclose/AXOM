@@ -118,11 +118,16 @@ export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPract
   const duplicateTermLabels = new Set(termsAvailable.filter(([key, label]) =>
     termsAvailable.some(([otherKey, otherLabel]) => key !== otherKey && label === otherLabel)).map(([, label]) => label));
   function termLabel(key: string, label: string) {
-    if (!duplicateTermLabels.has(label) || !key.startsWith("term:")) return label;
+    if ((!duplicateTermLabels.has(label) && label !== "All terms") || !key.startsWith("term:")) return label;
     return `${label} (ID: ${key.slice(5)})`;
   }
   const termBranches = termFilter ? branches.filter((branch) => branch.termKey === termFilter) : branches;
   const courseOptions = [...new Map(termBranches.map((branch) => [courseIdentity(branch), branch.course])).entries()];
+  const duplicateCourseLabels = new Set(courseOptions.filter(([id, name]) =>
+    courseOptions.some(([otherId, otherName]) => id !== otherId && name === otherName)).map(([, name]) => name));
+  function courseLabel(id: string, name: string) {
+    return duplicateCourseLabels.has(name) || name === "All courses" ? `${name} (ID: ${id})` : name;
+  }
   const visibleBranches = courseFilter
     ? termBranches.filter((branch) => courseIdentity(branch) === courseFilter)
     : termBranches;
@@ -203,7 +208,7 @@ export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPract
         <option value="">All terms</option>{termsAvailable.map(([key, label]) => <option key={key} value={key}>{termLabel(key, label)}</option>)}
       </select></label>
       <label>Course<select aria-label="Filter by course" value={courseFilter} onChange={(event) => { setCourseFilter(event.target.value); setChosen(undefined); setLimit(12); }}>
-        <option value="">All courses</option>{courseOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+        <option value="">All courses</option>{courseOptions.map(([id, name]) => <option key={id} value={id}>{courseLabel(id, name)}</option>)}
       </select></label>
       <label>Collection type<select aria-label="Filter by collection type" value={source} onChange={(event) => { setSource(event.target.value); setLimit(12); }}>
         <option value="">All types</option>{availableSources.map((name) => <option key={name} value={name}>{name}</option>)}
@@ -221,7 +226,7 @@ export function CourseBankBrowser({ selectedIds = [], onSelectionChange, onPract
         <p className="cb-outline-label">Course outline</p>
         {visibleBranches.map((item, index) => <div className="cb-branch" key={item.key}>
           {(index === 0 || visibleBranches[index - 1].termKey !== item.termKey) && <p className="cb-term">{termLabel(item.termKey, item.term)}</p>}
-          {(index === 0 || courseIdentity(visibleBranches[index - 1]) !== courseIdentity(item) || visibleBranches[index - 1].termKey !== item.termKey) && <p className="cb-course">{item.course}</p>}
+          {(index === 0 || courseIdentity(visibleBranches[index - 1]) !== courseIdentity(item) || visibleBranches[index - 1].termKey !== item.termKey) && <p className="cb-course">{courseLabel(courseIdentity(item), item.course)}</p>}
           <button className="cb-module" aria-expanded={branch?.key === item.key} onClick={() => { setChosen(item.weeks[0] ? { key: item.weeks[0].key, scopeKey } : undefined); setQuery(""); setLimit(12); }}>
             <ChevronRight size={14} aria-hidden="true" className={branch?.key === item.key ? "cb-rotated" : ""} /><b>{item.module}</b><span>{item.weeks.length} weeks</span>
           </button>

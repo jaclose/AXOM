@@ -241,8 +241,9 @@ export function buildCourseQuestionBank(
     // if the duplicate names agree. Keep locally valid practice available,
     // but never choose one conflicting term by catalog order.
     const termMatches = course ? terms.filter((item) => item.id === course.termId) : [];
+    const name = termMatches[0]?.name;
     const term = termMatches.length > 1 ? "Term assignment needs review"
-      : termMatches[0] ? (termMatches[0].name.trim() || "Unnamed term") : "Not yet assigned";
+      : termMatches[0] ? ((typeof name === "string" && name.trim()) || "Unnamed term") : "Not yet assigned";
     // Identity and presentation are deliberately separate: custom names may
     // duplicate another term or a status label, but must not broaden a filter.
     const termKey = termMatches.length > 1 ? "status:ambiguous"
