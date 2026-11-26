@@ -477,6 +477,43 @@ describe("course schedule intake", () => {
     }
   });
 
+  it.each([["Renal", "Renal Lecture"], ["Renal Lecture", "Renal"]])("separates reviewed titles from original aliases: %s then %s", (prior, incoming) => {
+    const path = "Term 1/BPM 500/FTM 1/Week 3";
+    const originalDate = "2026-11-26";
+    const changedDate = "2026-11-27";
+    const existing: TrackerItem = {
+      id: "prior", path, label: prior, kind: "Lecture", activity: "lecture",
+      passes: 3, ankiPasses: 2, yield: "high", attendance: "missed", updated: originalDate,
+      note: "Scheduled " + originalDate,
+    };
+    const before = JSON.stringify(existing);
+    for (const [separator, source] of [[",", "schedule.csv"], [",", undefined], ["\t", "schedule.tsv"]] as const) {
+      const parse = (label: string) => parseCourseSchedule([originalDate, label].join(separator), [existing], source, {}, path)[0];
+      const row = parse(incoming);
+      expect(row).toMatchObject({ duplicate: "conflict", selected: false });
+      const [renamed] = reconcileScheduleDuplicates([{ ...row, label: "Different event", selected: true }], [existing], path);
+      expect(renamed).toMatchObject({ duplicate: "none", selected: true, legacyIdentity: row.legacyIdentity });
+      expect(scheduleCandidatesToTracker([renamed], path)).toHaveLength(1);
+      const [both] = reconcileScheduleDuplicates([{ ...renamed, date: changedDate }], [existing], path);
+      expect(both).toMatchObject({ duplicate: "none", selected: true, legacyIdentity: row.legacyIdentity });
+      const [reversed] = reconcileScheduleDuplicates([{ ...both, label: incoming }], [existing], path);
+      expect(reversed).toMatchObject({ duplicate: "conflict", selected: false });
+      const [sameNormalized] = reconcileScheduleDuplicates([{ ...row, label: incoming.toUpperCase(), selected: true }], [existing], path);
+      expect(sameNormalized).toMatchObject({ duplicate: "conflict", selected: false });
+      const [effectiveAlias] = reconcileScheduleDuplicates([{ ...parse("Unrelated"), label: incoming }], [existing], path);
+      expect(effectiveAlias).toMatchObject({ duplicate: "conflict", selected: false });
+      const [exact] = reconcileScheduleDuplicates([{ ...renamed, label: prior }], [existing], path);
+      expect(exact).toMatchObject({ duplicate: "exact", selected: false });
+      const [confirmed] = reconcileScheduleDuplicates([{ ...row, selected: true, confirmedConflictKey: row.conflictKey }], [existing], path);
+      expect(canImportScheduleCandidate(confirmed)).toBe(true);
+      const [stale] = reconcileScheduleDuplicates([{ ...confirmed, label: "Different event" }], [existing], path);
+      expect(stale).toMatchObject({ duplicate: "none", selected: false });
+      expect(stale.confirmedConflictKey).toBeUndefined();
+      expect(reconcileScheduleDuplicates([{ ...renamed, label: incoming }], [existing], "Term 2")[0].duplicate).toBe("none");
+      expect(JSON.stringify(existing)).toBe(before);
+    }
+  });
+
   it("keeps a 2,000-row intake linear enough for an ordinary browser interaction", () => {
     const input = Array.from({ length: 2_000 }, (_, index) => `2026-09-${String(index % 28 + 1).padStart(2, "0")},Synthetic Lecture ${index + 1},Lecture`).join("\n");
     const started = performance.now();

@@ -167,19 +167,24 @@ export function reconcileScheduleDuplicates(
       const [previousLabel] = legacy.previous.split("|");
       const originalTitleDate = titleDateIdentity(legacy.original);
       const previousTitleDate = titleDateIdentity(legacy.previous);
-      // Preserve the parsed source claim; a review edit must not erase it.
-      if (originalTitleDate !== titleDate) {
-        aliasClaims.push(...(existingByTitleDate.get(originalTitleDate) ?? []));
-      }
-      if (previousLabel && previousTitleDate !== originalTitleDate) {
-        aliasClaims.push(...(existingByTitleDate.get(previousTitleDate) ?? []));
-        // Date corrections retain the source title's legacy alias.
-        if (labelKey === originalLabel) {
-          aliasClaims.push(...(existingByTitleDate.get(JSON.stringify([previousLabel, candidate.date ?? ""])) ?? []));
+      // Provenance is immutable, but an explicitly different reviewed title
+      // has its own duplicate identity. Date-only edits retain the source alias.
+      if (labelKey === originalLabel) {
+        if (originalTitleDate !== titleDate) {
+          aliasClaims.push(...(existingByTitleDate.get(originalTitleDate) ?? []));
         }
+        if (previousLabel && previousTitleDate !== originalTitleDate) {
+          aliasClaims.push(...(existingByTitleDate.get(previousTitleDate) ?? []),
+            ...(existingByTitleDate.get(JSON.stringify([previousLabel, candidate.date ?? ""])) ?? []));
+        }
+        aliasClaims.push(...(legacyAliasesByTitleDate.get(originalTitleDate) ?? []));
       }
-      aliasClaims.push(...(legacyAliasesByTitleDate.get(originalTitleDate) ?? []),
-        ...(legacyAliasesByTitleDate.get(titleDate) ?? []));
+      // Reconcile the effective title in both directions, including renames.
+      const effectiveAlias = normalize(cleanLabel(candidate.label, candidate.kind));
+      if (effectiveAlias && effectiveAlias !== labelKey) {
+        aliasClaims.push(...(existingByTitleDate.get(JSON.stringify([effectiveAlias, candidate.date ?? ""])) ?? []));
+      }
+      aliasClaims.push(...(legacyAliasesByTitleDate.get(titleDate) ?? []));
     }
     const counterparts = [...new Set([...incompatible, ...aliasClaims])];
     const duplicate: ScheduleCandidate["duplicate"] = exact ? "exact" : counterparts.length ? "conflict"
