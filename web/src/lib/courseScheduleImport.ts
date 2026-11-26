@@ -165,18 +165,23 @@ export function reconcileScheduleDuplicates(
 function parseDelimitedSchedule(text: string, existing: readonly TrackerItem[], sourceName?: string, scopePath?: string): ScheduleCandidate[] {
   const lines = text.split("\n");
   const first = lines.find((line) => line.trim())?.trim() ?? "";
-  // Explicit file format takes precedence; pasted headers use the same
-  // first-field grammar whether date is quoted or unquoted.
+  // Explicit file format and a leading header take precedence. For other
+  // pasted schedules, infer structured context even after a preface or an
+  // invalid first date. Physical lines only provide format evidence here;
+  // they cannot independently authorize an activity.
   const declaredSeparator = /\.tsv$/i.test(sourceName ?? "") ? "\t"
     : /\.csv$/i.test(sourceName ?? "") ? "," : scheduleHeaderSeparator(first);
+  let detectedSeparator = declaredSeparator ?? lines.map(scheduleRecordSeparator).find(Boolean);
   // Frame structured records before admitting any physical line. Multiline
   // fields are not supported by splitRow; hold the whole affected record
   // instead of letting date-shaped continuation text become an activity.
   const records: Array<{ raw: string; index: number; endIndex: number; separator?: string }> = [];
   for (let index = 0; index < lines.length;) {
     const firstLine = lines[index].replace(/\r$/, "");
-    const datePrefix = firstLine.match(/^\s*"?(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}\/\d{1,2}\/\d{2,4})"? *([,\t])/);
-    const separator = declaredSeparator ?? scheduleHeaderSeparator(firstLine) ?? datePrefix?.[1];
+    // A recognized record may change the inferred delimiter in mixed paste,
+    // but an ambiguous line must not fall back to free-form admission.
+    const separator = declaredSeparator ?? scheduleRecordSeparator(firstLine) ?? detectedSeparator;
+    detectedSeparator = separator;
     let endIndex = index;
     let open = Boolean(separator) && quoteContinues(firstLine);
     while (open && endIndex + 1 < lines.length) {
@@ -255,6 +260,11 @@ function candidate(id: string, label: string, kind: TrackerKind, date: string | 
 
 function scheduleHeaderSeparator(line: string): string | undefined {
   return line.match(/^[ \uFEFF]*(?:"date"|date) *([,\t])/i)?.[1];
+}
+
+function scheduleRecordSeparator(line: string): string | undefined {
+  return scheduleHeaderSeparator(line) ??
+    line.match(/^\s*"?(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}\/\d{1,2}\/\d{2,4})"? *([,\t])/)?.[1];
 }
 
 function isScheduleHeader(cells: readonly string[]): boolean {

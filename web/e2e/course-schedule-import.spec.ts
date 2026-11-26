@@ -146,13 +146,17 @@ test("quoted multiline schedule fragments cannot create standalone attendance ev
   await expect(dialog.getByText("1 ready", { exact: true })).toBeVisible();
   await expect(dialog.getByText("Lines 2-4:", { exact: false })).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Import selected (1)" })).toBeEnabled();
-  await paste.fill("2026-11-27,Real synthetic event,IMCQ");
+  await paste.fill('2026-11-25,Prior synthetic event,Lecture\nunknown,"Start\n2026-11-26,Embedded synthetic event,IMCQ\nEnd",Lecture\n2026-11-27,Real synthetic event,IMCQ');
   await dialog.getByRole("button", { name: "Replace review with pasted rows" }).click();
-  await dialog.getByRole("button", { name: "Import selected (1)" }).click();
+  await expect(dialog.getByText("1 invalid", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("2 ready", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Lines 2-4:", { exact: false })).toBeVisible();
+  await dialog.getByRole("button", { name: "Import selected (2)" }).click();
   await reloadAfterSave(page);
   const module = page.locator(".week-overview").getByRole("region", { name: "FTM 1 by week" });
   await module.getByRole("button", { name: /Week 3/ }).click();
   await expect(module.getByRole("button", { name: "Missed Real synthetic event" })).toHaveCount(1);
+  await expect(module.getByRole("button", { name: "Missed Prior synthetic event" })).toHaveCount(1);
   await expect(module.getByRole("button", { name: "Missed Embedded synthetic event" })).toHaveCount(0);
 });
 

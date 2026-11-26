@@ -329,6 +329,37 @@ describe("course schedule intake", () => {
     expect(rows.filter((row) => row.sourceProblem).every((row) => !row.selected)).toBe(true);
   });
 
+
+  it.each([",", "\t"])("retains structured paste context for ambiguous %s records", (separator) => {
+    const row = (...cells: string[]) => cells.join(separator);
+    const prior = row("2026-11-25", "Prior", "Lecture");
+    const real = row("2026-11-27", "Real", "IMCQ");
+    const embedded = row("2026-11-26", "Embedded", "IMCQ");
+    const bad = [row("unknown", '"Start'), embedded, row('End"', "Lecture")].join("\n");
+    const escaped = [row("unknown", '"Start ""quoted""'), embedded, row('End"', "Lecture")].join("\n");
+    const header = row('"date"', '"title"', '"type"');
+    const file = separator === "," ? "schedule.csv" : "schedule.tsv";
+    for (const fixture of [
+      { input: [prior, bad, real].join("\n"), labels: ["Prior", "Real"], count: 1, range: "Lines 2-4:" },
+      { input: ["Schedule preface", header, bad, real].join("\n"), labels: ["Real"], count: 2, range: "Lines 3-5:" },
+      { input: [bad, real].join("\n"), labels: ["Real"], count: 1, range: "Lines 1-3:" },
+      { input: [prior, escaped, real].join("\n"), labels: ["Prior", "Real"], count: 1, range: "Lines 2-4:" },
+      { input: [prior, row("unknown", '"Start'), embedded, real].join("\n"), labels: ["Prior"], count: 1, range: "Lines 2-4:" },
+    ]) {
+      for (const source of [undefined, file]) {
+        const rows = parseCourseSchedule(fixture.input, [], source);
+        const held = rows.filter((candidate) => candidate.sourceProblem);
+        expect(held).toHaveLength(fixture.count);
+        expect(held.some((candidate) => candidate.sourceProblem?.includes(fixture.range) && candidate.rawInput?.includes("Embedded"))).toBe(true);
+        expect(scheduleCandidatesToTracker(rows, "T1").map((candidate) => candidate.label)).toEqual(fixture.labels);
+        for (const candidate of held) {
+          expect(candidate.selected).toBe(false);
+          expect(scheduleCandidatesToTracker([{ ...candidate, selected: true, label: "Forced", problem: undefined }], "T1")).toEqual([]);
+        }
+      }
+    }
+  });
+
   it("keeps a 2,000-row intake linear enough for an ordinary browser interaction", () => {
     const input = Array.from({ length: 2_000 }, (_, index) => `2026-09-${String(index % 28 + 1).padStart(2, "0")},Synthetic Lecture ${index + 1},Lecture`).join("\n");
     const started = performance.now();
