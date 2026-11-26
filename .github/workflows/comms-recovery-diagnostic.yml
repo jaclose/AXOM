@@ -74,8 +74,10 @@ jobs:
           retention-days: 7
       - name: Release tool regressions and repository hygiene
         run: |
+          npm run test:release
           npm run test:repo
           npm run repo:check
+          npm run typecheck:api
       - name: Focused recovery tests on regenerated tree
         run: npm --prefix web test -- src/lib/backup.test.ts src/lib/backupArchive.test.ts src/lib/backupExportScope.test.ts src/lib/questionAttachments.test.ts src/lib/refreshRecovery.test.ts src/components/shell/RefreshAfterBackup.test.tsx src/components/shell/SettingsModal.restore.test.ts src/components/shell/VaultSaveWatcher.test.tsx
       - name: Web typecheck lint test and build
