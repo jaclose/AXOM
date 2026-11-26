@@ -444,6 +444,39 @@ describe("course schedule intake", () => {
     }
   });
 
+  it.each([["Renal", "Renal Lecture"], ["Renal Lecture", "Renal"]])("rechecks edited dates in both legacy alias directions: %s then %s", (prior, incoming) => {
+    const path = "Term 1/BPM 500/FTM 1/Week 3";
+    const existing: TrackerItem = {
+      id: "prior", path, label: prior, kind: "Lecture", activity: "lecture",
+      passes: 3, ankiPasses: 2, yield: "high", attendance: "missed", updated: "2026-11-26",
+      note: "Scheduled 2026-11-26 · Imported from original.csv",
+    };
+    const before = JSON.stringify(existing);
+    for (const [separator, source] of [[",", "schedule.csv"], [",", "Pasted schedule"], ["\t", "schedule.tsv"]]) {
+      const parse = (date: string, label: string) => parseCourseSchedule([date, label].join(separator), [existing], source, {}, path)[0];
+      const fresh = parse("2026-11-25", incoming);
+      expect(fresh.selected).toBe(true);
+      expect(parse("2026-11-26", incoming).duplicate).toBe("conflict");
+      const [edited] = reconcileScheduleDuplicates([{ ...fresh, date: "2026-11-26" }], [existing], path);
+      expect(edited).toMatchObject({ duplicate: "conflict", selected: false, legacyIdentity: fresh.legacyIdentity });
+      expect(edited.conflictClaims).toEqual([expect.objectContaining({ id: "prior" })]);
+      expect(canImportScheduleCandidate({ ...edited, selected: true })).toBe(false);
+      expect(scheduleCandidatesToTracker([{ ...edited, selected: true }], path)).toEqual([]);
+      const [confirmed] = reconcileScheduleDuplicates([{ ...edited, selected: true, confirmedConflictKey: edited.conflictKey }], [existing], path);
+      expect(scheduleCandidatesToTracker([confirmed], path)).toHaveLength(1);
+      const [stale] = reconcileScheduleDuplicates([{ ...confirmed, date: "2026-11-27" }], [existing], path);
+      expect(stale.selected).toBe(false);
+      expect(stale.confirmedConflictKey).toBeUndefined();
+      const [restored] = reconcileScheduleDuplicates([{ ...stale, date: "2026-11-26" }], [existing], path);
+      expect(restored).toMatchObject({ duplicate: "conflict", selected: false });
+      const [moved] = reconcileScheduleDuplicates([{ ...parse("2026-11-26", incoming), date: "2026-11-27" }], [existing], path);
+      expect(moved).toMatchObject({ duplicate: "conflict", selected: false });
+      expect(reconcileScheduleDuplicates([{ ...fresh, date: "2026-11-26" }], [existing], "Term 2")[0].duplicate).not.toBe("conflict");
+      expect(parse("2026-11-26", prior)).toMatchObject({ duplicate: "exact", selected: false });
+      expect(JSON.stringify(existing)).toBe(before);
+    }
+  });
+
   it("keeps a 2,000-row intake linear enough for an ordinary browser interaction", () => {
     const input = Array.from({ length: 2_000 }, (_, index) => `2026-09-${String(index % 28 + 1).padStart(2, "0")},Synthetic Lecture ${index + 1},Lecture`).join("\n");
     const started = performance.now();

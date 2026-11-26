@@ -213,6 +213,63 @@ test("split-batch schedule title aliases require review after reload", async ({ 
   await expect(page.locator(".dr-label").getByText("Synthetic split Renal Lecture", { exact: true })).toHaveCount(1);
 });
 
+test("editing schedule dates rechecks both alias directions and retains prior progress after reload", async ({ page }) => {
+  await seedOnboarded(page);
+  await page.goto("/#tracker");
+  const path = "Term 1/BPM 500/FTM 1/Week 3";
+  const priorTitles = ["Synthetic edited Renal", "Synthetic edited Cardiac Lecture"];
+  const incomingTitles = ["Synthetic edited Renal Lecture", "Synthetic edited Cardiac"];
+  const before = await page.evaluate(async ({ path, priorTitles }) => {
+    type Dev = {
+      useStore: { getState: () => { tracker: Array<Record<string, unknown>>; bulkAddTrackerItems: (rows: Array<Record<string, unknown>>) => void } };
+      flushVault: () => Promise<void>;
+    };
+    const dev = await (window as unknown as { __AXOM_DEV__: Promise<Dev> }).__AXOM_DEV__;
+    dev.useStore.getState().bulkAddTrackerItems(priorTitles.map((label) => ({
+      path, label, kind: "Lecture", activity: "lecture", passes: 3, ankiPasses: 2,
+      yield: "high", attendance: "missed", note: "Scheduled 2026-11-26 · Imported from original.csv",
+    })));
+    await dev.flushVault();
+    return dev.useStore.getState().tracker.filter((row) => priorTitles.includes(String(row.label)));
+  }, { path, priorTitles });
+  expect(before).toHaveLength(2);
+  for (const row of before) expect(row).toMatchObject({ passes: 3, ankiPasses: 2, attendance: "missed" });
+  await reloadAfterSave(page);
+  await page.getByRole("button", { name: "Import schedule" }).click();
+  const dialog = page.getByRole("dialog", { name: "Import course schedule" });
+  await dialog.getByLabel("Tracker destination").fill(path);
+  await dialog.getByLabel("Or paste schedule rows").fill(incomingTitles.map((title) => "2026-11-25," + title).join("\n"));
+  await dialog.getByRole("button", { name: "Review schedule" }).click();
+  await expect(dialog.getByRole("button", { name: "Import selected (2)" })).toBeEnabled();
+  await dialog.getByLabel("Date").nth(0).fill("2026-11-26");
+  await dialog.getByLabel("Date").nth(1).fill("2026-11-26");
+  await expect(dialog.getByText("2 need review", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("list", { name: "Conflicting records" }).nth(0)).toContainText(priorTitles[0]);
+  await expect(dialog.getByRole("list", { name: "Conflicting records" }).nth(1)).toContainText(priorTitles[1]);
+  await dialog.getByRole("button", { name: "Select importable" }).click();
+  await expect(dialog.getByRole("button", { name: "Import selected (0)" })).toBeDisabled();
+  await dialog.getByRole("button", { name: "Confirm distinct activity" }).first().click();
+  await dialog.getByRole("button", { name: "Confirm distinct activity" }).click();
+  await expect(dialog.getByRole("button", { name: "Import selected (2)" })).toBeEnabled();
+  await dialog.getByLabel("Date").nth(0).fill("2026-11-27");
+  await dialog.getByLabel("Date").nth(0).fill("2026-11-26");
+  await expect(dialog.getByRole("button", { name: "Import selected (1)" })).toBeEnabled();
+  await dialog.getByRole("button", { name: "Confirm distinct activity" }).click();
+  await dialog.getByRole("button", { name: "Import selected (2)" }).click();
+  await reloadAfterSave(page);
+  const after = await page.evaluate(async () => {
+    type Dev = { useStore: { getState: () => { tracker: Array<Record<string, unknown>> } } };
+    const dev = await (window as unknown as { __AXOM_DEV__: Promise<Dev> }).__AXOM_DEV__;
+    return dev.useStore.getState().tracker;
+  });
+  for (const row of before) expect(after.find((item) => item.id === row.id)).toEqual(row);
+  for (const title of incomingTitles) {
+    const matches = after.filter((row) => row.label === title && row.path === path);
+    expect(matches).toHaveLength(1);
+    expect(matches[0]).toMatchObject({ passes: 0, ankiPasses: 0, note: expect.stringContaining("Scheduled 2026-11-26") });
+  }
+});
+
 async function completeOnboarding(page: Page) {
   if (!(await completeSetup(page, "Schedule Intake Test", { ifVisible: true }))) return;
   const later = page.getByRole("button", { name: "Review later" });

@@ -161,11 +161,26 @@ export function reconcileScheduleDuplicates(
     // Compare both directions across imports; fresh exact titles still win.
     const titleDate = titleDateIdentity(key);
     const legacy = candidate.legacyIdentity;
-    const aliasClaims = !exact && legacy && titleDateIdentity(legacy.original) === titleDate
-      ? [...(legacy.previous.split("|")[0] && legacy.previous !== legacy.original
-        ? existingByTitleDate.get(titleDateIdentity(legacy.previous)) ?? [] : []),
-        ...(legacyAliasesByTitleDate.get(titleDate) ?? [])]
-      : [];
+    const aliasClaims: ScheduleConflictClaim[] = [];
+    if (!exact && legacy) {
+      const [originalLabel] = legacy.original.split("|");
+      const [previousLabel] = legacy.previous.split("|");
+      const originalTitleDate = titleDateIdentity(legacy.original);
+      const previousTitleDate = titleDateIdentity(legacy.previous);
+      // Preserve the parsed source claim; a review edit must not erase it.
+      if (originalTitleDate !== titleDate) {
+        aliasClaims.push(...(existingByTitleDate.get(originalTitleDate) ?? []));
+      }
+      if (previousLabel && previousTitleDate !== originalTitleDate) {
+        aliasClaims.push(...(existingByTitleDate.get(previousTitleDate) ?? []));
+        // Date corrections retain the source title's legacy alias.
+        if (labelKey === originalLabel) {
+          aliasClaims.push(...(existingByTitleDate.get(JSON.stringify([previousLabel, candidate.date ?? ""])) ?? []));
+        }
+      }
+      aliasClaims.push(...(legacyAliasesByTitleDate.get(originalTitleDate) ?? []),
+        ...(legacyAliasesByTitleDate.get(titleDate) ?? []));
+    }
     const counterparts = [...new Set([...incompatible, ...aliasClaims])];
     const duplicate: ScheduleCandidate["duplicate"] = exact ? "exact" : counterparts.length ? "conflict"
       : labels.has(labelKey) || seenLabels.has(labelKey) ? "likely" : "none";
