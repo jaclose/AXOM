@@ -38,6 +38,7 @@ export interface BankModule {
   key: string;
   module: string;
   term: string;
+  termKey: string;
   course: string;
   courseId?: string;
   weeks: BankWeek[];
@@ -51,6 +52,49 @@ export function buildCourseQuestionBank(
   sets: readonly QuestionSet[], questions: readonly QuestionRecord[],
   courses: readonly Course[], terms: readonly Term[],
 ): BankModule[] {
+  // Raw duplicate originals are ambiguous before Map indexing. A last-write-wins
+  // lookup or Set-deduplicated member list must never certify a source week,
+  // launchable set card or ready count. Leave the records in the library for
+  // review and exclude every affected membership from this navigator only.
+  // An explicit local catalog ID must identify exactly one course, even if
+  // only one of its duplicate rows happens to contain the requested module.
+  const catalogIdCounts = new Map<string, number>();
+  for (const course of courses) {
+    catalogIdCounts.set(course.id, (catalogIdCounts.get(course.id) ?? 0) + 1);
+  }
+  const repeatedSetIds = new Set<string>();
+  const seenSetIds = new Set<string>();
+  const malformedMemberSets = new Set<QuestionSet>();
+  const ambiguousQuestionIds = new Set<string>();
+  for (const set of sets) {
+    if (seenSetIds.has(set.id)) repeatedSetIds.add(set.id);
+    seenSetIds.add(set.id);
+    if (new Set(set.questionIds).size !== set.questionIds.length) {
+      malformedMemberSets.add(set);
+      // A malformed review must not erase an independently verified primary.
+      // A malformed original cannot be rescued by an unrelated review set.
+      if (set.kind !== "review") set.questionIds.forEach((id) => ambiguousQuestionIds.add(id));
+    }
+  }
+  const originalSetIds = new Set(sets.filter((set) => set.kind !== "review").map((set) => set.id));
+  for (const set of sets) {
+    // Repeated review-only IDs hold those collections, not independent originals.
+    // Any collision involving an original retains the full identity quarantine.
+    if (repeatedSetIds.has(set.id) && originalSetIds.has(set.id)) {
+      set.questionIds.forEach((id) => ambiguousQuestionIds.add(id));
+    }
+  }
+  const seenQuestionIds = new Set<string>();
+  for (const question of questions) {
+    if (seenQuestionIds.has(question.id)) ambiguousQuestionIds.add(question.id);
+    seenQuestionIds.add(question.id);
+  }
+  // A held collection cannot certify a sibling through another review set.
+  // Reuse the collection eligibility decision for primary and legacy scope.
+  const heldCollectionIds = new Set(sets.filter((set) =>
+    repeatedSetIds.has(set.id) || malformedMemberSets.has(set)
+      || set.questionIds.some((id) => ambiguousQuestionIds.has(id)),
+  ).map((set) => set.id));
   const questionsById = new Map(questions.map((question) => [question.id, question]));
   const setsById = new Map(sets.map((set) => [set.id, set]));
   const memberships = new Map<string, QuestionSet[]>();
@@ -66,10 +110,11 @@ export function buildCourseQuestionBank(
   // scheduled week or borrow the course of a different primary source.
   const scopesById = new Map<string, CourseScope>();
   for (const question of questions) {
-    const related = memberships.get(question.id) ?? [];
-    // Bind legacy inference to a source collection, never to the first review
-    // collection encountered in an arbitrary array ordering.
-    const source = related.find((set) => set.kind !== "review");
+    // Review collections neither certify nor veto an independently supported
+    // legacy source week. Their own contradictory filing is checked below.
+    const related = (memberships.get(question.id) ?? []).filter((set) =>
+      !heldCollectionIds.has(set.id) && set.kind !== "review");
+    const source = related[0];
     const first = source?.scope;
     const unanimousLegacy = !question.setId && Boolean(first?.module)
       && related.every((set) =>
@@ -84,10 +129,19 @@ export function buildCourseQuestionBank(
 
   const modules = new Map<string, BankModule>();
   const eligibleBySet = new Map<string, string[]>();
+  // First classify local filing contradictions without depending on iteration order.
+  const filingHeldIds = new Set(heldCollectionIds);
+  const candidates: Array<{ set: QuestionSet; members: QuestionRecord[]; scope: CourseScope; catalogCourse: Course | undefined }> = [];
   for (const set of sets) {
+    // This also blocks secondary review sets from laundering a conflicted
+    // primary original into a different source week.
+    if (heldCollectionIds.has(set.id)) continue;
     const rawWeek = set.scope?.week;
     // Invalid explicit source weeks are review work, not a usable week label.
-    if (hasDeclaredWeek(rawWeek) && parseWeek(rawWeek) === undefined) continue;
+    if (hasDeclaredWeek(rawWeek) && parseWeek(rawWeek) === undefined) {
+      filingHeldIds.add(set.id);
+      continue;
+    }
     const members = [...new Set(set.questionIds)].flatMap((id) =>
       questionsById.has(id) ? [questionsById.get(id)!] : []);
     const scopes = members.map((question) => scopesById.get(question.id)!);
@@ -98,8 +152,26 @@ export function buildCourseQuestionBank(
     };
 
     // Week numbering without a module has no unambiguous academic owner.
-    if (!scope.module && scope.week !== undefined) continue;
+    if (!scope.module && scope.week !== undefined) {
+      filingHeldIds.add(set.id);
+      continue;
+    }
     const catalogCourse = courseForScope(scope, courses);
+    const catalogIdentity = scope.courseId ?? catalogCourse?.id;
+    if (catalogIdentity && (catalogIdCounts.get(catalogIdentity) ?? 0) > 1) {
+      filingHeldIds.add(set.id);
+      continue;
+    }
+
+    // Explicit course/module ownership must agree with the local catalog.
+    // Do not reparent a stale assignment to another course or certify a
+    // module absent from the assigned course. Keep the original collection
+    // and attempts intact for review outside this academic navigator.
+    if (scope.courseId && scope.module && (!catalogCourse || !catalogCourse.modules.some((module) =>
+      canonicalModuleKey(module.name) === canonicalModuleKey(scope.module!)))) {
+      filingHeldIds.add(set.id);
+      continue;
+    }
 
     // A contradictory source set is not a safe practice collection. Exclude
     // the *entire* set from this course/week navigator (not from the library)
@@ -113,7 +185,7 @@ export function buildCourseQuestionBank(
       // A question's refiled fields cannot silently override contradictory
       // primary-source proof just because a secondary review set agrees.
       const contradictsPrimary = question.setId != null && (
-        !primary || !primary.questionIds.includes(question.id)
+        !primary || primary.kind === "review" || heldCollectionIds.has(primary.id) || !primary.questionIds.includes(question.id)
         || (hasDeclaredWeek(primaryScope?.week) && primaryWeek === undefined)
         || Boolean(primaryScope && (
           (primaryScope.module && own.module
@@ -130,13 +202,55 @@ export function buildCourseQuestionBank(
         || Boolean(catalogCourse && own.courseId && own.courseId !== catalogCourse.id)
         || (scope.week !== undefined && own.week !== scope.week);
     });
-    if (conflicting) continue;
+    if (conflicting) {
+      filingHeldIds.add(set.id);
+      continue;
+    }
+    candidates.push({ set, members, scope, catalogCourse });
+  }
 
+  // A collection-wide filing hold also invalidates practice collections that
+  // depend on that original, even if their own subset looks consistent. Legacy
+  // records without an explicit primary cannot prove independence from any of
+  // their non-review source memberships. Explicitly bound questions in a
+  // different, valid primary remain independent of secondary collection holds.
+  const dependentsByPrimary = new Map<string, Set<string>>();
+  for (const { set, members } of candidates) {
+    for (const question of members) {
+      const primaryIds = question.setId != null ? [question.setId]
+        : (memberships.get(question.id) ?? []).filter((entry) => entry.kind !== "review").map((entry) => entry.id);
+      for (const primaryId of primaryIds) {
+        if (primaryId === set.id) continue;
+        const dependents = dependentsByPrimary.get(primaryId) ?? new Set<string>();
+        dependents.add(set.id);
+        dependentsByPrimary.set(primaryId, dependents);
+      }
+    }
+  }
+  // Set iteration visits newly added holds; each ID is processed at most once.
+  // This closes transitive dependencies before any week/card becomes visible.
+  for (const heldId of filingHeldIds) {
+    for (const dependentId of dependentsByPrimary.get(heldId) ?? []) {
+      filingHeldIds.add(dependentId);
+    }
+  }
+  for (const { set, members, scope, catalogCourse } of candidates) {
+    if (filingHeldIds.has(set.id)) continue;
     const course = catalogCourse;
-    const term = terms.find((item) => item.id === course?.termId)?.name ?? "Not yet assigned";
+    // A duplicate installed term ID cannot establish an academic label, even
+    // if the duplicate names agree. Keep locally valid practice available,
+    // but never choose one conflicting term by catalog order.
+    const termMatches = course ? terms.filter((item) => item.id === course.termId) : [];
+    const name = termMatches[0]?.name;
+    const term = termMatches.length > 1 ? "Term assignment needs review"
+      : termMatches[0] ? ((typeof name === "string" && name.trim()) || "Unnamed term") : "Not yet assigned";
+    // Identity and presentation are deliberately separate: custom names may
+    // duplicate another term or a status label, but must not broaden a filter.
+    const termKey = termMatches.length > 1 ? "status:ambiguous"
+      : termMatches[0] ? `term:${termMatches[0].id}` : "status:unassigned";
     const key = JSON.stringify([course?.id ?? scope.courseId ?? "unassigned", canonicalModuleKey(scope.module ?? "")]);
     const branch = modules.get(key) ?? {
-      key, term, course: course?.name || course?.code || "Choose a course when filing",
+      key, term, termKey, course: course?.name || course?.code || "Choose a course when filing",
       courseId: course?.id, module: scope.module ?? "Unfiled & mixed", weeks: [],
     };
     const weekKey = `${key}|${scope.week ?? "mixed"}`;
@@ -164,6 +278,10 @@ export function buildCourseQuestionBank(
   }
   return [...modules.values()].sort((a, b) => {
     if (!!a.courseId !== !!b.courseId) return a.courseId ? -1 : 1;
-    return `${a.term}/${a.course}/${a.module}`.localeCompare(`${b.term}/${b.course}/${b.module}`, undefined, { numeric: true });
+    return a.term.localeCompare(b.term, undefined, { numeric: true })
+      || a.termKey.localeCompare(b.termKey)
+      || a.course.localeCompare(b.course, undefined, { numeric: true })
+      || (a.courseId ?? "").localeCompare(b.courseId ?? "")
+      || a.module.localeCompare(b.module, undefined, { numeric: true });
   });
 }

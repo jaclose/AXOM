@@ -3,6 +3,7 @@ import type { Course } from "../types";
 import type { QuestionSet } from "../library";
 import type { QuestionRecord } from "../questions";
 import { bankSource, buildCourseQuestionBank, courseForScope } from "./questionBank";
+import { buildQuestionAvailabilityIndex } from "./moduleQuestionAvailability";
 
 const course: Course = { id: "c1", termId: "t1", code: "TEST 1", name: "First course", files: 0, modules: [{ id: "m1", name: "FTM 1" }] };
 const question: QuestionRecord = { id: "q1", source: "manual", stem: "Which sample?", options: [{ key: "A", text: "One" }, { key: "B", text: "Two" }],
@@ -140,9 +141,365 @@ describe("course bank read model", () => {
     expect(set).toEqual(original);
     expect(question).toEqual(row);
   });
+  it("holds colliding raw set IDs and all dependent review membership regardless of input order", () => {
+    const conflicting = { ...set, scope: { module: "FTM 1", week: 3, courseId: "c1" }, sourceDocumentIds: ["other-origin"] };
+    const review = { ...set, id: "review-q1", kind: "review" as const };
+    const cleanSet = { ...set, id: "unique", questionIds: ["q2"] };
+    const cleanQuestion = { ...question, id: "q2", setId: "unique" };
+    const original = structuredClone([set, conflicting, review, cleanSet, question, cleanQuestion]);
+    for (const originals of [[set, conflicting], [conflicting, set]]) {
+      const modules = indexed([...originals, review, cleanSet], [question, cleanQuestion]);
+      const weeks = modules.flatMap((module) => module.weeks);
+      expect(weeks.flatMap((week) => week.questionIds)).toEqual(["q2"]);
+      expect(weeks.flatMap((week) => week.sets.map((entry) => entry.id))).toEqual(["unique"]);
+      expect(weeks[0]).toMatchObject({ ready: 1, attempted: 1 });
+    }
+    expect([set, conflicting, review, cleanSet, question, cleanQuestion]).toEqual(original);
+  });
+  it("does not credit a duplicated raw question ID to any source week even when one copy looks ready", () => {
+    const other = { ...question, sourceDocumentId: "other-original", correctKey: "B" };
+    const cleanSet = { ...set, id: "unique", questionIds: ["q2"] };
+    const cleanQuestion = { ...question, id: "q2", setId: "unique" };
+    for (const originals of [[question, other], [other, question]]) {
+      const weeks = indexed([set, cleanSet], [...originals, cleanQuestion])
+        .flatMap((module) => module.weeks);
+      expect(weeks.flatMap((week) => week.questionIds)).toEqual(["q2"]);
+      expect(weeks.flatMap((week) => week.sets.map((entry) => entry.id))).toEqual(["unique"]);
+      expect(weeks[0]).toMatchObject({ ready: 1, attempted: 1 });
+    }
+  });
+
+  it("holds repeated original membership entries instead of silently deduplicating them", () => {
+    const duplicateMembers = { ...set, questionIds: ["q1", "q1"] };
+    const review = { ...set, id: "secondary", kind: "review" as const };
+    const cleanSet = { ...set, id: "unique", questionIds: ["q2"] };
+    const cleanQuestion = { ...question, id: "q2", setId: "unique" };
+    const weeks = indexed([duplicateMembers, review, cleanSet], [question, cleanQuestion])
+      .flatMap((module) => module.weeks);
+    expect(weeks.flatMap((week) => week.questionIds)).toEqual(["q2"]);
+    expect(weeks.flatMap((week) => week.sets.map((entry) => entry.id))).toEqual(["unique"]);
+    expect(duplicateMembers.questionIds).toEqual(["q1", "q1"]);
+  });
+
+  it("isolates duplicate review-only collection IDs without suppressing independent originals", () => {
+    const review = { ...set, id: "review", kind: "review" as const };
+    const duplicate = { ...review, title: "Stale review", scope: { module: "FTM 1", week: 3 } };
+    for (const setId of ["s1", undefined]) {
+      const records = [{ ...question, setId }];
+      for (const collections of [[set, review, duplicate], [duplicate, review, set]]) {
+        const snapshot = structuredClone([collections, records]);
+        const weeks = indexed(collections, records).flatMap((module) => module.weeks);
+        expect(weeks).toHaveLength(1);
+        expect(weeks[0]).toMatchObject({ week: 2, questionIds: ["q1"], ready: 1, attempted: 1 });
+        expect(weeks[0].sets.map((entry) => entry.id)).toEqual(["s1"]);
+        expect([collections, records]).toEqual(snapshot);
+      }
+      const mixed = { ...review, id: "s1" };
+      for (const collections of [[set, mixed], [mixed, set]]) {
+        expect(indexed(collections, records)).toEqual([]);
+      }
+    }
+  });
+
+  it("holds explicit review-only primary bindings even with matching own filing", () => {
+    const review = { ...set, id: "review", kind: "review" as const };
+    for (const own of [{}, { module: "FTM 1", week: 2 }]) {
+      const record = { ...question, ...own, setId: "review" };
+      const snapshot = structuredClone(record);
+      expect(indexed([review], [record])).toEqual([]);
+      expect(record).toEqual(snapshot);
+    }
+  });
+
+  it("does not let a malformed secondary review suppress an independently verified primary", () => {
+    const malformedReview = { ...set, id: "review", kind: "review" as const, questionIds: ["q1", "q1"] };
+    const [module] = indexed([set, malformedReview], [question]);
+    expect(module.weeks[0]).toMatchObject({ questionIds: ["q1"], ready: 1, attempted: 1 });
+    expect(module.weeks[0].sets.map((entry) => entry.id)).toEqual(["s1"]);
+  });
+
+  it("does not let a secondary collection certify a healthy sibling of a held primary", () => {
+    const primary = { ...set, questionIds: ["q1", "sibling"] };
+    const secondary = { ...set, id: "secondary", kind: "review" as const, questionIds: ["sibling"] };
+    const clean = { ...set, id: "clean", questionIds: ["clean-q"] };
+    const sibling = { ...question, id: "sibling", module: "FTM 1", week: 2 };
+    const cleanQuestion = { ...question, id: "clean-q", setId: "clean" };
+    const collision = { ...question, sourceDocumentId: "different-original" };
+    const original = structuredClone([primary, secondary, clean, question, collision, sibling, cleanQuestion]);
+    for (const collections of [[primary, secondary, clean], [secondary, primary, clean]]) {
+      for (const records of [[question, collision], [collision, question]]) {
+        const weeks = indexed(collections, [...records, sibling, cleanQuestion]).flatMap((module) => module.weeks);
+        expect(weeks.flatMap((week) => week.questionIds)).toEqual(["clean-q"]);
+        expect(weeks.flatMap((week) => week.sets.map((entry) => entry.id))).toEqual(["clean"]);
+      }
+    }
+    expect([primary, secondary, clean, question, collision, sibling, cleanQuestion]).toEqual(original);
+  });
+
+  it("does not inherit legacy source scope from a held original into a review collection", () => {
+    const primary = { ...set, questionIds: ["q1", "legacy"] };
+    const secondary = { ...set, id: "secondary", kind: "review" as const, questionIds: ["legacy"] };
+    const legacy = { ...question, id: "legacy", setId: undefined };
+    const collision = { ...question, sourceDocumentId: "different-original" };
+    for (const collections of [[primary, secondary], [secondary, primary]]) {
+      expect(indexed(collections, [question, collision, legacy])).toEqual([]);
+      const healthy = indexed(collections, [question, legacy]).flatMap((module) => module.weeks);
+      expect(healthy.flatMap((week) => week.questionIds).sort()).toEqual(["legacy", "q1"]);
+      expect(healthy[0].ready).toBe(2);
+    }
+  });
+
+
+  it("propagates whole-primary filing holds to secondary and legacy practice in either order", () => {
+    const primary = { ...set, questionIds: ["q1", "sibling"] };
+    const review = { ...set, id: "review", kind: "review" as const, questionIds: ["sibling"] };
+    const clean = { ...set, id: "clean", questionIds: ["clean-q"] };
+    const cleanQuestion = { ...question, id: "clean-q", setId: "clean" };
+    for (const invalid of [{ week: 3 }, { week: 0 }, { setId: "missing" }, { courseId: "c2" }]) {
+      for (const primaryId of ["s1", undefined]) {
+        const records = [{ ...question, ...invalid }, { ...question, id: "sibling", setId: primaryId }, cleanQuestion];
+        const snapshot = structuredClone(records);
+        for (const collections of [[primary, review, clean], [review, clean, primary]]) {
+          const weeks = indexed(collections, records).flatMap((module) => module.weeks);
+          expect(weeks.flatMap((week) => week.sets.map((entry) => entry.id))).toEqual(["clean"]);
+          expect(weeks.flatMap((week) => week.questionIds)).toEqual(["clean-q"]);
+          expect(weeks[0]).toMatchObject({ ready: 1, attempted: 1 });
+        }
+        expect(records).toEqual(snapshot);
+      }
+    }
+  });
+
+  it("propagates dependent primary holds transitively but keeps an independent primary", () => {
+    const primary = { ...set, questionIds: ["q1", "sibling"] };
+    const dependent = { ...set, id: "dependent", questionIds: ["sibling", "other"] };
+    const review = { ...set, id: "other-review", kind: "review" as const, questionIds: ["other"] };
+    const clean = { ...set, id: "clean", questionIds: ["clean-q"] };
+    const records = [{ ...question, week: 3 }, { ...question, id: "sibling" },
+      { ...question, id: "other", setId: "dependent" }, { ...question, id: "clean-q", setId: "clean" }];
+    for (const collections of [[primary, dependent, review, clean], [review, dependent, clean, primary]]) {
+      const weeks = indexed(collections, records).flatMap((module) => module.weeks);
+      expect(weeks.flatMap((week) => week.sets.map((entry) => entry.id))).toEqual(["clean"]);
+      expect(weeks.flatMap((week) => week.questionIds)).toEqual(["clean-q"]);
+    }
+  });
+
+  it("keeps an unambiguously filed legacy original available when a secondary review is stale", () => {
+    const legacy = { ...question, setId: undefined };
+    const primary = { ...set, scope: { module: "FTM 1", week: 2, courseId: "c1" } };
+    for (const stale of [{ week: 3 }, { week: 0 }, { module: "FTM 2" }, { courseId: "c2" }]) {
+      const review = { ...primary, id: "review", kind: "review" as const, scope: { ...primary.scope, ...stale } };
+      for (const collections of [[primary, review], [review, primary]]) {
+        const snapshot = structuredClone([collections, legacy]);
+        const weeks = indexed(collections, [legacy]).flatMap((module) => module.weeks);
+        expect(weeks).toHaveLength(1);
+        expect(weeks[0]).toMatchObject({ week: 2, questionIds: ["q1"], ready: 1, attempted: 1 });
+        expect(weeks[0].sets.map((entry) => entry.id)).toEqual(["s1"]);
+        expect([collections, legacy]).toEqual(snapshot);
+      }
+    }
+    const reviewOnly = { ...primary, id: "review", kind: "review" as const };
+    const otherOriginal = { ...primary, id: "other", scope: { ...primary.scope, week: 3 } };
+    expect(indexed([reviewOnly], [legacy])).toEqual([]);
+    expect(indexed([primary, otherOriginal], [legacy])).toEqual([]);
+  });
+
+  it("closes cyclic primary dependencies only when seeded by a filing hold, in every collection order", () => {
+    const scope = { module: "FTM 1", week: 2, courseId: "c1" };
+    const primaryA = { ...set, id: "a", scope, questionIds: ["qa", "qb", "seed"] };
+    const primaryB = { ...set, id: "b", scope, questionIds: ["qa", "qb"] };
+    const review = { ...set, id: "review", kind: "review" as const, scope, questionIds: ["qb"] };
+    const clean = { ...set, id: "clean", scope, questionIds: ["qc"] };
+    const orderings = (entries: QuestionSet[]): QuestionSet[][] => entries.length === 0 ? [[]]
+      : entries.flatMap((entry, index) => orderings(entries.filter((_, i) => i !== index)).map((rest) => [entry, ...rest]));
+    const permutations = orderings([primaryA, primaryB, review, clean]);
+    expect(permutations).toHaveLength(24);
+    for (const held of [false, true]) {
+      const records = [
+        { ...question, id: "qa", setId: "a" },
+        { ...question, id: "qb", setId: "b" },
+        { ...question, id: "seed", setId: "a", week: held ? 3 : 2 },
+        { ...question, id: "qc", setId: "clean" },
+      ];
+      for (const collections of permutations) {
+        const snapshot = structuredClone([collections, records]);
+        const weeks = indexed(collections, records).flatMap((module) => module.weeks);
+        expect(weeks).toHaveLength(1);
+        expect(weeks[0]).toMatchObject({ week: 2, ready: held ? 1 : 4, attempted: held ? 1 : 4 });
+        expect(weeks[0].questionIds.slice().sort()).toEqual(held ? ["qc"] : ["qa", "qb", "qc", "seed"]);
+        expect(weeks[0].sets.map((entry) => entry.id).sort()).toEqual(held ? ["clean"] : ["a", "b", "clean", "review"]);
+        expect([collections, records]).toEqual(snapshot);
+      }
+    }
+  });
+
+  it("keeps missing raw member references repairable without inventing a question", () => {
+    const primary = { ...set, questionIds: ["q1", "missing"] };
+    const review = { ...set, id: "review", kind: "review" as const };
+    const [module] = indexed([review, primary], [question]);
+    expect(module.weeks[0].questionIds).toEqual(["q1"]);
+    expect(module.weeks[0].sets.map((entry) => entry.id).sort()).toEqual(["review", "s1"]);
+    expect(primary.questionIds).toEqual(["q1", "missing"]);
+  });
+
   it("keeps generated and review provenance ahead of school-like titles", () => {
     expect(bankSource({ ...set, kind: "generated" })).toBe("AXOM generated");
     expect(bankSource({ ...set, kind: "review" })).toBe("Review");
     expect(bankSource(set)).toBe("IMCQ");
+  });
+});
+
+describe("catalog course/module ownership", () => {
+  it("agrees with Tracker availability for explicit catalog contradictions without refiling stored records", () => {
+    const second = { ...course, id: "c2", code: "TEST 2", name: "Second course", termId: "t2",
+      modules: [{ id: "m2", name: "DERS" }] };
+    const terms = [term, { id: "t2", name: "Term 2" }];
+    const curriculum = { id: "synthetic", label: "Synthetic outline", terms: [
+      { name: "Term 1", courses: [{ code: course.code, name: course.name, modules: ["FTM 1"] }] },
+      { name: "Term 2", courses: [{ code: second.code, name: second.name, modules: ["DERS"] }] },
+    ] };
+    for (const invalid of [
+      { courseId: "c1", module: "DERS" },
+      { courseId: "c1", module: "Unknown module" },
+      { courseId: "deleted", module: "DERS" },
+      { courseId: "empty", module: "FTM 1" },
+    ]) {
+      const courses = [course, second, { ...course, id: "empty", modules: [] }];
+      const scope = { ...invalid, week: 2 };
+      const original = { ...set, scope };
+      const record = { ...question, ...scope };
+      const review = { ...original, id: "secondary", kind: "review" as const };
+      const validScope = { courseId: "c2", module: "DERS", week: 2 };
+      const clean = { ...set, id: "clean", questionIds: ["clean-q"], scope: validScope };
+      const records = [record, { ...question, ...validScope, id: "clean-q", setId: "clean" }];
+      for (const sets of [[original, review, clean], [clean, review, original]]) {
+        const snapshot = structuredClone([sets, records, courses]);
+        const bank = buildCourseQuestionBank(sets, records, courses, terms);
+        const weeks = bank.flatMap((branch) => branch.weeks);
+        expect(weeks.flatMap((week) => week.questionIds)).toEqual(["clean-q"]);
+        expect(weeks.flatMap((week) => week.sets.map((entry) => entry.id))).toEqual(["clean"]);
+        expect(bank[0].courseId).toBe("c2");
+        expect(weeks[0]).toMatchObject({ ready: 1, attempted: 1 });
+        const tracker = buildQuestionAvailabilityIndex({ curriculum, terms, courses, sets, questions: records });
+        expect(tracker.unassignedQuestions).toBe(1);
+        expect(tracker.unassignedCollections).toBe(2);
+        expect([...tracker.byModule.values()]).toHaveLength(1);
+        expect([...tracker.byModule.values()][0]).toMatchObject({ readyQuestions: 1, storedQuestions: 1, indexedWeeks: [2] });
+        expect([sets, records, courses]).toEqual(snapshot);
+      }
+    }
+  });
+
+  it("preserves aliases, explicit ownership of repeated modules and unscheduled/custom practice", () => {
+    const repeated = { ...course, id: "c2", termId: "t2" };
+    const custom = { ...course, modules: [{ id: "custom", name: "Personal practice" }] };
+    for (const { scope, courses, expectedCourse } of [
+      { scope: { courseId: "c1", module: "FTM-1", week: 2 }, courses: [course], expectedCourse: "c1" },
+      { scope: { courseId: "c2", module: "ftm1", week: 2 }, courses: [course, repeated], expectedCourse: "c2" },
+      { scope: { courseId: "c1", module: "Personal practice", week: 2 }, courses: [custom], expectedCourse: "c1" },
+      { scope: { module: "Personal practice" }, courses: [course], expectedCourse: undefined },
+      { scope: { courseId: "c1" }, courses: [course], expectedCourse: "c1" },
+    ]) {
+      const [branch] = indexed([{ ...set, scope }], [{ ...question, ...scope }], courses);
+      expect(branch.courseId).toBe(expectedCourse);
+      expect(branch.weeks[0]).toMatchObject({ questionIds: ["q1"], ready: 1, attempted: 1 });
+    }
+  });
+});
+
+describe("local catalog identity and curriculum evidence", () => {
+  it("holds duplicate course identities in either order without suppressing an unrelated original", () => {
+    const second = { ...course, termId: "t2", code: "TEST 2", name: "Other owner" };
+    const cleanCourse = { ...course, id: "clean-course", termId: "t2", code: "TEST 3",
+      modules: [{ id: "m2", name: "DERS" }] };
+    const scope = { courseId: "c1", module: "FTM 1", week: 2 };
+    const cleanScope = { courseId: cleanCourse.id, module: "DERS", week: 2 };
+    const original = { ...set, scope };
+    const review = { ...original, id: "secondary", kind: "review" as const };
+    const clean = { ...set, id: "clean", scope: cleanScope, questionIds: ["clean-q"] };
+    const records = [{ ...question, ...scope }, { ...question, ...cleanScope, id: "clean-q", setId: "clean" }];
+    for (const duplicate of [second, { ...second, modules: [{ id: "other", name: "Other module" }] }, { ...course }]) {
+      for (const catalog of [[course, duplicate, cleanCourse], [duplicate, course, cleanCourse]]) {
+        for (const collections of [[original, review, clean], [clean, review, original]]) {
+          const snapshot = structuredClone([collections, records, catalog]);
+          const bank = buildCourseQuestionBank(collections, records, catalog, [term, { id: "t2", name: "Term 2" }]);
+          expect(bank.flatMap((branch) => branch.weeks.flatMap((week) => week.questionIds))).toEqual(["clean-q"]);
+          expect(bank.flatMap((branch) => branch.weeks.flatMap((week) => week.sets.map((entry) => entry.id)))).toEqual(["clean"]);
+          expect([collections, records, catalog]).toEqual(snapshot);
+        }
+      }
+    }
+  });
+
+  it("preserves local practice without asserting curriculum-indexed availability for unsupported owners", () => {
+    const outline = { id: "synthetic", label: "Synthetic outline", terms: [
+      { name: "Term 1", courses: [{ code: course.code, name: course.name, modules: ["FTM 1"] }] },
+    ] };
+    const duplicateOutline = { ...outline, terms: [{ ...outline.terms[0],
+      courses: [...outline.terms[0].courses, ...outline.terms[0].courses] }] };
+    for (const { local, terms, curriculum, module } of [
+      { local: course, terms: [term], curriculum: outline, module: "FTM 1" },
+      { local: course, terms: [], curriculum: outline, module: "FTM 1" },
+      { local: { ...course, code: "UNKNOWN" }, terms: [term], curriculum: outline, module: "FTM 1" },
+      { local: course, terms: [term], curriculum: duplicateOutline, module: "FTM 1" },
+      { local: { ...course, modules: [{ id: "custom", name: "Personal practice" }] },
+        terms: [term], curriculum: outline, module: "Personal practice" },
+    ]) {
+      const scope = { courseId: local.id, module, week: 2 };
+      const collections = [{ ...set, scope }];
+      const records = [{ ...question, ...scope }];
+      const catalog = [local];
+      const snapshot = structuredClone([collections, records, catalog, terms, curriculum]);
+      const bank = buildCourseQuestionBank(collections, records, catalog, terms);
+      expect(bank[0].weeks[0]).toMatchObject({ questionIds: ["q1"], ready: 1, attempted: 1 });
+      const tracker = buildQuestionAvailabilityIndex({ sets: collections, questions: records, courses: catalog, terms, curriculum });
+      const indexedOwner = local === course && terms.length === 1 && curriculum === outline;
+      expect(tracker.unassignedQuestions).toBe(indexedOwner ? 0 : 1);
+      expect(tracker.unassignedCollections).toBe(indexedOwner ? 0 : 1);
+      expect(tracker.byModule.size).toBe(indexedOwner ? 1 : 0);
+      expect([collections, records, catalog, terms, curriculum]).toEqual(snapshot);
+    }
+  });
+});
+
+describe("installed term label integrity", () => {
+  it("withholds ambiguous term labels in every order without removing local practice or history", () => {
+    const second = { ...course, id: "c2", termId: "t2", name: "Second course",
+      modules: [{ id: "m2", name: "DERS" }] };
+    const otherTerm = { id: "t2", name: "Term 2" };
+    const primary = { ...set, scope: { module: "FTM 1", week: 2, courseId: "c1" } };
+    const control = { ...set, id: "control", questionIds: ["q2"],
+      scope: { module: "DERS", week: 3, courseId: "c2" } };
+    const records = [question, { ...question, id: "q2", setId: "control" }];
+    for (const variant of [
+      { terms: [term, otherTerm], label: "Term 1" },
+      { terms: [otherTerm], label: "Not yet assigned" },
+      ...["Other term", term.name, ""].map((name) => ({
+        terms: [term, { ...term, name }, otherTerm], label: "Term assignment needs review",
+      })),
+      { terms: [term, { ...term, name: "Other term" }, { ...term, name: "Third term" }, otherTerm],
+        label: "Term assignment needs review" },
+    ]) {
+      for (const terms of [variant.terms, [...variant.terms].reverse()]) {
+        for (const reversed of [false, true]) {
+          const collections = reversed ? [control, primary] : [primary, control];
+          const catalog = reversed ? [second, course] : [course, second];
+          const questions = reversed ? [...records].reverse() : records;
+          const snapshot = structuredClone([collections, questions, catalog, terms]);
+          const bank = buildCourseQuestionBank(collections, questions, catalog, terms);
+          expect(bank).toHaveLength(2);
+          const first = bank.find((entry) => entry.courseId === "c1");
+          const independent = bank.find((entry) => entry.courseId === "c2");
+          expect(first?.term).toBe(variant.label);
+          expect(first?.termKey).toBe(variant.label === "Term 1" ? "term:t1"
+            : variant.label === "Not yet assigned" ? "status:unassigned" : "status:ambiguous");
+          expect(independent?.termKey).toBe("term:t2");
+          expect(first?.weeks[0]).toMatchObject({ week: 2, questionIds: ["q1"], ready: 1, attempted: 1 });
+          expect(independent?.term).toBe("Term 2");
+          expect(independent?.weeks[0]).toMatchObject({ week: 3, questionIds: ["q2"], ready: 1, attempted: 1 });
+          expect([collections, questions, catalog, terms]).toEqual(snapshot);
+        }
+      }
+    }
   });
 });
