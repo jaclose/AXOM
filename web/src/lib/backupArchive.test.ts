@@ -289,6 +289,42 @@ describe("portable binary media backup", () => {
     expect(await (await readSourceOriginal(document.id, document.checksum))?.text()).toBe("private source");
   });
 
+  describe.each([1, 2])("ZIP version %s image manifest identity", version => {
+    it.each(["path", "key", "identical", "trimmed", "legacy", "blank", "distinct", "legacy-distinct"] as const)("validates %s before staging any image", async scenario => {
+      const { default: JSZip } = await import("jszip");
+      const first = { file: "media/0", metadata: { ...attachment, questionId: "held-question" } };
+      const second = {
+        file: scenario === "path" || scenario === "identical" ? "media/0" : "media/1",
+        metadata: {
+          ...first.metadata,
+          id: scenario === "identical" ? attachment.id : scenario === "legacy" || scenario === "blank" ? attachment.blobKey : "other-figure",
+          blobKey: scenario === "key" || scenario === "identical" ? attachment.blobKey
+            : scenario === "trimmed" ? ` ${attachment.blobKey} `
+            : scenario === "legacy" || scenario === "legacy-distinct" ? undefined
+            : scenario === "blank" ? " " : "other-key",
+        },
+      };
+      const zip = new JSZip();
+      zip.file("workspace.json", JSON.stringify({ _backupFormat: "axom-media-backup", _backupVersion: version, media: [first, second], originals: [] }));
+      zip.file("media/0", "AXOM", { createFolders: false });
+      zip.file("media/1", "DIFF", { createFolders: false });
+      const file = new File([await zip.generateAsync({ type: "arraybuffer" })], "identities.zip");
+      await putQuestionAttachmentBlob(attachment.blobKey, {
+        blob: new Blob(["SAFE"]), mimeType: "image/png", byteSize: 4,
+        questionId: "held-question", updatedAt: attachment.updatedAt,
+      });
+      if (scenario === "distinct" || scenario === "legacy-distinct") {
+        const backup = await readPortableBackup(file);
+        expect(JSON.parse(backup.rawText).media).toHaveLength(2);
+      } else {
+        await expect(readPortableBackup(file)).rejects.toThrow("duplicate image identities");
+      }
+      expect(await (await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true }))!.blob.text()).toBe("SAFE");
+      expect(await getQuestionAttachmentBlob("other-key", { localOnly: true })).toBeUndefined();
+      expect(await getQuestionAttachmentBlob("other-figure", { localOnly: true })).toBeUndefined();
+    });
+  });
+
   it("rejects unrelated ZIPs and missing media before allowing a workspace restore", async () => {
     const { default: JSZip } = await import("jszip");
     const zip = new JSZip(); zip.file("catalog.json", "{}");
