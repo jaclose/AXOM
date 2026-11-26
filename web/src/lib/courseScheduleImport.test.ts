@@ -1,8 +1,93 @@
 import { describe, expect, it } from "vitest";
-import { parseCourseSchedule, scheduleCandidatesToTracker } from "./courseScheduleImport";
+import { canImportScheduleCandidate, parseCourseSchedule, reconcileScheduleDuplicates, scheduleCandidatesToTracker } from "./courseScheduleImport";
 import type { TrackerItem } from "./types";
+import { absenceStanding, isAttended } from "./course-engine/weekView";
 
 describe("course schedule intake", () => {
+
+  it.each([
+    ["Lab", ""], ["Review Loop", ""], ["Assessment", ""],
+    ["Clinical Lab Methods", ""], ["Renal Lecture", ""],
+    ["Cardiac Lab", ","], ["Reading: Chapter 5", ""],
+    ["Clinical Lab Methods", ",Lab"],
+  ])("preserves the structured title %s with type suffix %s", (label, suffix) => {
+    const input = `2026-11-25,${label}${suffix}`;
+    for (const source of [undefined, "schedule.csv"]) {
+      const [row] = parseCourseSchedule(input, [], source);
+      expect(row).toMatchObject({ label, selected: true });
+      expect(scheduleCandidatesToTracker([row], "T1")[0].label).toBe(label);
+    }
+  });
+
+  it("retains a quoted TSV title and ordinary free-form behavior", () => {
+    const [row] = parseCourseSchedule('2026-11-25\t"Clinical Lab, Methods"\t', [], "schedule.tsv");
+    expect(row).toMatchObject({ label: "Clinical Lab, Methods", selected: true, kind: "Lab" });
+    expect(parseCourseSchedule("Clinical Lab Methods")[0].label).toBe("Clinical  Methods");
+  });
+
+  it("preserves distinct structured titles and prevents duplicate reimport", () => {
+    const path = "Term 1/BPM 500/FTM 1/Week 3";
+    const input = "2026-11-25,Renal Lecture\n2026-11-25,Renal";
+    const rows = parseCourseSchedule(input, [], "schedule.csv", {}, path);
+    const projected = scheduleCandidatesToTracker(rows, path);
+    expect(projected.map((row) => row.label)).toEqual(["Renal Lecture", "Renal"]);
+    const existing: TrackerItem[] = projected.map((row, index) => ({
+      ...row, id: String(index), updated: "2026-11-25", passes: index + 1,
+    }));
+    const before = JSON.stringify(existing);
+    expect(parseCourseSchedule(input, existing, "schedule.csv", {}, path).every((row) => row.duplicate === "exact" && !row.selected)).toBe(true);
+    expect(JSON.stringify(existing)).toBe(before);
+    // Old unclassified imports lost the word Lecture. Do not silently
+    // recreate a possibly identical event or rewrite its saved progress.
+    const legacy = existing.filter((row) => row.label === "Renal");
+    const [held] = parseCourseSchedule("2026-11-25,Renal Lecture", legacy, "schedule.csv", {}, path);
+    expect(held).toMatchObject({ label: "Renal Lecture", duplicate: "conflict", selected: false });
+    expect(scheduleCandidatesToTracker([{ ...held, selected: true }], path)).toEqual([]);
+    expect(parseCourseSchedule("2026-11-25,Renal Lecture", legacy, "schedule.csv", {}, "Other term")[0].selected).toBe(true);
+    expect(JSON.stringify(existing)).toBe(before);
+  });
+
+
+  it.each([undefined, "lecture", "flipped-lecture"] as const)("holds a classified or unclassified legacy title alias (%s) across file and paste imports", (activity) => {
+    const path = "Term 1/BPM 500/FTM 1/Week 3";
+    const existing: TrackerItem = {
+      id: "legacy-original", path, label: "Renal", kind: "Lecture", activity,
+      passes: 3, ankiPasses: 2, yield: "high", attendance: "missed", updated: "2026-11-26",
+      note: "Scheduled 2026-11-26 · Imported from schedule.csv",
+    };
+    const before = JSON.stringify(existing);
+    for (const source of ["schedule.csv", "Pasted schedule"]) {
+      const [held] = parseCourseSchedule("2026-11-26,Renal Lecture", [existing], source, {}, path);
+      expect(held).toMatchObject({ duplicate: "conflict", selected: false });
+      expect(held.conflictClaims).toEqual([expect.objectContaining({ id: existing.id, label: "Renal", activity })]);
+      expect(scheduleCandidatesToTracker([{ ...held, selected: true }], path)).toEqual([]);
+      const [confirmed] = reconcileScheduleDuplicates([{ ...held, selected: true, confirmedConflictKey: held.conflictKey }], [existing], path);
+      expect(scheduleCandidatesToTracker([confirmed], path)).toHaveLength(1);
+      expect(reconcileScheduleDuplicates([confirmed], [{ ...existing, passes: 4 }], path)[0].selected).toBe(true);
+      expect(reconcileScheduleDuplicates([confirmed], [{ ...existing, id: "replacement" }], path)[0].selected).toBe(false);
+      expect(reconcileScheduleDuplicates([confirmed], [{ ...existing, note: "Scheduled 2026-11-26 · Imported from another.csv" }], path)[0].selected).toBe(false);
+      expect(parseCourseSchedule("2026-11-27,Renal Lecture", [existing], source, {}, path)[0].selected).toBe(true);
+      expect(parseCourseSchedule("2026-11-26,Renal Lecture", [existing], source, {}, "Term 2")[0].selected).toBe(true);
+    }
+    expect(JSON.stringify(existing)).toBe(before);
+  });
+
+  it.each([["Renal Lecture", "Renal"], ["Renal", "Renal Lecture"]])("reviews distinct titles in split batches: %s then %s", (first, second) => {
+    const path = "Term 1/BPM 500/FTM 1/Week 3";
+    const line = (title: string) => `2026-11-26,${title}`;
+    const [firstItem] = scheduleCandidatesToTracker(parseCourseSchedule(line(first)), path);
+    const existing: TrackerItem = { ...firstItem, id: "first", updated: "2026-11-26", passes: 3 };
+    const [held] = parseCourseSchedule(line(second), [existing], "schedule.csv", {}, path);
+    expect(held).toMatchObject({ label: second, duplicate: "conflict", selected: false });
+    const [confirmed] = reconcileScheduleDuplicates([{ ...held, selected: true, confirmedConflictKey: held.conflictKey }], [existing], path);
+    const [secondItem] = scheduleCandidatesToTracker([confirmed], path);
+    expect(secondItem.label).toBe(second);
+    const both = [existing, { ...secondItem, id: "second", updated: "2026-11-26" }];
+    expect(parseCourseSchedule([line(first), line(second)].join("\n"), both, "schedule.csv", {}, path).every((row) => row.duplicate === "exact" && !row.selected)).toBe(true);
+    expect(scheduleCandidatesToTracker(parseCourseSchedule([line(first), line(second)].join("\n")), path).map((row) => row.label)).toEqual([first, second]);
+    expect(existing.passes).toBe(3);
+  });
+
   it("extracts dated course work conservatively", () => {
     const rows = parseCourseSchedule("2026-08-14,Renal Physiology,Lecture\n2026-08-14,Renal DLA,DLA\n2026-08-20,IMCQ 2,Assessment");
     expect(rows.map((row) => [row.date, row.kind])).toEqual([
@@ -73,6 +158,360 @@ describe("course schedule intake", () => {
     const [row] = parseCourseSchedule("BEGIN:VCALENDAR\nBEGIN:VEVENT\nDTSTART:20260814T080000\nEND:VEVENT\nEND:VCALENDAR", [], "broken.ics");
     expect(row).toMatchObject({ selected: false, sourceName: "broken.ics", problem: "Calendar event 1 has no title." });
     expect(scheduleCandidatesToTracker([row], "T1")).toEqual([]);
+  });
+
+  it("retains explicit CSV activity types without inventing attendance or policy", () => {
+    const rows = parseCourseSchedule([
+      "2026-08-14,Renal clearance,Lecture",
+      "2026-08-14,Fluid balance,Flipped Lecture",
+      "2026-08-14,Case discussion,Small Group",
+      "2026-08-14,Clinical quiz,IMCQ",
+      "2026-08-14,Weekly quiz,ESoft",
+      "2026-08-14,Independent practice,Practice questions",
+      "2026-08-14,Personal review",
+    ].join("\n"));
+    expect(rows.map(({ label, kind, activity }) => [label, kind, activity])).toEqual([
+      ["Renal clearance", "Lecture", "lecture"],
+      ["Fluid balance", "Lecture", "flipped-lecture"],
+      ["Case discussion", "Requirement", "small-group"],
+      ["Clinical quiz", "Assessment", "imcq"],
+      ["Weekly quiz", "Assessment", "esoft"],
+      ["Independent practice", "PQ", "pq"],
+      ["Personal review", "Review Loop", undefined],
+    ]);
+    const path = "Term 1/BPM 500/FTM 1/Week 3";
+    const items: TrackerItem[] = scheduleCandidatesToTracker(rows, path).map((row, index) => ({ ...row, id: String(index), updated: "2026-08-14" }));
+    expect(items.every((item) => item.attendance === undefined && item.passes === 0)).toBe(true);
+    expect(items.map((item) => isAttended(item.activity))).toEqual([true, true, true, true, true, false, false]);
+    const term = { name: "Term 1", absenceAllowances: { lecture: 3, "small-group": 2, imcq: 2, esoft: 2 } };
+    expect(absenceStanding(items, term).every((entry) => entry.missed === 0)).toBe(true);
+    const missed = items.map((item) => isAttended(item.activity) ? { ...item, attendance: "missed" as const } : item);
+    expect(absenceStanding(missed, term)).toEqual([
+      { category: "lecture", missed: 2, allowed: 3, remaining: 1 },
+      { category: "small-group", missed: 1, allowed: 2, remaining: 1 },
+      { category: "imcq", missed: 1, allowed: 2, remaining: 1 },
+      { category: "esoft", missed: 1, allowed: 2, remaining: 1 },
+    ]);
+    expect(parseCourseSchedule("2026-08-14,Case discussion,Small Group", items, "schedule.csv", {}, path)[0]).toMatchObject({ duplicate: "exact", selected: false });
+  });
+
+  it("does not recreate old coarse-type rows when importing the same typed schedule", () => {
+    const path = "Term 1/BPM 500/FTM 1/Week 3";
+    const existing: TrackerItem[] = [
+      { id: "old-1", path, label: "Fluid balance Flipped", kind: "Lecture", passes: 2, ankiPasses: 1, yield: "high", updated: "2026-08-14", note: "Scheduled 2026-08-14" },
+      { id: "old-2", path, label: "Case discussion Small Group", kind: "Lecture", passes: 1, ankiPasses: 0, yield: "none", updated: "2026-08-14", note: "Scheduled 2026-08-14" },
+      { id: "old-3", path, label: "Weekly quiz ESoft", kind: "Assessment", passes: 1, ankiPasses: 0, yield: "none", updated: "2026-08-14", assessmentDate: "2026-08-14" },
+    ];
+    const before = JSON.stringify(existing);
+    const csv = "2026-08-14,Fluid balance,Flipped Lecture\n2026-08-14,Case discussion,Small Group\n2026-08-14,Weekly quiz,ESoft";
+    const rows = parseCourseSchedule(csv, existing, "schedule.csv", {}, path);
+    expect(rows.every((row) => row.duplicate === "conflict" && !row.selected)).toBe(true);
+    expect(scheduleCandidatesToTracker(rows, path)).toEqual([]);
+    expect(JSON.stringify(existing)).toBe(before);
+    expect(parseCourseSchedule(csv, existing, "schedule.csv", {}, "Term 2/BPM 500/FTM 1/Week 3").every((row) => row.duplicate === "none" && row.selected)).toBe(true);
+    const [edited] = reconcileScheduleDuplicates([{ ...rows[0], label: "Different event", selected: true }], existing, path);
+    expect(edited).toMatchObject({ duplicate: "none", selected: true });
+    const [classified] = parseCourseSchedule(csv, [{ ...existing[0], activity: "lecture" }], "schedule.csv", {}, path);
+    expect(classified).toMatchObject({ duplicate: "conflict", selected: false });
+  });
+
+  it("requires explicit category review for ICS and ignores an incompatible category", () => {
+    const rows = parseCourseSchedule([
+      "BEGIN:VCALENDAR", "BEGIN:VEVENT", "DTSTART:20260814T080000", "SUMMARY:IMCQ 2", "END:VEVENT",
+      "BEGIN:VEVENT", "DTSTART:20260815T080000", "SUMMARY:Lecture cancellation", "END:VEVENT", "END:VCALENDAR",
+    ].join("\r\n"));
+    expect(rows.every((row) => row.activity === undefined)).toBe(true);
+    const path = "Term 1/BPM 500/FTM 1/Week 3";
+    expect(scheduleCandidatesToTracker([{ ...rows[0], activity: "imcq" }, { ...rows[1], activity: "esoft" }], path)
+      .map((row) => row.activity)).toEqual(["imcq", undefined]);
+    expect(scheduleCandidatesToTracker(rows, path).every((row) => row.activity === undefined)).toBe(true);
+  });
+
+  it.each([["IMCQ", "ESoft"], ["ESoft", "IMCQ"]] as const)("holds incompatible %s/%s categories until distinct-event confirmation", (first, second) => {
+    const path = "Term 1/BPM 500/FTM 1/Week 3";
+    const csv = (category: string) => `2026-08-14,Session 1,${category}`;
+    const initial = parseCourseSchedule(csv(first));
+    const existing: TrackerItem[] = scheduleCandidatesToTracker(initial, path).map((row) => ({
+      ...row, id: "existing", updated: "2026-08-14", passes: 2, attendance: "missed" as const,
+    }));
+    const before = JSON.stringify(existing);
+    const [collision] = parseCourseSchedule(csv(second), existing, "schedule.csv", {}, path);
+    expect(collision).toMatchObject({ duplicate: "conflict", selected: false });
+    expect(canImportScheduleCandidate(collision)).toBe(false);
+    expect(scheduleCandidatesToTracker([{ ...collision, selected: true }], path)).toEqual([]);
+    const confirmed = reconcileScheduleDuplicates([{ ...collision, confirmedConflictKey: collision.conflictKey, selected: true }], existing, path);
+    expect(scheduleCandidatesToTracker(confirmed, path)).toHaveLength(1);
+    expect(JSON.stringify(existing)).toBe(before);
+    const [same] = parseCourseSchedule(csv(first), existing, "schedule.csv", {}, path);
+    expect(same).toMatchObject({ duplicate: "exact", selected: false });
+    const [legacy] = parseCourseSchedule(csv(second), [{ ...existing[0], activity: undefined }], "schedule.csv", {}, path);
+    expect(legacy).toMatchObject({ duplicate: "exact", selected: false });
+    const [other] = parseCourseSchedule(csv(second), existing, "schedule.csv", {}, "Term 2/BPM 500");
+    expect(other).toMatchObject({ duplicate: "none", selected: true });
+    const batch = parseCourseSchedule([csv(first), csv(second), csv(first)].join("\n"), [], "schedule.csv", {}, path);
+    expect(batch.map((row) => [row.duplicate, row.selected])).toEqual([["conflict", false], ["conflict", false], ["exact", false]]);
+    const approved = reconcileScheduleDuplicates(batch.map((row) => ({ ...row, confirmedConflictKey: row.conflictKey, selected: true })), [], path);
+    expect(scheduleCandidatesToTracker(approved, path)).toHaveLength(2);
+    const changedDestination = reconcileScheduleDuplicates(approved, [], "Term 2/BPM 500");
+    expect(changedDestination.every((row) => !row.selected)).toBe(true);
+    const nowDuplicate = reconcileScheduleDuplicates(confirmed, [...existing, {
+      ...scheduleCandidatesToTracker(confirmed, path)[0], id: "new-existing", updated: "2026-08-14",
+    }], path);
+    expect(scheduleCandidatesToTracker(nowDuplicate, path)).toEqual([]);
+  });
+
+  it("requires renewed confirmation when material counterpart claims change", () => {
+    const path = "Term 1/BPM 500/FTM 1/Week 3";
+    const [source] = parseCourseSchedule("2026-08-14,Session 1,IMCQ", [], "original.csv");
+    const [item] = scheduleCandidatesToTracker([source], path);
+    const existing: TrackerItem = { ...item, id: "existing", updated: "2026-08-14" };
+    const other = { ...existing, id: "other", note: "Imported from other.csv" };
+    const original = [existing, other];
+    const [collision] = parseCourseSchedule("2026-08-14,Session 1,ESoft", original, "incoming.csv", {}, path);
+    const [confirmed] = reconcileScheduleDuplicates([{ ...collision, confirmedConflictKey: collision.conflictKey, selected: true }], original, path);
+    expect(canImportScheduleCandidate(confirmed)).toBe(true);
+    expect(confirmed.conflictClaims).toHaveLength(2);
+    const before = JSON.stringify(original);
+    const [unchanged] = reconcileScheduleDuplicates([confirmed], [other, { ...existing, passes: 3, attendance: "attended", updated: "2026-09-01" }], path);
+    expect(unchanged).toMatchObject({ selected: true, confirmedConflictKey: confirmed.conflictKey });
+    for (const changed of [
+      [{ ...existing, id: "replacement" }, other],
+      [{ ...existing, note: "Imported from replacement.csv" }, other],
+      [{ ...existing, templateKey: "new-line" }, other],
+      [...original, { ...existing, id: "third" }],
+      [...original, existing],
+      [existing],
+      [],
+    ]) {
+      const [row] = reconcileScheduleDuplicates([confirmed], changed, path);
+      expect(row.selected).toBe(false);
+      expect(row.confirmedConflictKey).toBeUndefined();
+      expect(scheduleCandidatesToTracker([row], path)).toEqual([]);
+    }
+    expect(JSON.stringify(original)).toBe(before);
+    const [first, second] = parseCourseSchedule("2026-08-14,Session 1,IMCQ\n2026-08-14,Session 1,ESoft", [], "batch.csv", {}, path);
+    const batch = reconcileScheduleDuplicates([{ ...first, confirmedConflictKey: first.conflictKey, selected: true }, second], [], path);
+    expect(batch[0].selected).toBe(true);
+    expect(reconcileScheduleDuplicates([batch[1], batch[0]], [], path)[1].selected).toBe(true);
+    expect(reconcileScheduleDuplicates([batch[0], { ...batch[1], sourceName: "different.csv" }], [], path)[0].selected).toBe(false);
+    expect(reconcileScheduleDuplicates([batch[0]], [], path)[0].selected).toBe(false);
+  });
+
+  it.each([
+    "2026-11-25\t\tIMCQ",
+    "2026-11-25,\"Session 1,IMCQ",
+    "2026-11-25\t\"\"\tIMCQ",
+    "2026-11-25,\"Session 1\"x,IMCQ",
+    "2026-11-25\t\tSession 1\tIMCQ",
+    "2026-11-25,Session,IMCQ,Extra",
+    "2026-02-29,Session,IMCQ",
+    "1900-02-29,Session,IMCQ",
+    "2026-04-31,Session,IMCQ",
+    "2026-13-01,Session,IMCQ",
+    "2026-01-00,Session,IMCQ",
+    "0000-01-01,Session,IMCQ",
+    "2/29/26,Session,IMCQ",
+    "2/28/026,Session,IMCQ",
+    "2026-11-25,Session,UnknownType",
+  ])("holds malformed structured input %s", (input) => {
+    const [row] = parseCourseSchedule(input);
+    expect(row).toMatchObject({ selected: false, rawInput: input, sourceProblem: expect.any(String) });
+    expect(scheduleCandidatesToTracker([{ ...row, selected: true, label: "Forced", problem: undefined }], "T1")).toEqual([]);
+  });
+
+  it.each([
+    ["2026-11-25,Session,IMCQ","Session","imcq","2026-11-25"],
+    ["2026-11-25\tSession\tIMCQ","Session","imcq","2026-11-25"],
+    ["2026-11-25,\"Acid, base\",Lecture","Acid, base","lecture","2026-11-25"],
+    ["2026-11-25\t\"Acid\tbase\"\tLecture","Acid\tbase","lecture","2026-11-25"],
+    ["2026-11-25,\"Session \"\"one\"\"\",IMCQ","Session \"one\"","imcq","2026-11-25"],
+    ["2026-11-25,Session","Session",null,"2026-11-25"],
+    ["2026-11-25,Session,","Session",null,"2026-11-25"],
+    ["2026-11-25\tSession\t","Session",null,"2026-11-25"],
+    ["2000-02-29,Session,IMCQ","Session","imcq","2000-02-29"],
+    ["2/29/24,Session,IMCQ","Session","imcq","2024-02-29"],
+    ["Renal, physiology","Renal, physiology",null,null],
+  ] as const)("preserves valid input %s", (input, label, activity, date) => {
+    const [row] = parseCourseSchedule(input);
+    expect(row).toMatchObject({ selected: true, label });
+    expect(row.activity).toBe(activity ?? undefined);
+    expect(row.date).toBe(date ?? undefined);
+    expect(scheduleCandidatesToTracker([row], "T1")).toHaveLength(1);
+  });
+
+  it("refuses impossible edited dates at projection without rejecting undated rows", () => {
+    const [row] = parseCourseSchedule("2026-11-25,Session,IMCQ");
+    for (const date of ["2026-02-29","2026-13-01","2026-1-1","","0000-01-01"]) {
+      expect(scheduleCandidatesToTracker([{ ...row, date, selected: true }], "T1")).toEqual([]);
+    }
+    expect(scheduleCandidatesToTracker([{ ...row, date: "2028-02-29" }], "T1")[0].assessmentDate).toBe("2028-02-29");
+    expect(scheduleCandidatesToTracker([{ ...row, date: undefined }], "T1")).toHaveLength(1);
+    const [invalid] = parseCourseSchedule("date,title,type\n,Session,IMCQ", [], "schedule.csv");
+    expect(invalid.selected).toBe(false);
+  });
+
+  it.each([
+    ["CSV file", '2026-11-25,"Start\n2026-11-26,Embedded,IMCQ\nEnd",Lecture\n2026-11-27,Real,IMCQ', "schedule.csv", ["Real"]],
+    ["pasted CSV", '2026-11-25,"Start\n2026-11-26,Embedded,IMCQ\nEnd",Lecture\n2026-11-27,Real,IMCQ', undefined, ["Real"]],
+    ["TSV file", '2026-11-25\t"Start\r\n2026-11-26\tEmbedded\tIMCQ\r\nEnd"\tLecture\r\n2026-11-27\tReal\tIMCQ', "schedule.tsv", ["Real"]],
+    ["unclosed CSV", '2026-11-25,"Start\n2026-11-26,Embedded,IMCQ', "schedule.csv", []],
+    ["unclosed paste", '2026-11-25,"Start\n2026-11-26,Embedded,IMCQ', undefined, []],
+    ["header inside quotes", 'date,title,type\n2026-11-25,"Start\ndate,title,type\n2026-11-26,Embedded,IMCQ\nEnd",Lecture\n2026-11-27,Real,IMCQ', undefined, ["Real"]],
+    ["escaped quotes", '2026-11-25,"Start ""quoted""\n2026-11-26,Embedded,IMCQ\nEnd",Lecture\n2026-11-27,Real,IMCQ', "schedule.csv", ["Real"]],
+    ["malformed opening quote", '2026-11-25,bad"Start\n2026-11-26,Embedded,IMCQ\nEnd",Lecture\n2026-11-27,Real,IMCQ', "schedule.csv", ["Real"]],
+  ] as const)("holds the entire quoted record in %s", (_name, input, sourceName, labels) => {
+    const rows = parseCourseSchedule(input, [], sourceName);
+    const held = rows.filter((row) => row.sourceProblem);
+    expect(held).toHaveLength(1);
+    expect(held[0].selected).toBe(false);
+    expect(held[0].rawInput).toContain("Embedded");
+    expect(scheduleCandidatesToTracker(rows, "T1").map((row) => row.label)).toEqual(labels);
+    expect(scheduleCandidatesToTracker([{ ...held[0], selected: true, label: "Forced", problem: undefined }], "T1")).toEqual([]);
+  });
+
+  it("retains the complete CRLF record, original physical line range and next source line", () => {
+    const raw = '2026-11-25,"Start\r\n2026-11-26,Embedded,IMCQ\r\nEnd",Lecture';
+    const rows = parseCourseSchedule("date,title,type\r\n" + raw + "\r\n2026-11-27,Real,IMCQ", [], "schedule.csv");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ sourceLine: 2, rawInput: raw, selected: false, sourceProblem: expect.stringContaining("Lines 2-4:") });
+    expect(rows[1]).toMatchObject({ sourceLine: 5, label: "Real", activity: "imcq", selected: true });
+  });
+
+  it("keeps free-form quote text and single-line escaped fields admissible", () => {
+    expect(scheduleCandidatesToTracker(parseCourseSchedule('Renal, physiology\nA "quoted" title'), "T1").map((row) => row.label))
+      .toEqual(["Renal, physiology", 'A "quoted" title']);
+    expect(scheduleCandidatesToTracker(parseCourseSchedule('2026-11-25,"Session ""one""",IMCQ'), "T1")[0].label).toBe('Session "one"');
+  });
+
+  it.each([
+    ["header only \",\" undefined", "\"date\",\"title\",\"type\"", undefined, [], 0],
+    ["valid \",\" undefined", "\"date\",\"title\",\"type\"\n2026-11-27,Real,IMCQ", undefined, ["Real"], 0],
+    ["malformed multiline \",\" undefined", "\"date\",\"title\",\"type\"\nunknown,\"Start\n2026-11-26,Embedded,IMCQ\nEnd\",Lecture\n2026-11-27,Real,IMCQ", undefined, ["Real"], 1],
+    ["unclosed \",\" undefined", "\"date\",\"title\",\"type\"\nunknown,\"Start\n2026-11-27,Real,IMCQ", undefined, [], 1],
+    ["header only \",\" schedule.csv", "\"date\",\"title\",\"type\"", "schedule.csv", [], 0],
+    ["valid \",\" schedule.csv", "\"date\",\"title\",\"type\"\n2026-11-27,Real,IMCQ", "schedule.csv", ["Real"], 0],
+    ["malformed multiline \",\" schedule.csv", "\"date\",\"title\",\"type\"\nunknown,\"Start\n2026-11-26,Embedded,IMCQ\nEnd\",Lecture\n2026-11-27,Real,IMCQ", "schedule.csv", ["Real"], 1],
+    ["unclosed \",\" schedule.csv", "\"date\",\"title\",\"type\"\nunknown,\"Start\n2026-11-27,Real,IMCQ", "schedule.csv", [], 1],
+    ["header only \"\\t\" undefined", "\"date\"\t\"title\"\t\"type\"", undefined, [], 0],
+    ["valid \"\\t\" undefined", "\"date\"\t\"title\"\t\"type\"\n2026-11-27\tReal\tIMCQ", undefined, ["Real"], 0],
+    ["malformed multiline \"\\t\" undefined", "\"date\"\t\"title\"\t\"type\"\nunknown\t\"Start\n2026-11-26\tEmbedded\tIMCQ\nEnd\"\tLecture\n2026-11-27\tReal\tIMCQ", undefined, ["Real"], 1],
+    ["unclosed \"\\t\" undefined", "\"date\"\t\"title\"\t\"type\"\nunknown\t\"Start\n2026-11-27\tReal\tIMCQ", undefined, [], 1],
+    ["header only \"\\t\" schedule.tsv", "\"date\"\t\"title\"\t\"type\"", "schedule.tsv", [], 0],
+    ["valid \"\\t\" schedule.tsv", "\"date\"\t\"title\"\t\"type\"\n2026-11-27\tReal\tIMCQ", "schedule.tsv", ["Real"], 0],
+    ["malformed multiline \"\\t\" schedule.tsv", "\"date\"\t\"title\"\t\"type\"\nunknown\t\"Start\n2026-11-26\tEmbedded\tIMCQ\nEnd\"\tLecture\n2026-11-27\tReal\tIMCQ", "schedule.tsv", ["Real"], 1],
+    ["unclosed \"\\t\" schedule.tsv", "\"date\"\t\"title\"\t\"type\"\nunknown\t\"Start\n2026-11-27\tReal\tIMCQ", "schedule.tsv", [], 1],
+    ["unquoted header", "date,title,type\n2026-11-27,Real,IMCQ", undefined, ["Real"], 0],
+    ["free text", "Renal, physiology\nA \"quoted\" title", undefined, ["Renal, physiology","A \"quoted\" title"], 0],
+    ["header malformed", "\"date\",\"title\",\"type\",\"extra\"\n2026-11-27,Real,IMCQ", undefined, ["Real"], 1],
+    ["mixed quotes", "\"DATE\",title,\"TYPE\"\n2026-11-27,Real,IMCQ", undefined, ["Real"], 0],
+    ["two-column", "\"date\",\"title\"\n2026-11-27,Real", undefined, ["Real"], 0],
+    ["BOM and blank lines", "\n﻿\"date\",\"title\",\"type\"\r\n2026-11-27,Real,IMCQ", undefined, ["Real"], 0],
+  ] as const)("recognizes structured schedule headers: %s", (_name, input, sourceName, labels, heldCount) => {
+    const rows = parseCourseSchedule(input, [], sourceName);
+    expect(rows.filter((row) => row.sourceProblem)).toHaveLength(heldCount);
+    expect(scheduleCandidatesToTracker(rows, "T1").map((row) => row.label)).toEqual(labels);
+    expect(rows.filter((row) => row.sourceProblem).every((row) => !row.selected)).toBe(true);
+  });
+
+
+  it.each([",", "\t"])("retains structured paste context for ambiguous %s records", (separator) => {
+    const row = (...cells: string[]) => cells.join(separator);
+    const prior = row("2026-11-25", "Prior", "Lecture");
+    const real = row("2026-11-27", "Real", "IMCQ");
+    const embedded = row("2026-11-26", "Embedded", "IMCQ");
+    const bad = [row("unknown", '"Start'), embedded, row('End"', "Lecture")].join("\n");
+    const escaped = [row("unknown", '"Start ""quoted""'), embedded, row('End"', "Lecture")].join("\n");
+    const header = row('"date"', '"title"', '"type"');
+    const file = separator === "," ? "schedule.csv" : "schedule.tsv";
+    for (const fixture of [
+      { input: [prior, bad, real].join("\n"), labels: ["Prior", "Real"], count: 1, range: "Lines 2-4:" },
+      { input: ["Schedule preface", header, bad, real].join("\n"), labels: ["Real"], count: 2, range: "Lines 3-5:" },
+      { input: [bad, real].join("\n"), labels: ["Real"], count: 1, range: "Lines 1-3:" },
+      { input: [prior, escaped, real].join("\n"), labels: ["Prior", "Real"], count: 1, range: "Lines 2-4:" },
+      { input: [prior, row("unknown", '"Start'), embedded, real].join("\n"), labels: ["Prior"], count: 1, range: "Lines 2-4:" },
+    ]) {
+      for (const source of [undefined, file]) {
+        const rows = parseCourseSchedule(fixture.input, [], source);
+        const held = rows.filter((candidate) => candidate.sourceProblem);
+        expect(held).toHaveLength(fixture.count);
+        expect(held.some((candidate) => candidate.sourceProblem?.includes(fixture.range) && candidate.rawInput?.includes("Embedded"))).toBe(true);
+        expect(scheduleCandidatesToTracker(rows, "T1").map((candidate) => candidate.label)).toEqual(fixture.labels);
+        for (const candidate of held) {
+          expect(candidate.selected).toBe(false);
+          expect(scheduleCandidatesToTracker([{ ...candidate, selected: true, label: "Forced", problem: undefined }], "T1")).toEqual([]);
+        }
+      }
+    }
+  });
+
+  it.each([["Renal", "Renal Lecture"], ["Renal Lecture", "Renal"]])("rechecks edited dates in both legacy alias directions: %s then %s", (prior, incoming) => {
+    const path = "Term 1/BPM 500/FTM 1/Week 3";
+    const existing: TrackerItem = {
+      id: "prior", path, label: prior, kind: "Lecture", activity: "lecture",
+      passes: 3, ankiPasses: 2, yield: "high", attendance: "missed", updated: "2026-11-26",
+      note: "Scheduled 2026-11-26 · Imported from original.csv",
+    };
+    const before = JSON.stringify(existing);
+    for (const [separator, source] of [[",", "schedule.csv"], [",", "Pasted schedule"], ["\t", "schedule.tsv"]]) {
+      const parse = (date: string, label: string) => parseCourseSchedule([date, label].join(separator), [existing], source, {}, path)[0];
+      const fresh = parse("2026-11-25", incoming);
+      expect(fresh.selected).toBe(true);
+      expect(parse("2026-11-26", incoming).duplicate).toBe("conflict");
+      const [edited] = reconcileScheduleDuplicates([{ ...fresh, date: "2026-11-26" }], [existing], path);
+      expect(edited).toMatchObject({ duplicate: "conflict", selected: false, legacyIdentity: fresh.legacyIdentity });
+      expect(edited.conflictClaims).toEqual([expect.objectContaining({ id: "prior" })]);
+      expect(canImportScheduleCandidate({ ...edited, selected: true })).toBe(false);
+      expect(scheduleCandidatesToTracker([{ ...edited, selected: true }], path)).toEqual([]);
+      const [confirmed] = reconcileScheduleDuplicates([{ ...edited, selected: true, confirmedConflictKey: edited.conflictKey }], [existing], path);
+      expect(scheduleCandidatesToTracker([confirmed], path)).toHaveLength(1);
+      const [stale] = reconcileScheduleDuplicates([{ ...confirmed, date: "2026-11-27" }], [existing], path);
+      expect(stale.selected).toBe(false);
+      expect(stale.confirmedConflictKey).toBeUndefined();
+      const [restored] = reconcileScheduleDuplicates([{ ...stale, date: "2026-11-26" }], [existing], path);
+      expect(restored).toMatchObject({ duplicate: "conflict", selected: false });
+      const [moved] = reconcileScheduleDuplicates([{ ...parse("2026-11-26", incoming), date: "2026-11-27" }], [existing], path);
+      expect(moved).toMatchObject({ duplicate: "conflict", selected: false });
+      expect(reconcileScheduleDuplicates([{ ...fresh, date: "2026-11-26" }], [existing], "Term 2")[0].duplicate).not.toBe("conflict");
+      expect(parse("2026-11-26", prior)).toMatchObject({ duplicate: "exact", selected: false });
+      expect(JSON.stringify(existing)).toBe(before);
+    }
+  });
+
+  it.each([["Renal", "Renal Lecture"], ["Renal Lecture", "Renal"]])("separates reviewed titles from original aliases: %s then %s", (prior, incoming) => {
+    const path = "Term 1/BPM 500/FTM 1/Week 3";
+    const originalDate = "2026-11-26";
+    const changedDate = "2026-11-27";
+    const existing: TrackerItem = {
+      id: "prior", path, label: prior, kind: "Lecture", activity: "lecture",
+      passes: 3, ankiPasses: 2, yield: "high", attendance: "missed", updated: originalDate,
+      note: "Scheduled " + originalDate,
+    };
+    const before = JSON.stringify(existing);
+    for (const [separator, source] of [[",", "schedule.csv"], [",", undefined], ["\t", "schedule.tsv"]] as const) {
+      const parse = (label: string) => parseCourseSchedule([originalDate, label].join(separator), [existing], source, {}, path)[0];
+      const row = parse(incoming);
+      expect(row).toMatchObject({ duplicate: "conflict", selected: false });
+      const [renamed] = reconcileScheduleDuplicates([{ ...row, label: "Different event", selected: true }], [existing], path);
+      expect(renamed).toMatchObject({ duplicate: "none", selected: true, legacyIdentity: row.legacyIdentity });
+      expect(scheduleCandidatesToTracker([renamed], path)).toHaveLength(1);
+      const [both] = reconcileScheduleDuplicates([{ ...renamed, date: changedDate }], [existing], path);
+      expect(both).toMatchObject({ duplicate: "none", selected: true, legacyIdentity: row.legacyIdentity });
+      const [reversed] = reconcileScheduleDuplicates([{ ...both, label: incoming }], [existing], path);
+      expect(reversed).toMatchObject({ duplicate: "conflict", selected: false });
+      const [sameNormalized] = reconcileScheduleDuplicates([{ ...row, label: incoming.toUpperCase(), selected: true }], [existing], path);
+      expect(sameNormalized).toMatchObject({ duplicate: "conflict", selected: false });
+      const [effectiveAlias] = reconcileScheduleDuplicates([{ ...parse("Unrelated"), label: incoming }], [existing], path);
+      expect(effectiveAlias).toMatchObject({ duplicate: "conflict", selected: false });
+      const [exact] = reconcileScheduleDuplicates([{ ...renamed, label: prior }], [existing], path);
+      expect(exact).toMatchObject({ duplicate: "exact", selected: false });
+      const [confirmed] = reconcileScheduleDuplicates([{ ...row, selected: true, confirmedConflictKey: row.conflictKey }], [existing], path);
+      expect(canImportScheduleCandidate(confirmed)).toBe(true);
+      const [stale] = reconcileScheduleDuplicates([{ ...confirmed, label: "Different event" }], [existing], path);
+      expect(stale).toMatchObject({ duplicate: "none", selected: false });
+      expect(stale.confirmedConflictKey).toBeUndefined();
+      expect(reconcileScheduleDuplicates([{ ...renamed, label: incoming }], [existing], "Term 2")[0].duplicate).toBe("none");
+      expect(JSON.stringify(existing)).toBe(before);
+    }
   });
 
   it("keeps a 2,000-row intake linear enough for an ordinary browser interaction", () => {
