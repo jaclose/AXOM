@@ -802,10 +802,10 @@ function ScheduleImportModal({ defaultPath, onClose }: { defaultPath: string; on
             </small>
             {row.rawInput !== undefined && <small className="sub" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>Source row {row.sourceLine}: {row.rawInput}</small>}
             {row.duplicate === "conflict" && !row.problem && row.conflictKey && <div className="schedule-review-fields">
-              <span className="sub">The same title, date and type has a different explicit activity. Compare the following records before confirming a separate event. Leaving this unselected preserves the existing items.</span>
+              <span className="sub">A previous import may have stored a different title or type, or the same title and date may have a conflicting activity. Compare the following records before confirming a separate event. Leaving this unselected preserves the existing items.</span>
               <ul aria-label="Conflicting records" className="sub">
                 {row.conflictClaims?.map((claim, claimIndex) => <li key={`${claim.origin}-${claim.id}-${claimIndex}`}>
-                  {claim.origin === "tracker" ? "Existing tracker item" : "Other schedule row"}: {claim.label} · {COURSE_ACTIVITY_LABEL[claim.activity]}
+                  {claim.origin === "tracker" ? "Existing tracker item" : "Other schedule row"}: {claim.label} · {claim.activity ? COURSE_ACTIVITY_LABEL[claim.activity] : claim.kind ?? "Unassigned"}
                   {claim.date ? ` · ${claim.date}` : ""}
                   {claim.origin === "batch" ? ` · ${claim.sourceName ?? "Schedule"} (row ${claim.sourceLine})` : ""}
                   {claim.origin === "tracker" && claim.note ? ` · ${claim.note}` : ""}

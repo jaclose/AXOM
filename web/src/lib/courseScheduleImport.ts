@@ -7,7 +7,8 @@ interface ScheduleConflictClaim {
   origin: "tracker" | "batch";
   id: string;
   label: string;
-  activity: CourseActivity;
+  activity?: CourseActivity;
+  kind?: TrackerKind;
   path?: string;
   date?: string;
   note?: string;
@@ -23,7 +24,7 @@ export interface ScheduleCandidate {
   kind: TrackerKind;
   /** Explicit source type or learner-reviewed category; never inferred from the default kind. */
   activity?: CourseActivity;
-  /** Compatibility with rows imported by the previous coarse-type parser. */
+  /** Structured source identity and possible older coarse-parser alias. */
   legacyIdentity?: { original: string; previous: string };
   sourceLine: number;
   sourceName?: string;
@@ -106,6 +107,8 @@ export function reconcileScheduleDuplicates(
   const existingCategories = new Map<string, Set<string>>();
   const conflictClaimsByIdentity = new Map<string, ScheduleConflictClaim[]>();
   const seenCategories = new Map<string, Set<string>>();
+  const existingByTitleDate = new Map<string, ScheduleConflictClaim[]>();
+  const legacyAliasesByTitleDate = new Map<string, ScheduleConflictClaim[]>();
   function remember(map: Map<string, Set<string>>, key: string, activity?: CourseActivity) {
     const categories = map.get(key) ?? new Set<string>();
     categories.add(activity ?? "");
@@ -120,10 +123,22 @@ export function reconcileScheduleDuplicates(
     const date = dateFrom(item.assessmentDate, item.note);
     const key = identity(item.label, item.kind, date);
     remember(existingCategories, key, item.activity);
-    if (isCourseActivity(item.activity)) rememberClaim(key, {
+    const claim: ScheduleConflictClaim = {
       origin: "tracker", id: item.id, label: item.label, activity: item.activity,
-      path: trackerPathKey(item.path), date, note: item.note, templateKey: item.templateKey,
-    });
+      kind: item.kind, path: trackerPathKey(item.path), date, note: item.note, templateKey: item.templateKey,
+    };
+    if (isCourseActivity(item.activity)) rememberClaim(key, claim);
+    const titleDate = titleDateIdentity(key);
+    const byTitle = existingByTitleDate.get(titleDate) ?? [];
+    byTitle.push(claim);
+    existingByTitleDate.set(titleDate, byTitle);
+    const alias = cleanLabel(item.label, item.kind);
+    if (normalize(alias) && normalize(alias) !== normalize(item.label)) {
+      const aliasKey = titleDateIdentity(identity(alias, item.kind, date));
+      const aliases = legacyAliasesByTitleDate.get(aliasKey) ?? [];
+      aliases.push(claim);
+      legacyAliasesByTitleDate.set(aliasKey, aliases);
+    }
   }
   for (const row of candidates) {
     if (normalize(row.label) && isCourseActivity(row.activity)) rememberClaim(identity(row.label, row.kind, row.date), {
@@ -131,7 +146,6 @@ export function reconcileScheduleDuplicates(
       date: row.date, sourceName: row.sourceName, sourceLine: row.sourceLine,
     });
   }
-  const legacyExact = new Set(scoped.filter((item) => item.activity === undefined).map((item) => identity(item.label, item.kind, dateFrom(item.assessmentDate, item.note))));
   const labels = new Set(scoped.map((item) => normalize(item.label)));
   const seenLabels = new Set<string>();
   return candidates.map((candidate) => {
@@ -139,15 +153,25 @@ export function reconcileScheduleDuplicates(
     const labelKey = normalize(candidate.label);
     const activity = candidate.activity ?? "";
     const prior = new Set([...(existingCategories.get(key) ?? []), ...(seenCategories.get(key) ?? [])]);
-    const matchesLegacy = candidate.legacyIdentity?.original === key && legacyExact.has(candidate.legacyIdentity.previous);
-    const exact = matchesLegacy || prior.has(activity) || prior.has("") || (!activity && prior.size > 0);
+    const exact = prior.has(activity) || prior.has("") || (!activity && prior.size > 0);
     const incompatible = !exact && activity ? (conflictClaimsByIdentity.get(key) ?? [])
       .filter((claim) => claim.activity !== activity) : [];
-    const duplicate: ScheduleCandidate["duplicate"] = exact ? "exact" : incompatible.length ? "conflict"
+    // A legacy import may have stripped title words, appended a type, or used
+    // another coarse kind. Classification is mutable, not source identity.
+    // Compare both directions across imports; fresh exact titles still win.
+    const titleDate = titleDateIdentity(key);
+    const legacy = candidate.legacyIdentity;
+    const aliasClaims = !exact && legacy && titleDateIdentity(legacy.original) === titleDate
+      ? [...(legacy.previous.split("|")[0] && legacy.previous !== legacy.original
+        ? existingByTitleDate.get(titleDateIdentity(legacy.previous)) ?? [] : []),
+        ...(legacyAliasesByTitleDate.get(titleDate) ?? [])]
+      : [];
+    const counterparts = [...new Set([...incompatible, ...aliasClaims])];
+    const duplicate: ScheduleCandidate["duplicate"] = exact ? "exact" : counterparts.length ? "conflict"
       : labels.has(labelKey) || seenLabels.has(labelKey) ? "likely" : "none";
     // Sorting serialized claims preserves multiplicity without binding to order.
     // Mutable progress, attendance, selection and update timestamps are excluded.
-    const conflictClaims = duplicate === "conflict" ? incompatible
+    const conflictClaims = duplicate === "conflict" ? counterparts
       .map((claim) => ({ claim, snapshot: JSON.stringify(claim) }))
       .sort((a, b) => a.snapshot < b.snapshot ? -1 : a.snapshot > b.snapshot ? 1 : 0)
       .map(({ claim }) => claim) : undefined;
@@ -229,7 +253,7 @@ function parseDelimitedSchedule(text: string, existing: readonly TrackerItem[], 
     return [{
       ...candidate(`${index + 1}`, label, kind, date, index + 1, sourceName, problem),
       ...(activity ? { activity } : {}),
-      ...((activity || separator) && original !== previous && previousLabel ? { legacyIdentity: { original, previous } } : {}),
+      ...(separator ? { legacyIdentity: { original, previous } } : {}),
     }];
   });
   return reconcileScheduleDuplicates(rows, existing, scopePath);
@@ -346,5 +370,10 @@ function provenanceNote(candidate: ScheduleCandidate): string | undefined {
   return parts.length ? parts.join(" · ") : undefined;
 }
 function identity(label: string, kind: TrackerKind, date?: string) { return `${normalize(label)}|${kind}|${date ?? ""}`; }
+// Identity labels are normalized before the pipe-delimited key is built.
+function titleDateIdentity(key: string): string {
+  const [label, , date] = key.split("|");
+  return JSON.stringify([label, date]);
+}
 function normalize(value: string) { return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
 function dateFrom(value?: string, note?: string) { return value ?? note?.match(/Scheduled (\d{4}-\d{2}-\d{2})/)?.[1]; }

@@ -185,6 +185,34 @@ test("structured titles survive review, import, reload and duplicate reimport", 
   await expect(dialog.getByRole("button", { name: "Import selected (0)" })).toBeDisabled();
 });
 
+
+test("split-batch schedule title aliases require review after reload", async ({ page }) => {
+  await seedOnboarded(page);
+  await page.goto("/#tracker");
+  const path = "Term 1/BPM 500";
+  const dialog = page.getByRole("dialog", { name: "Import course schedule" });
+  await page.getByRole("button", { name: "Import schedule" }).click();
+  await dialog.getByLabel("Tracker destination").fill(path);
+  await dialog.getByLabel("Or paste schedule rows").fill("2026-11-26,Synthetic split Renal,Lecture");
+  await dialog.getByRole("button", { name: "Review schedule" }).click();
+  await dialog.getByRole("button", { name: "Import selected (1)" }).click();
+  await reloadAfterSave(page);
+  await page.getByRole("button", { name: "Import schedule" }).click();
+  await dialog.getByLabel("Tracker destination").fill(path);
+  await dialog.locator('input[type="file"]').setInputFiles({
+    name: "legacy-alias.csv", mimeType: "text/csv", buffer: Buffer.from("2026-11-26,Synthetic split Renal Lecture"),
+  });
+  await expect(dialog.getByText("1 need review", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("list", { name: "Conflicting records" })).toContainText("Synthetic split Renal");
+  await dialog.getByRole("button", { name: "Select importable" }).click();
+  await expect(dialog.getByRole("button", { name: "Import selected (0)" })).toBeDisabled();
+  await dialog.getByRole("button", { name: "Confirm distinct activity" }).click();
+  await dialog.getByRole("button", { name: "Import selected (1)" }).click();
+  await reloadAfterSave(page);
+  await expect(page.locator(".dr-label").getByText("Synthetic split Renal", { exact: true })).toHaveCount(1);
+  await expect(page.locator(".dr-label").getByText("Synthetic split Renal Lecture", { exact: true })).toHaveCount(1);
+});
+
 async function completeOnboarding(page: Page) {
   if (!(await completeSetup(page, "Schedule Intake Test", { ifVisible: true }))) return;
   const later = page.getByRole("button", { name: "Review later" });
