@@ -268,10 +268,32 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
       if (!Array.isArray(declared) || !declared.every(hasExactMediaDeclaration) || declared.length !== payloads.length) {
         throw new Error("The backup contains an invalid image payload declaration.");
       }
+      // JSON exports may repeat a shared image for different questions.
+      // Check all normalized claims before any staged write: a conflicting
+      // later payload must not leave the first bytes stranded in the vault.
+      // Retain only references to existing declarations, not decoded copies.
+      const claims = new Map<string, QuestionAttachmentExportPayload>();
       for (const payload of payloads) {
         const bytes = base64ToBytes(payload.base64);
         if (!bytes || bytes.byteLength === 0 || bytes.byteLength !== payload.byteSize || bytes.byteLength > MAX_QUESTION_ATTACHMENT_BYTES) {
           throw new Error("The backup contains an invalid image payload declaration.");
+        }
+        const prior = claims.get(payload.blobKey);
+        if (!prior) {
+          claims.set(payload.blobKey, payload);
+          continue;
+        }
+        if (prior.mimeType !== payload.mimeType || prior.byteSize !== payload.byteSize) {
+          throw new Error("The backup contains conflicting image payloads for one storage key.");
+        }
+        // Compare decoded bytes, not base64 spelling (legacy padding and
+        // whitespace may differ). Avoid decoding identical strings twice.
+        if (prior.base64 !== payload.base64) {
+          const previousBytes = base64ToBytes(prior.base64);
+          if (!previousBytes || previousBytes.byteLength !== bytes.byteLength
+            || bytes.some((byte, index) => byte !== previousBytes[index])) {
+            throw new Error("The backup contains conflicting image payloads for one storage key.");
+          }
         }
       }
     }

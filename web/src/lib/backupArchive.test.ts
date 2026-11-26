@@ -150,6 +150,45 @@ describe("portable binary media backup", () => {
     expect(await (await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true }))!.blob.text()).toBe("SAFE");
   });
 
+  describe.each(["same-key", "trimmed-key", "legacy-key"] as const)("JSON shared image claims (%s)", identity => {
+    it.each(["bytes", "mime", "size"] as const)("rejects contradictory %s claims in either order before staging", async conflict => {
+      const first = { ...attachment, id: attachment.blobKey, questionId: "held-question", base64: "QVhPTQ==" };
+      const second = {
+        ...first, questionId: "unrelated-question",
+        ...(identity === "trimmed-key" ? { blobKey: "  " + attachment.blobKey + "  " }
+          : identity === "legacy-key" ? { blobKey: undefined } : { id: "other-use" }),
+        ...(conflict === "bytes" ? { base64: "U0FGRQ==" }
+          : conflict === "mime" ? { mimeType: "image/jpeg" }
+          : { base64: "QQ==", byteSize: 1 }),
+      };
+      for (const declarations of [[first, second], [second, first]]) {
+        const file = new File([JSON.stringify({ [ATTACHMENT_EXPORT_KEY]: declarations })], "conflict.json");
+        await expect(readPortableBackup(file)).rejects.toThrow("conflicting image payloads");
+        expect(await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true })).toBeUndefined();
+      }
+      await putQuestionAttachmentBlob(attachment.blobKey, { blob: new Blob(["SAFE"]), mimeType: "image/png", byteSize: 4, questionId: "held-question", updatedAt: attachment.updatedAt });
+      for (const declarations of [[first, second], [second, first]]) {
+        const file = new File([JSON.stringify({ [ATTACHMENT_EXPORT_KEY]: declarations })], "occupied.json");
+        await expect(readPortableBackup(file)).rejects.toThrow("conflicting image payloads");
+        expect(await (await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true }))!.blob.text()).toBe("SAFE");
+      }
+    });
+
+    it("preserves equivalent shared claims and provenance through repeated restore", async () => {
+      const first = { ...attachment, id: attachment.blobKey, questionId: "held-question", base64: "QVhPTQ==" };
+      const second = { ...first, questionId: "second-use", base64: "QVhP TQ",
+        ...(identity === "trimmed-key" ? { blobKey: " " + attachment.blobKey + " " }
+          : identity === "legacy-key" ? { blobKey: undefined } : { id: "second-image" }) };
+      const references = [...refs, { id: "second-use", attachments: [{ ...attachment, id: "second-image" }] }];
+      const payload = { [ATTACHMENT_EXPORT_KEY]: [first, second] };
+      const backup = await readPortableBackup(new File([JSON.stringify(payload)], "shared.json"));
+      expect(JSON.parse(backup.rawText)).toEqual(JSON.parse(JSON.stringify(payload)));
+      expect(await backup.restoreMedia(references)).toMatchObject({ restored: 1, skipped: 1 });
+      expect(await backup.restoreMedia(references)).toMatchObject({ restored: 0, skipped: 2 });
+      expect(await (await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true }))!.blob.text()).toBe("AXOM");
+    });
+  });
+
   it.each([false, true])("preserves legacy JSON with absent or empty declarations (present: %s)", async present => {
     const file = new File([JSON.stringify(present ? { [ATTACHMENT_EXPORT_KEY]: [] } : {})], "metadata-only.json");
     const backup = await readPortableBackup(file);
