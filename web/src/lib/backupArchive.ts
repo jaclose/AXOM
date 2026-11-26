@@ -236,6 +236,17 @@ export interface PortableBackupRead {
   restoreMedia: (references: References) => Promise<StagedQuestionAttachmentRestore>;
 }
 
+// Portable payload declarations describe exact bytes, unlike tolerant legacy
+// workspace metadata. The question ID is provenance, not exclusive ownership:
+// shared images may survive under a different question or review document.
+function hasExactMediaDeclaration(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.byteSize === "number" && Number.isSafeInteger(item.byteSize)
+    && item.byteSize > 0 && item.byteSize <= MAX_QUESTION_ATTACHMENT_BYTES
+    && typeof item.questionId === "string" && item.questionId.trim().length > 0;
+}
+
 /** Read and validate a portable copy before any workspace state is adopted. */
 export async function readPortableBackup(file: File): Promise<PortableBackupRead> {
   // Bind deferred archive extraction and staging to the original generation.
@@ -254,7 +265,7 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
     // including those that may not survive a later merge, before staging any.
     if (parsed && typeof parsed === "object" && Object.prototype.hasOwnProperty.call(parsed, ATTACHMENT_EXPORT_KEY)) {
       const declared = (parsed as Record<string, unknown>)[ATTACHMENT_EXPORT_KEY];
-      if (!Array.isArray(declared) || declared.length !== payloads.length) {
+      if (!Array.isArray(declared) || !declared.every(hasExactMediaDeclaration) || declared.length !== payloads.length) {
         throw new Error("The backup contains an invalid image payload declaration.");
       }
       for (const payload of payloads) {
@@ -298,6 +309,7 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
   const mediaFiles = new Set<string>(), mediaKeys = new Set<string>();
   for (const item of media) {
     if (!item || typeof item.file !== "string" || !/^media\/\d+$/.test(item.file) || !zip.file(item.file)) throw new Error("The backup contains an invalid or missing image record.");
+    if (!hasExactMediaDeclaration(item.metadata)) throw new Error("The backup contains an invalid or missing image record.");
     const [normalized] = extractQuestionAttachmentPayloads({ [ATTACHMENT_EXPORT_KEY]: [{ ...item.metadata, base64: "AA==" }] });
     if (!normalized) throw new Error("The backup contains an invalid or missing image record.");
     // Use the same normalized storage identity as deferred media extraction,

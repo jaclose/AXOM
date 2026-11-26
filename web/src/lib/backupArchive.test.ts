@@ -181,6 +181,52 @@ describe("portable binary media backup", () => {
     });
   });
 
+  describe.each(["json", "zip-v1", "zip-v2"] as const)("exact media declarations in %s", format => {
+    it.each(["fraction", "zero", "negative", "unsafe", "string", "missing-size", "blank-owner", "missing-owner", "numeric-owner", "valid", "legacy-key", "shared-owner"] as const)("validates %s without partial staging", async scenario => {
+      const fresh = { ...attachment, id: "fresh-image", blobKey: "fresh-image" };
+      const references = [...refs, { id: "fresh-question", attachments: [fresh] }];
+      const first = { ...fresh, questionId: "fresh-question", ...(scenario === "legacy-key" ? { blobKey: undefined } : {}) };
+      const second = {
+        ...attachment, questionId: "held-question",
+        ...(scenario === "fraction" ? { byteSize: 4.9 }
+          : scenario === "zero" ? { byteSize: 0 }
+          : scenario === "negative" ? { byteSize: -4 }
+          : scenario === "unsafe" ? { byteSize: Number.MAX_SAFE_INTEGER + 1 }
+          : scenario === "string" ? { byteSize: "4" }
+          : scenario === "missing-size" ? { byteSize: undefined }
+          : scenario === "blank-owner" ? { questionId: " \t\n" }
+          : scenario === "missing-owner" ? { questionId: undefined }
+          : scenario === "numeric-owner" ? { questionId: 123 }
+          : scenario === "shared-owner" ? { questionId: "another-source-question" } : {}),
+      };
+      let file: File;
+      if (format === "json") {
+        file = new File([JSON.stringify({ [ATTACHMENT_EXPORT_KEY]: [
+          { ...first, base64: "QVhPTQ==" }, { ...second, base64: "U0FGRQ==" },
+        ] })], "exact.json");
+      } else {
+        const { default: JSZip } = await import("jszip");
+        const zip = new JSZip();
+        zip.file("workspace.json", JSON.stringify({ _backupFormat: "axom-media-backup", _backupVersion: format === "zip-v1" ? 1 : 2, originals: [], media: [
+          { file: "media/0", metadata: first }, { file: "media/1", metadata: second },
+        ] }));
+        zip.file("media/0", "AXOM", { createFolders: false });
+        zip.file("media/1", "SAFE", { createFolders: false });
+        file = new File([await zip.generateAsync({ type: "arraybuffer" })], "exact.zip");
+      }
+      await putQuestionAttachmentBlob(attachment.blobKey, { blob: new Blob(["SAFE"]), mimeType: "image/png", byteSize: 4, questionId: "held-question", updatedAt: attachment.updatedAt });
+      if (["valid", "legacy-key", "shared-owner"].includes(scenario)) {
+        const backup = await readPortableBackup(file);
+        expect(await backup.restoreMedia(references)).toMatchObject({ restored: 1, skipped: 1 });
+        expect(await (await getQuestionAttachmentBlob(fresh.blobKey, { localOnly: true }))!.blob.text()).toBe("AXOM");
+      } else {
+        await expect(readPortableBackup(file)).rejects.toThrow(/invalid image payload declaration|invalid or missing image record/);
+        expect(await getQuestionAttachmentBlob(fresh.blobKey, { localOnly: true })).toBeUndefined();
+      }
+      expect(await (await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true }))!.blob.text()).toBe("SAFE");
+    });
+  });
+
   it("never overwrites existing bytes when a portable backup reuses their blob key", async () => {
     await putQuestionAttachmentBlob(attachment.blobKey, {
       blob: new Blob(["SAFE"]), mimeType: "image/png", byteSize: 4,
