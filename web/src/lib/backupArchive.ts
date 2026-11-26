@@ -6,7 +6,7 @@ import { readSourceOriginal, saveSourceOriginal } from "./decode/sources";
 import type { SourceDocument } from "./library";
 import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent } from "./questionAttachmentScope";
 import {
-  ATTACHMENT_EXPORT_KEY, MAX_QUESTION_ATTACHMENT_BYTES, QUESTION_ATTACHMENT_TYPES, base64ToBytes, blobToBase64,
+  ATTACHMENT_EXPORT_KEY, MAX_QUESTION_ATTACHMENT_BYTES, base64ToBytes, blobToBase64,
   extractQuestionAttachmentPayloads, getQuestionAttachmentBlob, stageQuestionAttachmentPayloads,
   type QuestionImageAttachment, type QuestionAttachmentExportPayload, type AttachmentReadOptions,
   type StagedQuestionAttachmentRestore,
@@ -165,9 +165,14 @@ function mediaReferences(references: References, conflictingKeys?: Set<string>) 
     for (const attachment of question.attachments ?? []) {
       const metadata = { ...attachment, questionId: question.id };
       const prior = byKey.get(metadata.blobKey);
-      if (!hasExactMediaDeclaration(metadata) || !QUESTION_ATTACHMENT_TYPES.includes(metadata.mimeType)
-        || (prior && (prior.byteSize !== metadata.byteSize || prior.mimeType !== metadata.mimeType))) {
-        conflictingKeys?.add(metadata.blobKey);
+      if (conflictingKeys) {
+        // The reader normalizes legacy keys and validates provenance. Do not
+        // export raw bytes under an identity the reader would change or reject.
+        const [normalized] = extractQuestionAttachmentPayloads({ [ATTACHMENT_EXPORT_KEY]: [{ ...metadata, base64: "AA==" }] });
+        if (!hasExactMediaDeclaration(metadata) || !normalized || normalized.blobKey !== metadata.blobKey
+          || (prior && (prior.byteSize !== metadata.byteSize || prior.mimeType !== metadata.mimeType))) {
+          conflictingKeys.add(metadata.blobKey);
+        }
       }
       // Keep existing last-reference provenance for consistent shared bytes.
       byKey.set(metadata.blobKey, metadata);

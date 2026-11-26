@@ -119,6 +119,43 @@ describe("portable binary media backup", () => {
     }
   });
 
+  it.each(["blank-id", "blank-question", "empty-created", "empty-updated", "raw-alias", "legacy-fallback", "alias-plus-canonical", "shared-invalid", "valid"] as const)("keeps ZIP manifests self-admissible (%s)", async scenario => {
+    const record = { blob: new Blob(["AXOM"], { type: attachment.mimeType }), mimeType: attachment.mimeType, byteSize: 4,
+      questionId: "held-question", updatedAt: attachment.updatedAt };
+    const invalid = { ...attachment,
+      ...(scenario === "blank-id" || scenario === "shared-invalid" ? { id: " " } : {}),
+      ...(scenario === "empty-created" ? { createdAt: "" } : {}),
+      ...(scenario === "empty-updated" ? { updatedAt: "" } : {}),
+      ...(scenario === "raw-alias" || scenario === "alias-plus-canonical" ? { blobKey: " " + attachment.blobKey + " " } : {}),
+      ...(scenario === "legacy-fallback" ? { blobKey: "" } : {}),
+    };
+    const keep = { ...attachment, id: "keep", blobKey: "keep" };
+    for (const key of new Set([invalid.blobKey, attachment.blobKey, keep.blobKey])) {
+      await putQuestionAttachmentBlob(key, record);
+    }
+    const references = [
+      { id: scenario === "blank-question" ? " " : "held-question", attachments: [invalid] },
+      ...(scenario === "alias-plus-canonical" || scenario === "shared-invalid" ? refs : []),
+      { id: "other-question", attachments: [keep] },
+    ];
+    const expected = scenario === "valid" ? [attachment.blobKey, keep.blobKey]
+      : scenario === "alias-plus-canonical" ? [attachment.blobKey, keep.blobKey] : [keep.blobKey];
+    for (const ordered of [references, [...references].reverse()]) {
+      const snapshot = JSON.stringify(ordered);
+      const result = await createMediaBackupArchive({ questions: ordered }, ordered);
+      expect(result.missingBlobKeys).toEqual(scenario === "valid" ? [] : [invalid.blobKey]);
+      expect(result.attachmentCount).toBe(expected.length);
+      const backup = await readPortableBackup(new File([result.blob], "self-admission.zip"));
+      const manifest = JSON.parse(backup.rawText);
+      expect(manifest.questions).toEqual(ordered);
+      expect(manifest.media.map((entry: { metadata: { blobKey: string } }) => entry.metadata.blobKey).sort()).toEqual([...expected].sort());
+      expect(JSON.stringify(ordered)).toBe(snapshot);
+      for (const key of new Set([invalid.blobKey, attachment.blobKey, keep.blobKey])) {
+        expect(await (await getQuestionAttachmentBlob(key, { localOnly: true }))!.blob.text()).toBe("AXOM");
+      }
+    }
+  });
+
   it("counts actual ZIP entries and reserves a manifest entry", async () => {
     await putQuestionAttachmentBlob(attachment.blobKey, { blob: new Blob(["AXOM"]), mimeType: "image/png", byteSize: 4, questionId: "held-question", updatedAt: attachment.updatedAt });
     await expect(createMediaBackupArchive({}, refs, [], {}, { maxEntries: 1 })).rejects.toThrow("Too many files");
