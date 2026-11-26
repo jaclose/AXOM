@@ -168,19 +168,19 @@ describe.each(["replace", "merge"] as const)("portable %s transaction", (mode) =
     expect(h.recordRestore).not.toHaveBeenCalled();
   });
 
-  it.each([false, true])("preserves both failure causes, including a falsy rollback rejection: %s", async (falsyRollback) => {
+  it.each([[false, false], [false, true], [true, false], [true, true]])("preserves both failure values and the direct caught cause: %s/%s", async (falsyTarget, falsyRollback) => {
     const h = restoreHarness(mode);
-    const targetError = new Error("target save refused");
+    const targetError = falsyTarget ? undefined : new Error("target save refused");
     const rollbackError = falsyRollback ? undefined : new Error("prior flush refused");
     h.flush.mockRejectedValueOnce(targetError).mockRejectedValueOnce(rollbackError);
 
     const error: unknown = await h.run().catch((failure: unknown) => failure);
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toContain("could not confirm the prior workspace rollback");
-    const cause = (error as Error).cause;
-    expect(cause).toBeInstanceOf(AggregateError);
-    expect((cause as AggregateError).errors[0]).toBe(targetError);
-    expect((cause as AggregateError).errors[1]).toBe(rollbackError);
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as Error).cause).toBe(targetError);
+    expect((error as AggregateError).errors[0]).toBe(targetError);
+    expect((error as AggregateError).errors[1]).toBe(rollbackError);
     expect(h.recordRestore).not.toHaveBeenCalled();
     expect(h.maintainAttachments).not.toHaveBeenCalled();
     expect(h.rollback).not.toHaveBeenCalled();
