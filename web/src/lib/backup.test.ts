@@ -563,12 +563,31 @@ describe("portable backup safety", () => {
         [[], [valid, malformed]], [[], [malformed, valid]],
         [[valid, malformed], []], [[malformed, valid], []], [[], [malformed]],
       ]) {
-        const local = parse(left);
-        const imported = parse(right);
+        // Raw local state may predate parser admission; retain the merge defense.
+        const local = Object.assign(parse([]), { [collection]: left });
+        const imported = Object.assign(parse([]), { [collection]: right });
         const snapshot = JSON.stringify([local, imported]);
         expect(() => mergeStates(local, imported)).toThrow("invalid or noncanonical record identity");
         expect(JSON.stringify([local, imported])).toBe(snapshot);
       }
+    }
+  });
+
+  it.each([
+    ["tasks", "id"], ["logs", "id"], ["dayPlans", "dayKey"], ["dailyArchives", "date"],
+  ] as const)("refuses malformed %s identity at common portable admission", (collection, identity) => {
+    const valid = { [identity]: "1", value: "valid" };
+    for (const schemaVersion of [undefined, 31, SCHEMA_VERSION]) {
+      for (const bad of [1, 0, true, false, {}, [], ["1"], " ", "\t", " 1", "1 ", "\u00a0"]) {
+        const malformed = { [identity]: bad, value: "malformed" };
+        for (const records of [[malformed], [valid, malformed], [malformed, valid]]) {
+          const raw = JSON.stringify({ terms: [], schemaVersion, [collection]: records });
+          expect(() => parseImport(raw)).toThrow(`invalid or noncanonical record identity (${collection})`);
+        }
+      }
+      const records = [valid, { [identity]: "01" }, { [identity]: "a b" },
+        { [identity]: "A" }, { [identity]: "a" }, {}, { [identity]: null }, { [identity]: "" }];
+      expect(parseImport(JSON.stringify({ terms: [], schemaVersion, [collection]: records }))[collection]).toEqual(records);
     }
   });
 

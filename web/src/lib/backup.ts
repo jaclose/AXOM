@@ -55,6 +55,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isPortableRecordIdentity(value: unknown): boolean {
+  return value === undefined || value === null || value === ""
+    || (typeof value === "string" && value.trim() === value);
+}
+
 export function toPortableState(state: NoctyriumState): NoctyriumState {
   const payload: Record<string, unknown> = {};
   const src = state as unknown as Record<string, unknown>;
@@ -268,10 +273,10 @@ function mergeById(
   const identity = (record: Record<string, unknown>): string => {
     const id = record[idKey];
     if (id === undefined || id === null || id === "") return "";
-    if (typeof id !== "string" || id.trim() !== id) {
+    if (!isPortableRecordIdentity(id)) {
       throw new Error("This merge contains an invalid or noncanonical record identity. Keep both original workspaces.");
     }
-    return id;
+    return id as string;
   };
   const latestById = (records: Array<Record<string, unknown>>) => {
     const result = new Map<string, Record<string, unknown>>();
@@ -457,6 +462,18 @@ export function parseImport(text: string): NoctyriumState {
     const collection: unknown = data[key];
     if (collection !== undefined && (!Array.isArray(collection) || !collection.every(isRecord))) {
       throw new Error(`This backup has an invalid workspace collection (${key}). Keep the original file.`);
+    }
+  }
+  // These generic collections must satisfy the same identity rule for
+  // both Merge and Replace, before either can stage media or adopt state.
+  // Keep legacy unkeyed records verbatim; never trim or coerce an identity.
+  for (const [collection, identity] of [
+    ["tasks", "id"], ["logs", "id"], ["dayPlans", "dayKey"], ["dailyArchives", "date"],
+  ] as const) {
+    for (const record of data[collection] ?? []) {
+      if (!isPortableRecordIdentity(record[identity])) {
+        throw new Error(`This backup has an invalid or noncanonical record identity (${collection}). Keep the original file.`);
+      }
     }
   }
   // Course Tracker consumes each present course's module array directly.
