@@ -1,0 +1,82 @@
+name: COMMS recovery diagnostic R263
+on:
+  pull_request:
+    branches:
+      - codex/mothership-r247-complete-backup-receipt-20261125
+permissions:
+  contents: read
+jobs:
+  pinned-generation:
+    if: github.head_ref == 'codex/mothership-r263-comms-diagnostic-20261126'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 99197626be3b4590f1e2d8bc3bb686c5ecfe8ef9
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version-file: .nvmrc
+      - name: Record exact source and install locked dependencies
+        run: |
+          test "$(git rev-parse HEAD)" = 99197626be3b4590f1e2d8bc3bb686c5ecfe8ef9
+          git rev-parse HEAD
+          git rev-parse 'HEAD^{tree}'
+          node scripts/toolchain.mjs
+          npm ci
+          npm --prefix web ci
+      - name: Canonical generation and deterministic verification
+        run: |
+          set -euo pipefail
+          generate() {
+            node scripts/build-communications.mjs
+            node scripts/render-communications-auth.mjs
+          }
+          manifest=supabase/functions/communications/source-manifest.json
+          generate
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import {createHash} from 'node:crypto';
+          import {readFileSync} from 'node:fs';
+          const manifestPath = 'supabase/functions/communications/source-manifest.json';
+          const m = JSON.parse(readFileSync(manifestPath, 'utf8'));
+          assert.equal(m.version, 1);
+          assert.equal(m.bundle.path, 'supabase/functions/communications/service.js');
+          const templates = ['confirmation','magic_link','recovery','invite','email_change','reauthentication','security'].map(n => 'supabase/templates/communications/' + n + '.html');
+          assert.deepEqual(Object.keys(m.authTemplates).sort(), templates.sort());
+          for (const [p, digest] of Object.entries({...m.sources, [m.bundle.path]:m.bundle.sha256, ...m.authTemplates})) {
+            assert.match(digest, /^[a-f0-9]{64}$/);
+            assert.equal(createHash('sha256').update(readFileSync(p)).digest('hex'),digest,p);
+          }
+          console.log('Verified', Object.keys(m.sources).length, 'source inputs, bundle and', templates.length, 'templates');
+          NODE
+          sha256sum "$manifest" supabase/functions/communications/service.js supabase/templates/communications/{confirmation,magic_link,recovery,invite,email_change,reauthentication,security}.html > "$RUNNER_TEMP/comms-first.sha256"
+          generate
+          sha256sum -c "$RUNNER_TEMP/comms-first.sha256"
+          git diff --stat -- supabase/functions/communications/service.js "$manifest" supabase/templates/communications/
+          git diff --name-only
+      - name: Preserve explicit generated public files for review (no commit)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: comms-pinned-generation-r263
+          path: |
+            supabase/functions/communications/service.js
+            supabase/functions/communications/source-manifest.json
+            supabase/templates/communications/confirmation.html
+            supabase/templates/communications/magic_link.html
+            supabase/templates/communications/recovery.html
+            supabase/templates/communications/invite.html
+            supabase/templates/communications/email_change.html
+            supabase/templates/communications/reauthentication.html
+            supabase/templates/communications/security.html
+          if-no-files-found: error
+          retention-days: 7
+      - name: Release tool regressions and repository hygiene
+        run: |
+          npm run test:repo
+          npm run repo:check
+      - name: Focused recovery tests on regenerated tree
+        run: npm --prefix web test -- src/lib/backup.test.ts src/lib/backupArchive.test.ts src/lib/backupExportScope.test.ts src/lib/questionAttachments.test.ts src/lib/refreshRecovery.test.ts src/components/shell/RefreshAfterBackup.test.tsx src/components/shell/SettingsModal.restore.test.ts src/components/shell/VaultSaveWatcher.test.tsx
+      - name: Web typecheck lint test and build
+        run: npm --prefix web run quality
