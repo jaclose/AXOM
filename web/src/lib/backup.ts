@@ -262,11 +262,22 @@ function mergeById(
   // later in the imported list can hide a newer record before the local
   // comparison. Equal latest timestamps with distinct contents on one side
   // have no reliable ordering; refuse that merge without adopting anything.
+  // A malformed ID must never alias a legitimate string through coercion.
+  // Missing/null/empty legacy identities remain unkeyed and are retained;
+  // explicit non-string or padded identities require non-destructive review.
+  const identity = (record: Record<string, unknown>): string => {
+    const id = record[idKey];
+    if (id === undefined || id === null || id === "") return "";
+    if (typeof id !== "string" || id.trim() !== id) {
+      throw new Error("This merge contains an invalid or noncanonical record identity. Keep both original workspaces.");
+    }
+    return id;
+  };
   const latestById = (records: Array<Record<string, unknown>>) => {
     const result = new Map<string, Record<string, unknown>>();
     const ambiguous = new Set<string>();
     for (const record of records) {
-      const id = String(record[idKey] ?? "");
+      const id = identity(record);
       if (!id) continue;
       const prior = result.get(id);
       if (prior && equivalent(record, prior)) continue;
@@ -289,7 +300,7 @@ function mergeById(
     byId.set(id, !other || equivalent(record, other) || compare(record, other) >= 0 ? record : other);
   }
   // Keep unkeyed records from both sides rather than dropping them.
-  const unkeyed = [...current, ...imported].filter((r) => !String(r[idKey] ?? ""));
+  const unkeyed = [...current, ...imported].filter((r) => !identity(r));
   return [...byId.values(), ...unkeyed];
 }
 

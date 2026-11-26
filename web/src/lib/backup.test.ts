@@ -552,6 +552,43 @@ describe("portable backup safety", () => {
 
   it.each([
     ["tasks", "id"], ["logs", "id"], ["dayPlans", "dayKey"], ["dailyArchives", "date"],
+  ] as const)("refuses noncanonical record identities in %s without aliasing or mutation", (collection, identity) => {
+    const parse = (records: Array<Record<string, unknown>>) =>
+      parseImport(JSON.stringify({ terms: [], [collection]: records }));
+    const valid = { [identity]: "1", updatedAt: "2026-11-25T00:00:00Z", value: "valid" };
+    for (const bad of [1, 0, true, false, {}, [], ["1"], " ", "\t", " 1", "1 ", "\u00a0"]) {
+      const malformed = { [identity]: bad, updatedAt: "2026-11-26T00:00:00Z", value: "malformed" };
+      for (const [left, right] of [
+        [[valid], [malformed]], [[malformed], [valid]],
+        [[], [valid, malformed]], [[], [malformed, valid]],
+        [[valid, malformed], []], [[malformed, valid], []], [[], [malformed]],
+      ]) {
+        const local = parse(left);
+        const imported = parse(right);
+        const snapshot = JSON.stringify([local, imported]);
+        expect(() => mergeStates(local, imported)).toThrow("invalid or noncanonical record identity");
+        expect(JSON.stringify([local, imported])).toBe(snapshot);
+      }
+    }
+  });
+
+  it.each([
+    ["tasks", "id"], ["logs", "id"], ["dayPlans", "dayKey"], ["dailyArchives", "date"],
+  ] as const)("preserves exact string identities and legacy unkeyed records in %s", (collection, identity) => {
+    const parse = (records: Array<Record<string, unknown>>) =>
+      parseImport(JSON.stringify({ terms: [], [collection]: records }));
+    const keyed = ["1", "01", "0", "a", "A", "a b"].map(value => ({ [identity]: value, value }));
+    const unkeyed = [{ value: "missing" }, { [identity]: null, value: "null" }, { [identity]: "", value: "empty" }];
+    const local = parse([...keyed.slice(0, 3), ...unkeyed]);
+    const imported = parse([...keyed.slice(3), ...unkeyed]);
+    const snapshot = JSON.stringify([local, imported]);
+    expect(mergeStates(local, imported)[collection]).toEqual([...keyed.slice(3), ...keyed.slice(0, 3), ...unkeyed, ...unkeyed]);
+    expect(mergeStates(imported, local)[collection]).toEqual([...keyed, ...unkeyed, ...unkeyed]);
+    expect(JSON.stringify([local, imported])).toBe(snapshot);
+  });
+
+  it.each([
+    ["tasks", "id"], ["logs", "id"], ["dayPlans", "dayKey"], ["dailyArchives", "date"],
   ] as const)("orders explicit timestamp instants in %s without changing the stored representation", (collection, identity) => {
     const parse = (records: Array<Record<string, unknown>>) =>
       parseImport(JSON.stringify({ terms: [], [collection]: records }));
