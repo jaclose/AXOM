@@ -325,6 +325,57 @@ describe("portable binary media backup", () => {
     });
   });
 
+
+  describe.each([1, 2])("ZIP version %s manifest path runtime types", version => {
+    it.each(["single-array", "mixed", "reverse-mixed", "two-arrays", "nested-array", "number", "null", "object", "duplicate-string", "distinct"] as const)("checks %s image paths before staging", async scenario => {
+      const { default: JSZip } = await import("jszip");
+      const path = "media/0";
+      const first = { file: scenario === "reverse-mixed" || scenario === "two-arrays" ? [path] : path, metadata: { ...attachment, questionId: "held-question" } };
+      const second = { file: scenario === "distinct" ? "media/1" : scenario === "duplicate-string" || scenario === "reverse-mixed" ? path
+        : scenario === "nested-array" ? [[path]] : scenario === "number" ? 0 : scenario === "null" ? null : scenario === "object" ? { path } : [path],
+        metadata: { ...first.metadata, id: "second-figure", blobKey: "second-key" } };
+      const media = scenario === "single-array" ? [second] : [first, second];
+      const zip = new JSZip();
+      zip.file("workspace.json", JSON.stringify({ _backupFormat: "axom-media-backup", _backupVersion: version, media, originals: [] }));
+      zip.file(path, "AXOM", { createFolders: false });
+      zip.file("media/1", "DIFF", { createFolders: false });
+      await putQuestionAttachmentBlob(attachment.blobKey, { blob: new Blob(["SAFE"]), mimeType: "image/png", byteSize: 4, questionId: "held-question", updatedAt: attachment.updatedAt });
+      const file = new File([await zip.generateAsync({ type: "arraybuffer" })], "typed-image-path.zip");
+      if (scenario === "distinct") {
+        expect(JSON.parse((await readPortableBackup(file)).rawText).media).toEqual(media);
+      } else {
+        await expect(readPortableBackup(file)).rejects.toThrow(/invalid or missing image record|duplicate image identities/);
+      }
+      expect(await (await getQuestionAttachmentBlob(attachment.blobKey, { localOnly: true }))!.blob.text()).toBe("SAFE");
+      expect(await getQuestionAttachmentBlob("second-key", { localOnly: true })).toBeUndefined();
+    });
+  });
+
+  it.each(["single-array", "mixed", "reverse-mixed", "two-arrays", "nested-array", "number", "null", "object", "duplicate-string", "distinct"] as const)("checks %s original paths before staging", async scenario => {
+    const { default: JSZip } = await import("jszip");
+    const original = new Blob(["original source"], { type: "text/plain" });
+    const document: SourceDocument = { id: "typed-original", title: "Source", fileName: "source.txt", fileType: "text/plain", uploadedAt: "2026-10-13", rawText: "original source", sizeBytes: original.size, checksum: await sha256Hex(await original.arrayBuffer()), tags: [], linkedQuestionSetIds: [], libraryOnly: true };
+    const secondDocument = { ...document, id: "second-original" };
+    const path = "originals/0";
+    const first = { file: scenario === "reverse-mixed" || scenario === "two-arrays" ? [path] : path, documentId: document.id, sha256: document.checksum, byteSize: original.size, mimeType: original.type };
+    const second = { ...first, documentId: secondDocument.id, file: scenario === "distinct" ? "originals/1" : scenario === "duplicate-string" || scenario === "reverse-mixed" ? path
+      : scenario === "nested-array" ? [[path]] : scenario === "number" ? 0 : scenario === "null" ? null : scenario === "object" ? { path } : [path] };
+    const originals = scenario === "single-array" ? [second] : [first, second];
+    const zip = new JSZip();
+    zip.file("workspace.json", JSON.stringify({ _backupFormat: "axom-media-backup", _backupVersion: 2, media: [], documents: [document, secondDocument], originals }));
+    zip.file(path, new Uint8Array(await original.arrayBuffer()), { createFolders: false });
+    zip.file("originals/1", new Uint8Array(await original.arrayBuffer()), { createFolders: false });
+    await saveSourceOriginal(document, original);
+    const file = new File([await zip.generateAsync({ type: "arraybuffer" })], "typed-original-path.zip");
+    if (scenario === "distinct") {
+      expect(JSON.parse((await readPortableBackup(file)).rawText).originals).toEqual(originals);
+    } else {
+      await expect(readPortableBackup(file)).rejects.toThrow("invalid or missing original-file record");
+    }
+    expect(await (await readSourceOriginal(document.id, document.checksum))?.text()).toBe("original source");
+    expect(await readSourceOriginal(secondDocument.id, secondDocument.checksum)).toBeUndefined();
+  });
+
   describe.each([1, 2])("ZIP version %s physical member identity", version => {
     it.each(["duplicate-media", "duplicate-workspace", "alias-first", "alias-last", "local-name", "count", "expanded", "valid"] as const)("checks %s before the ZIP map can collapse members", async scenario => {
       const { default: JSZip } = await import("jszip");

@@ -281,7 +281,7 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
   const media = manifest.media;
   const mediaFiles = new Set<string>(), mediaKeys = new Set<string>();
   for (const item of media) {
-    if (!item || !/^media\/\d+$/.test(item.file) || !zip.file(item.file)) throw new Error("The backup contains an invalid or missing image record.");
+    if (!item || typeof item.file !== "string" || !/^media\/\d+$/.test(item.file) || !zip.file(item.file)) throw new Error("The backup contains an invalid or missing image record.");
     const [normalized] = extractQuestionAttachmentPayloads({ [ATTACHMENT_EXPORT_KEY]: [{ ...item.metadata, base64: "AA==" }] });
     if (!normalized) throw new Error("The backup contains an invalid or missing image record.");
     // Use the same normalized storage identity as deferred media extraction,
@@ -311,7 +311,7 @@ export async function readPortableBackup(file: File): Promise<PortableBackupRead
   // Check integrity before the caller offers to adopt any workspace records.
   for (const item of originals) {
     if (!item || typeof item.documentId !== "string" || !item.documentId || ids.has(item.documentId) || files.has(item.file)
-      || !/^originals\/\d+$/.test(item.file) || !zip.file(item.file) || !/^[a-f0-9]{64}$/.test(item.sha256)
+      || typeof item.file !== "string" || !/^originals\/\d+$/.test(item.file) || !zip.file(item.file) || !/^[a-f0-9]{64}$/.test(item.sha256)
       || !Number.isSafeInteger(item.byteSize) || item.byteSize < 0 || item.byteSize > MAX_ORIGINAL_BYTES
       || typeof item.mimeType !== "string" || item.mimeType.length > 255
       || documentChecksums.get(item.documentId) !== item.sha256) throw new Error("The backup contains an invalid or missing original-file record.");
