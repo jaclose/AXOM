@@ -4,15 +4,16 @@
 // shows its current mastery and historical accuracy, digest (when AI-enhanced), and can launch blocks or
 // generate more questions from its source document (review-gated).
 // ===========================================================================
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { BookOpen, FileText, FolderInput, ListPlus, Search, Sparkles, Trash2 } from "lucide-react";
 import { useStore } from "../../lib/store";
-import { questionSetMetrics, sortQuestionSetsByRecency, type QuestionSet, type SourceDocument } from "../../lib/library";
+import { digestHoldReason, digestMembership, digestSourceFingerprint, questionSetMetrics, sortQuestionSetsByRecency, type QuestionSet, type SourceDocument } from "../../lib/library";
 import { enhanceQuestionSet, resolveActiveProvider } from "../../lib/ai";
 import { GlassCard, GButton, GhostButton, PanelHeader, Tag, EmptyState } from "../ui/primitives";
 import { Modal } from "../ui/Modal";
 import { pushToast } from "../../lib/toast";
 import type { QuestionRecord } from "../../lib/questions";
+import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent, subscribeQuestionAttachmentScope } from "../../lib/questionAttachmentScope";
 import type { MissingQuestionRecovery } from "../../lib/questionRecovery";
 import { QuestionSetCard } from "./QuestionSetCard";
 import { QuestionSetLibrarySubmitDialog } from "./QuestionSetLibrarySubmitDialog";
@@ -38,6 +39,7 @@ const SOURCE_PAGE_SIZE = 40;
 interface ManagedQuestionSetShare extends OwnedQuestionSetShare {
   link: string;
 }
+
 
 export function SourceLibrary({
   onParseFrom,
@@ -164,6 +166,7 @@ export function QuestionSetList({
   const sets = s.questionSets ?? NO_SETS;
   const questions = s.questions ?? NO_QUESTIONS;
   const provider = useMemo(() => resolveActiveProvider(), []);
+  const currentDigestOwner = useSyncExternalStore(subscribeQuestionAttachmentScope, () => getQuestionAttachmentScope().owner);
   const [enhancing, setEnhancing] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [filingSet, setFilingSet] = useState<QuestionSet | null>(null);
@@ -193,17 +196,49 @@ export function QuestionSetList({
 
   async function enhance(set: QuestionSet) {
     if (!provider) return;
+    // Re-evaluate on activation, not only at render time. Missing/collided IDs
+    // must never reach the provider or create a persistent teaching digest.
+    const membership = digestMembership(set, questions);
+    if (membership.holdReason) {
+      pushToast({ title: "Digest held for source review", body: membership.holdReason, tone: "warn" });
+      return;
+    }
+    const accountScope = getQuestionAttachmentScope();
+    const fingerprint = digestSourceFingerprint(set, membership.records, accountScope.owner);
     setEnhancing(set.id);
     try {
-      const byId = new Map(questions.map((q) => [q.id, q]));
-      const forDigest = set.questionIds
-        .map((id) => byId.get(id))
-        .filter((q): q is NonNullable<typeof q> => !!q)
-        .map((q) => ({ stem: q.stem, correct: q.options.find((o) => o.key === q.correctKey)?.text, explanation: q.explanation }));
+      const forDigest = membership.records.map((q) => ({
+        stem: q.stem,
+        correct: q.options.find((o) => o.key === q.correctKey)?.text,
+        explanation: q.explanation,
+      }));
       const digest = await enhanceQuestionSet(provider, { title: set.title, questions: forDigest });
-      s.updateQuestionSet(set.id, {
+      // Never commit a provider response into an account or question mapping that
+      // changed while the async request was running (including A → B → A).
+      if (!isQuestionAttachmentScopeCurrent(accountScope)) return;
+      const latest = useStore.getState();
+      const currentSet = (latest.questionSets ?? []).find((candidate) => candidate.id === set.id);
+      const currentMembership = currentSet && digestMembership(currentSet, latest.questions ?? NO_QUESTIONS);
+      if (!currentSet || !currentMembership || currentMembership.holdReason
+        || digestSourceFingerprint(currentSet, currentMembership.records, getQuestionAttachmentScope().owner) !== fingerprint) {
+        pushToast({
+          title: "Digest source changed",
+          body: "The questions, answer review, or set changed during analysis. No old AI advice was saved; review the current source and retry.",
+          tone: "warn",
+        });
+        return;
+      }
+      latest.updateQuestionSet(set.id, {
         aiEnhanced: true,
-        digest: { ...digest, generatedBy: provider.info.label, generatedAt: new Date().toISOString() },
+        // Do not destroy a previously persisted digest, including legacy
+        // source-unbound advice: retain it for audit instead of silent overwrite.
+        digestHistory: currentSet.digest
+          ? [...(currentSet.digestHistory ?? []), currentSet.digest]
+          : currentSet.digestHistory,
+        digest: {
+          ...digest, generatedBy: provider.info.label, generatedAt: new Date().toISOString(),
+          sourceFingerprint: { version: 1, sha256: fingerprint },
+        },
       });
     } catch (err) {
       pushToast({ title: "Enhancement failed", body: err instanceof Error ? err.message : "Unknown error.", tone: "warn" });
@@ -357,23 +392,39 @@ export function QuestionSetList({
   // silently associate a bank with the wrong term when module names repeat.
 
   function addDigestReview(set: QuestionSet) {
-    const suggestions = set.digest?.suggestedReview ?? [];
-    const course = (s.courses ?? []).find((item) => item.id === set.scope?.courseId);
-    const term = (s.terms ?? []).find((item) => item.id === course?.termId);
-    const destination = set.scope?.module
-      ? [term?.name ?? course?.code ?? "Question Bank", set.scope.module, set.scope.week ? `Week ${set.scope.week}` : "Review"].join("/")
+    // Re-read the authoritative current store at activation: a displayed
+    // button may be stale before React commits a source/account update.
+    const live = useStore.getState();
+    const currentSet = (live.questionSets ?? []).find((item) => item.id === set.id);
+    const membership = currentSet && digestMembership(currentSet, live.questions ?? NO_QUESTIONS);
+    if (!currentSet || !membership || digestHoldReason(currentSet, membership, getQuestionAttachmentScope().owner)) {
+      pushToast({
+        title: "Digest requires source review",
+        body: "The account or reviewed question source changed. Rebuild the digest before adding Tracker actions.",
+        tone: "warn",
+      });
+      return;
+    }
+    const suggestions = currentSet.digest?.suggestedReview ?? [];
+    if (!suggestions.length) return;
+    const course = (live.courses ?? []).find((item) => item.id === currentSet.scope?.courseId);
+    const term = (live.terms ?? []).find((item) => item.id === course?.termId);
+    const destination = currentSet.scope?.module
+      ? [term?.name ?? course?.code ?? "Question Bank", currentSet.scope.module, currentSet.scope.week ? `Week ${currentSet.scope.week}` : "Review"].join("/")
       : "Question Bank/Review";
-    const items = reviewTaskInputs(suggestions, destination, { source: "digest", sourceId: set.id }, s.tracker);
+    const items = reviewTaskInputs(suggestions, destination, { source: "digest", sourceId: currentSet.id }, live.tracker);
     if (!items.length) {
       pushToast({ title: "Review already tracked", body: "Those active digest topics are already in the Course Tracker.", tone: "warn" });
       return;
     }
-    s.bulkAddTrackerItems(items);
+    live.bulkAddTrackerItems(items);
     pushToast({ title: "Review work added", body: `${items.length} digest topic${items.length === 1 ? "" : "s"} added to the Course Tracker.`, tone: "success" });
   }
 
   function renderCard(set: QuestionSet) {
     const metrics = questionSetMetrics(set, questions, s.documents ?? []);
+    const membership = digestMembership(set, questions);
+    const holdReason = digestHoldReason(set, membership, currentDigestOwner);
     return (
       <QuestionSetCard
         key={set.id}
@@ -393,7 +444,12 @@ export function QuestionSetList({
         onSubmit={!compact ? () => setSubmitSet(set) : undefined}
         compact={compact}
       >
-        {!compact && set.digest && (
+        {!compact && (provider || set.digest) && holdReason && (
+          <p className="sub" role="status">
+            {holdReason}{set.digest ? " Earlier AI digest and its tracker suggestions are withheld." : ""}
+          </p>
+        )}
+        {!compact && set.digest && !holdReason && (
           <div className="stack" style={{ gap: 6, marginTop: 10 }}>
             <div className="question-explanation">
               <b>{set.digest.generatedBy}:</b> {set.digest.summary}
@@ -407,12 +463,12 @@ export function QuestionSetList({
           </div>
         )}
         {!compact && <div className="row wrap gap6">
-          {provider && !set.digest && (
-            <GhostButton disabled={enhancing === set.id} onClick={() => void enhance(set)}>
-              <Sparkles size={ICON_SIZE.body} /> {enhancing === set.id ? "Analyzing…" : "Build digest"}
+          {provider && (!set.digest || (holdReason && !membership.holdReason)) && (
+            <GhostButton disabled={enhancing === set.id || Boolean(membership.holdReason)} onClick={() => void enhance(set)}>
+              <Sparkles size={ICON_SIZE.body} /> {enhancing === set.id ? "Analyzing…" : set.digest ? "Rebuild digest" : "Build digest"}
             </GhostButton>
           )}
-          {set.digest?.suggestedReview.length ? (
+          {!holdReason && set.digest?.suggestedReview.length ? (
             <GhostButton onClick={() => addDigestReview(set)}>
               <ListPlus size={ICON_SIZE.body} /> Add review to Tracker
             </GhostButton>

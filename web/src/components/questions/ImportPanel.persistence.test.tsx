@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { indexedDB as fakeIndexedDb, IDBKeyRange } from "fake-indexeddb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,10 +8,12 @@ import { useStore } from "../../lib/store";
 import { ImportPanel } from "./ImportPanel";
 import { importFromCsv } from "../../lib/questionImport";
 import { questionMappingStatus } from "../../lib/questions";
+import { digestMembership, type SourceDocument } from "../../lib/library";
+import { enhanceQuestionSet, resolveActiveProvider } from "../../lib/ai";
 import { parseImport, toPortableState } from "../../lib/backup";
 import { DB_NAME } from "../../lib/localVault";
 import { hasReviewedImportInFlight, persistReviewedImportOnce, settledReviewedImportSnapshot, type ReviewedImportPersistenceResult } from "../../lib/questionImportFinalization";
-import type { SourceDocument } from "../../lib/library";
+
 
 vi.mock("../../lib/toast", () => ({ pushToast: vi.fn() }));
 vi.mock("../../lib/ai", () => ({
@@ -50,6 +52,8 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   cleanup();
+  vi.mocked(resolveActiveProvider).mockReturnValue(null);
+  vi.mocked(enhanceQuestionSet).mockReset();
   await useStore.setState(original);
   vi.unstubAllGlobals();
 });
@@ -216,6 +220,68 @@ describe("Import Center persistence invariant", () => {
       expect(useStore.getState().questions.some((question) => question.bank === "Untitled set")).toBe(true);
       expect(screen.queryByRole("button", { name: "Finalize import" })).toBeNull();
     });
+  });
+
+  it("binds a reviewed post-import AI digest to a durable source revision", async () => {
+    const user = userEvent.setup();
+    vi.mocked(resolveActiveProvider).mockReturnValue({ info: { label: "Synthetic provider" } } as
+      NonNullable<ReturnType<typeof resolveActiveProvider>>);
+    vi.mocked(enhanceQuestionSet).mockResolvedValue({
+      summary: "Verified import digest", pitfalls: [], suggestedReview: ["Review mast cell function"],
+    } as Awaited<ReturnType<typeof enhanceQuestionSet>>);
+    const rawText = [
+      "question,a,b,c,answer",
+      '"Which cell releases histamine?","Mast cells","CD4+ T lymphocytes","B lymphocytes","A. Mast cell"',
+    ].join("\n");
+    render(<ImportPanel seed={{
+      drafts: importFromCsv(rawText).drafts, rawText, title: "AI reviewed source",
+      fileName: "reviewed.csv", fileType: "csv",
+    }} />);
+    await user.click(screen.getByRole("button", { name: /Which cell releases histamine/ }));
+    await user.click(screen.getByRole("button", { name: "Confirm mapped answer A" }));
+    await user.click(screen.getByLabelText(/Optional AI digest after finalization/i));
+    await user.click(screen.getByRole("button", { name: "Finalize import" }));
+    await waitFor(() => expect(enhanceQuestionSet).toHaveBeenCalledOnce());
+    await waitFor(() => {
+      const state = useStore.getState();
+      const set = state.questionSets.find((item) => item.title === "AI reviewed source");
+      expect(set?.digest).toMatchObject({
+        summary: "Verified import digest",
+        sourceFingerprint: { version: 1, sha256: expect.stringMatching(/^[a-f0-9]{64}$/) },
+      });
+      expect(set && digestMembership(set, state.questions).holdReason).toBeNull();
+    });
+  });
+
+  it("discards optional post-import AI output after the reviewed source is corrected", async () => {
+    const user = userEvent.setup();
+    vi.mocked(resolveActiveProvider).mockReturnValue({ info: { label: "Synthetic provider" } } as
+      NonNullable<ReturnType<typeof resolveActiveProvider>>);
+    let resolveDigest!: (value: Awaited<ReturnType<typeof enhanceQuestionSet>>) => void;
+    vi.mocked(enhanceQuestionSet).mockImplementation(() => new Promise((resolve) => { resolveDigest = resolve; }));
+    const rawText = [
+      "question,a,b,c,answer",
+      '"Which cell releases histamine?","Mast cells","CD4+ T lymphocytes","B lymphocytes","A. Mast cell"',
+    ].join("\n");
+    render(<ImportPanel seed={{
+      drafts: importFromCsv(rawText).drafts, rawText, title: "Deferred reviewed source",
+      fileName: "deferred.csv", fileType: "csv",
+    }} />);
+    await user.click(screen.getByRole("button", { name: /Which cell releases histamine/ }));
+    await user.click(screen.getByRole("button", { name: "Confirm mapped answer A" }));
+    await user.click(screen.getByLabelText(/Optional AI digest after finalization/i));
+    await user.click(screen.getByRole("button", { name: "Finalize import" }));
+    await waitFor(() => expect(enhanceQuestionSet).toHaveBeenCalledOnce());
+    const state = useStore.getState();
+    const set = state.questionSets.find((item) => item.title === "Deferred reviewed source")!;
+    const question = state.questions.find((item) => item.id === set.questionIds[0])!;
+    state.updateQuestion(question.id, { stem: "Revised after import while AI is running?" });
+    await act(async () => {
+      resolveDigest({
+        summary: "Outdated teaching", pitfalls: [], suggestedReview: ["Wrong revision"],
+      } as Awaited<ReturnType<typeof enhanceQuestionSet>>);
+    });
+    expect(useStore.getState().questionSets.find((item) => item.id === set.id)?.digest).toBeUndefined();
   });
 
   it("persists a structured drift candidate only after the learner confirms it", async () => {
