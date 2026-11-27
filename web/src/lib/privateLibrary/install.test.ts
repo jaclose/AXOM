@@ -1,6 +1,21 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Blob as NativeBlob, File as NativeFile } from "node:buffer";
+import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent, setQuestionAttachmentAccount } from "../questionAttachmentScope";
+import { readSourceOriginal } from "../decode/sources";
+const binaryWriteRace = vi.hoisted(() => ({ afterFirstWrite: undefined as undefined | (() => void) }));
+vi.mock("../questionAttachments", async importOriginal => {
+  const actual = await importOriginal<typeof import("../questionAttachments")>();
+  return {
+    ...actual,
+    putQuestionAttachmentBlob: async (...args: Parameters<typeof actual.putQuestionAttachmentBlob>) => {
+      const result = await actual.putQuestionAttachmentBlob(...args);
+      const notify = binaryWriteRace.afterFirstWrite;
+      if (notify) { binaryWriteRace.afterFirstWrite = undefined; notify(); }
+      return result;
+    },
+  };
+});
 import { IDBObjectStore as FakeIDBObjectStore } from "fake-indexeddb";
 import { useStore } from "../store";
 import { closeWorkspace, openEmptyWorkspace, reloadWorkspace } from "../question-content/persistenceHarness.testing";
@@ -44,7 +59,7 @@ function stubSuccessfulImageDecode(width = 1, height = 1) {
   vi.stubGlobal("createImageBitmap", vi.fn(async () => ({ width, height, close: vi.fn() })));
 }
 beforeEach(async () => { await openEmptyWorkspace(); resetLocalBackupRuntimeForTests(); vi.stubGlobal("Blob", NativeBlob); vi.stubGlobal("File", NativeFile); });
-afterEach(async () => { resetLocalBackupRuntimeForTests(); await closeWorkspace(); vi.unstubAllGlobals(); });
+afterEach(async () => { binaryWriteRace.afterFirstWrite = undefined; setQuestionAttachmentAccount(undefined); resetLocalBackupRuntimeForTests(); await closeWorkspace(); vi.unstubAllGlobals(); });
 describe("prepared private library installation", () => {
   it.each([undefined, "a".repeat(64), `sha256:${"d".repeat(64)}`])("rejects invalid source bindings on the first install: %s", async (sourceChecksum) => {
     const b = await bundle();
@@ -524,6 +539,66 @@ describe("private library failure diagnostics", () => {
     expect(result).toMatchObject({ status: "partial", questionIds: [] });
     expect(result.warnings[0]).toMatch(/preparing figure assets:.*unreadable\.png.*NotReadableError/);
     expect(await getQuestionAttachmentBlob(`private-library:${checksum}`, { localOnly: true })).toBeUndefined();
+  });
+
+  it("never writes A-origin source originals to B when a progress callback switches accounts", async () => {
+    const b = await bundle();
+    const original = encode("Account A verified original, not for the next signed-in account.");
+    const checksum = (await sha256(original)).slice(7);
+    b.catalog.sources[0] = { ...b.catalog.sources[0], checksum, bankFile: undefined,
+      originalFile: "sources/account-a.txt", ready: 0 };
+    b.files.set("catalog.json", encode(b.catalog));
+    b.files.set("sources/account-a.txt", original);
+    setQuestionAttachmentAccount("A");
+    const originating = getQuestionAttachmentScope();
+    const progress = (message: string) => {
+      if (message.includes("saving original file")) setQuestionAttachmentAccount("B");
+    };
+    await expect(installPrivateLibrary(b.read, progress, {
+      key: "account-A", assertCurrent: () => {
+        if (!isQuestionAttachmentScopeCurrent(originating)) throw new Error("Account changed");
+      },
+    })).rejects.toThrow("Account changed");
+    expect(getQuestionAttachmentScope().accountId).toBe("B");
+    expect(await readSourceOriginal(`private-source-${checksum}`, `sha256:${checksum}`)).toBeUndefined();
+    expect(useStore.getState().questions).toHaveLength(0);
+    setQuestionAttachmentAccount("A");
+    expect(await readSourceOriginal(`private-source-${checksum}`, `sha256:${checksum}`)).toBeUndefined();
+  });
+
+  it("pins both verified image writes to A and never leaks the second image into B after A-to-B transition", async () => {
+    stubSuccessfulImageDecode();
+    const b = await bundle();
+    const bank = readPreparedBank(JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)));
+    const png = new Uint8Array([137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1]);
+    const second = new Uint8Array([...png, 2]);
+    const checksums = await Promise.all([sha256(png), sha256(second)]);
+    bank.pkg.questions[0].assets = checksums.map((checksum, index) => ({
+      id: `image-${index + 1}`, filename: `image-${index + 1}.png`, mimeType: "image/png",
+      role: "stem" as const, questionId: "sample-1", checksum,
+    }));
+    bank.pkg.questions[0].stem.push(...bank.pkg.questions[0].assets.map(a => ({
+      type: "image" as const, assetId: a.id, role: "stem" as const,
+    })));
+    b.files.set("banks/test/bank.json", encode(bank));
+    b.files.set("banks/test/assets/image-1.png", png);
+    b.files.set("banks/test/assets/image-2.png", second);
+    setQuestionAttachmentAccount("A");
+    const originating = getQuestionAttachmentScope();
+    binaryWriteRace.afterFirstWrite = () => setQuestionAttachmentAccount("B");
+    const keys = checksums.map(checksum => `private-library:${checksum}`);
+    await expect(installPrivateLibrary(b.read, undefined, {
+      key: "account-A", assertCurrent: () => {
+        if (!isQuestionAttachmentScopeCurrent(originating)) throw new Error("Account changed");
+      },
+    })).rejects.toThrow("Account changed");
+    expect(getQuestionAttachmentScope().accountId).toBe("B");
+    expect(await listQuestionAttachmentBlobKeys()).not.toEqual(expect.arrayContaining(keys));
+    for (const key of keys) expect(await getQuestionAttachmentBlob(key, { localOnly: true })).toBeUndefined();
+    expect(useStore.getState().questions).toHaveLength(0);
+    setQuestionAttachmentAccount("A");
+    expect(await getQuestionAttachmentBlob(keys[0], { localOnly: true })).toMatchObject({ byteSize: png.length });
+    expect(await getQuestionAttachmentBlob(keys[1], { localOnly: true })).toBeUndefined();
   });
 
   it("reports the exact figure write position and empty-message browser error without importing questions", async () => {
