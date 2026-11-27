@@ -22,4 +22,23 @@ describe("academic course order", () => {
     ]);
     expect(groups.map(group => [group.term, group.courses.map(course => course.id)])).toEqual([["Term 1", ["b", "a"]], ["Term 4", ["c"]]]);
   });
+
+  it("coalesces standard term aliases without rewriting a learner's original course term", () => {
+    const records = [
+      { id: "nb", term: "T2", module: "NB 2" },
+      { id: "er", term: "Term 2", module: "ER" },
+      { id: "unknown", term: "T6", module: "Elective" },
+      { id: "boards", term: "Boards", module: "STEP 1" },
+    ];
+    for (const input of [records, [...records].reverse()]) {
+      const groups = coursesByTerm(input);
+      expect(groups.map(({ term, courses }) => [term, courses.map(course => course.id)])).toEqual([
+        ["Term 2", ["er", "nb"]],
+        ["T6", ["unknown"]],
+        ["Boards", ["boards"]],
+      ]);
+      expect(groups.flatMap(group => group.courses).map(course => course.id).sort()).toEqual(["boards", "er", "nb", "unknown"]);
+    }
+    expect(records.map(({ term }) => term)).toEqual(["T2", "Term 2", "T6", "Boards"]);
+  });
 });
