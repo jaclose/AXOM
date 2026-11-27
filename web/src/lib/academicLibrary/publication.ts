@@ -10,7 +10,7 @@ import { parseCourseTemplate } from "../course-engine/templateParse";
 import { SGU_CURRICULUM } from "../curricula";
 import { questionScope } from "../question-content/package";
 import { sha256 } from "../question-content/assets";
-import { hasUniformUnfiledSourceScope, readCatalog, readPreparedBank, safeLibraryPath, type LibraryReader } from "../privateLibrary/install";
+import { decodeLibraryText, hasUniformUnfiledSourceScope, readCatalog, readPreparedBank, safeLibraryPath, type LibraryReader } from "../privateLibrary/install";
 import type { LibraryInputLimits } from "../privateLibrary/inputRoot";
 import type { PrivateLibraryCatalog, ReviewedFiling } from "../privateLibrary/types";
 import { academicCoursePlan, moduleIdentity, reviewedTermNumber, type AcademicPlanTerm } from "./coursePlan";
@@ -22,7 +22,8 @@ type Term = ReviewedFiling["term"];
 type CatalogSource = PrivateLibraryCatalog["sources"][number];
 const TERMS: readonly Term[] = ["Term 1", "Term 2", "Term 3", "Term 4", "Term 5"];
 const UPLOADABLE_ORIGINALS = new Set(["pdf", "docx", "txt"]);
-const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+// Validate raw bytes before selecting or re-encoding any part of the source catalog.
+const decode = decodeLibraryText;
 /** Publishing reads a library one course at a time, so a whole term's folder
  * may exceed the limits that bound installing everything on this device. */
 export const PUBLICATION_INPUT_LIMITS: LibraryInputLimits = { maxFileBytes: 512 * 1024 * 1024, maxTotalBytes: 32 * 1024 * 1024 * 1024 };

@@ -247,3 +247,91 @@ describe("publishing a prepared library as one course per term and module", () =
     expect(notes.keptLocal.get(goer.catalogId)).toBe(1);
   });
 });
+
+describe("publication raw UTF-8 admission", () => {
+  // A malformed byte and the genuine replacement character decode identically
+  // under the old nonfatal decoder. The latter must remain legitimate data.
+  function corruptReplacement(bytes: Uint8Array): Uint8Array {
+    const index = bytes.findIndex((byte, position) => byte === 0xef
+      && bytes[position + 1] === 0xbf && bytes[position + 2] === 0xbd);
+    if (index < 0) throw new Error("Missing synthetic replacement marker.");
+    return Uint8Array.from([...bytes.slice(0, index), 0xff, ...bytes.slice(index + 3)]);
+  }
+
+  it.each([
+    ["goer-pq.pdf", "name"],
+    ["goer-pq.pdf", "reason"],
+    ["goer-pq.pdf", "sourcePath"],
+    ["ncrs-pq.pdf", "name"],
+    ["ncrs-pq.pdf", "reason"],
+  ] as const)("rejects malformed raw catalog metadata in %s (%s), before inventory and after review", async (name, field) => {
+    const fixture = await library();
+    const source = fixture.catalog.sources.find(item => item.name === name)!;
+    source[field] += "\uFFFD";
+    const valid = new TextEncoder().encode(JSON.stringify(fixture.catalog));
+    fixture.files.set("catalog.json", valid);
+    const inventory = await readPublicationInventory(fixture.read);
+    const course = planPublication(inventory).courses.find(item => item.moduleKey === "goer")!;
+    expect(course).toBeDefined();
+    expect(course.sourceIds.includes(source.id)).toBe(name === "goer-pq.pdf");
+
+    const malformed = corruptReplacement(valid);
+    const snapshot = malformed.slice();
+    fixture.files.set("catalog.json", malformed);
+    await expect(readPublicationInventory(fixture.read)).rejects.toThrow(/Invalid UTF-8/);
+    await expect(courseLibraryReader(fixture.read, inventory, course)("catalog.json")).rejects.toThrow(/Invalid UTF-8/);
+    const { jobs, notes } = publicationJobs(fixture.read, inventory, [course]);
+    await expect(jobs[0].prepare()).rejects.toThrow(/Invalid UTF-8/);
+    expect(notes.failures.get(course.catalogId)).toMatch(/Invalid UTF-8/);
+    expect(notes.keptLocal.size).toBe(0);
+    expect(fixture.files.get("catalog.json")).toEqual(snapshot);
+  });
+
+  it("preserves valid Unicode and a leading BOM through scoping and actual preparation", async () => {
+    const fixture = await library();
+    const source = fixture.catalog.sources.find(item => item.name === "goer-pq.pdf")!;
+    source.reason = "Synthetic Ω \uFFFD";
+    const raw = new TextEncoder().encode("\uFEFF" + JSON.stringify(fixture.catalog));
+    const snapshot = raw.slice();
+    fixture.files.set("catalog.json", raw);
+    const inventory = await readPublicationInventory(fixture.read);
+    const course = planPublication(inventory).courses.find(item => item.moduleKey === "goer")!;
+    const scoped = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(
+      await courseLibraryReader(fixture.read, inventory, course)("catalog.json"))) as PrivateLibraryCatalog;
+    expect(scoped.sources.find(item => item.id === source.id)?.reason).toBe(source.reason);
+    const upload = await publicationJobs(fixture.read, inventory, [course]).jobs[0].prepare();
+    expect(upload.metadata.ready_questions).toBe(1);
+    expect(upload.catalogId).toBe(course.catalogId);
+    expect(fixture.files.get("catalog.json")).toEqual(snapshot);
+  });
+
+  it("refuses a malformed plan before deriving module or activity metadata", async () => {
+    const fixture = await library();
+    const file = fixture.catalog.templates[0].file;
+    const original = fixture.files.get(file)!;
+    const malformed = Uint8Array.from([...original, 0xff]);
+    const snapshot = malformed.slice();
+    fixture.files.set(file, malformed);
+    await expect(readPublicationInventory(fixture.read)).rejects.toThrow(/Invalid UTF-8/);
+    expect(fixture.files.get(file)).toEqual(snapshot);
+  });
+
+  it("holds an unreadable question package rather than deriving its filing from substituted text", async () => {
+    const fixture = await library();
+    const source = fixture.catalog.sources.find(item => item.name === "goer-pq.pdf")!;
+    const file = source.bankFile!;
+    const original = JSON.parse(new TextDecoder().decode(fixture.files.get(file)!));
+    original.sourceText.rawText += "\uFFFD";
+    const malformed = corruptReplacement(new TextEncoder().encode(JSON.stringify(original)));
+    const snapshot = malformed.slice();
+    fixture.files.set(file, malformed);
+    const inventory = await readPublicationInventory(fixture.read);
+    expect(inventory.sources.find(item => item.id === source.id)?.bank).toEqual({
+      problem: "Its question package could not be read.",
+    });
+    const plan = planPublication(inventory);
+    expect(plan.excluded.find(item => item.id === source.id)?.reason).toMatch(/could not be read/);
+    expect(plan.courses.every(course => !course.sourceIds.includes(source.id))).toBe(true);
+    expect(fixture.files.get(file)).toEqual(snapshot);
+  });
+});
