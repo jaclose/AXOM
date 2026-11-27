@@ -89,9 +89,14 @@ export async function splitCloudContent(state: NoctyriumState): Promise<{ worksp
   return { workspace, objects, references: references.sort((a, b) => `${a.collection}:${a.id}` < `${b.collection}:${b.id}` ? -1 : `${a.collection}:${a.id}` > `${b.collection}:${b.id}` ? 1 : 0) };
 }
 
+function academicFileLocator(asset: AcademicRecordReference): string {
+  return JSON.stringify([asset.revisionId.toLowerCase(), asset.path]);
+}
+
 export function readContentReferences(value: unknown): ContentReference[] {
   if (!Array.isArray(value) || value.length > 30_000) throw new Error("The source-content index is invalid.");
   const ids = new Set<string>();
+  const academicHashes = new Map<string, string>();
   let expanded = 0;
   return value.map((entry: ContentReference) => {
     const key = `${entry?.collection}:${entry?.id}`;
@@ -99,6 +104,14 @@ export function readContentReferences(value: unknown): ContentReference[] {
       || !/^[a-f0-9]{64}$/.test(entry.hash) || !Number.isSafeInteger(entry.byteSize) || entry.byteSize <= 0 || entry.byteSize > MAX_CONTENT_OBJECT_BYTES
       || (entry.academic !== undefined && (!validAcademicAsset(entry.academic) || !["question", "document", "review"].includes(entry.academic.kind)))
       || !Number.isSafeInteger(entry.expandedBytes) || entry.expandedBytes < 0) throw new Error("The source-content index is invalid.");
+    if (entry.academic) {
+      const locator = academicFileLocator(entry.academic);
+      const previous = academicHashes.get(locator);
+      if (previous !== undefined && previous !== entry.academic.sha256) {
+        throw new Error("The source-content index contains conflicting academic file hashes. Your current workspace is unchanged.");
+      }
+      academicHashes.set(locator, entry.academic.sha256);
+    }
     expanded += entry.expandedBytes;
     if (expanded > 256 * 1024 * 1024) throw new Error("The source library exceeds the safe restore size.");
     ids.add(key);
@@ -161,12 +174,14 @@ export async function hydrateCloudContent(client: SupabaseClient, userId: string
       const index = byId[reference.collection].get(reference.id);
       if (index === undefined) throw new Error("A source reference does not belong to this workspace.");
       await assertCurrent();
-      let packed = contentCache.get(`${userId}/${reference.hash}`);
+      // Matching reconstructed text is not proof of access to an academic asset.
+      // Only reuse verified academic files within this guarded hydration call.
+      let packed = reference.academic ? undefined : contentCache.get(`${userId}/${reference.hash}`);
       if (packed === undefined) {
         let data: Blob | null;
         let error: unknown;
         if (reference.academic) {
-          const key = `${reference.academic.revisionId}:${reference.academic.path}`;
+          const key = JSON.stringify([academicFileLocator(reference.academic), reference.academic.sha256]);
           let request = academicFiles.get(key);
           if (!request) { request = downloadAcademicAsset(client, reference.academic).then(async blob => readPreparedBank(JSON.parse(await blob.text()))); academicFiles.set(key, request); }
           const source = academicRecord(await request, reference.academic);
@@ -175,7 +190,7 @@ export async function hydrateCloudContent(client: SupabaseClient, userId: string
         } else ({ data, error } = await client.storage.from(CONTENT_BUCKET).download(`${userId}/${reference.hash}`));
         if (error || !data || data.size !== reference.byteSize || await sha256(new Uint8Array(await data.arrayBuffer())) !== reference.hash) throw new Error("A source file could not be downloaded or verified. Your current workspace is unchanged.");
         packed = await data.text();
-        cacheContent(`${userId}/${reference.hash}`, packed);
+        if (!reference.academic) cacheContent(`${userId}/${reference.hash}`, packed);
       }
       const text = await decompressText(packed, reference.expandedBytes);
       if (new TextEncoder().encode(text).length !== reference.expandedBytes) throw new Error("A source file has an invalid expanded size.");
