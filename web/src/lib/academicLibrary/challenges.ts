@@ -9,18 +9,107 @@ export interface DailyStandings {
   rows: Array<{ alias: string; points: number; answered: number; rank: number; you: boolean }>;
   yourRank: number | null; participants: number;
 }
+const uuid = (value: unknown): value is string => typeof value === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(value);
+const count = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+const text = (value: unknown, min: number, max: number): value is string => typeof value === "string"
+  && Array.from(value.trim()).length >= min && Array.from(value).length <= max && !Array.from(value).some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127);
+function day(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const timestamp = Date.parse(value + "T00:00:00Z");
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === value;
+}
+const invalidPage = (): never => { throw new Error("The daily challenge response is invalid."); };
+const invalidStandings = (): never => { throw new Error("Standings could not be refreshed. Your personal answers remain saved."); };
+
+/** Validate the complete server contract before an RPC result reaches the shared QBank UI. */
+export function readDailyChallenges(data: unknown): DailyChallenge[] {
+  if (!Array.isArray(data) || data.length > 24) return invalidPage();
+  const seenChallenges = new Set<string>();
+  for (const item of data) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return invalidPage();
+    const challenge = item as Record<string, unknown>;
+    if (!uuid(challenge.id) || seenChallenges.has(challenge.id)
+      || !uuid(challenge.collectionId) || !uuid(challenge.revisionId)
+      || !text(challenge.module, 1, 180) || !day(challenge.day)
+      || !count(challenge.questionCount) || challenge.questionCount < 1 || challenge.questionCount > 100
+      || !Array.isArray(challenge.questions) || challenge.questions.length !== challenge.questionCount) return invalidPage();
+    seenChallenges.add(challenge.id);
+    const participation = challenge.participation;
+    if (participation !== null) {
+      if (!participation || typeof participation !== "object" || Array.isArray(participation)) return invalidPage();
+      const entry = participation as Record<string, unknown>;
+      if (!text(entry.alias, 2, 32) || typeof entry.visible !== "boolean") return invalidPage();
+    }
+    const seenKeys = new Set<string>();
+    for (const item of challenge.questions) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return invalidPage();
+      const question = item as Record<string, unknown>;
+      if (!text(question.key, 3, 400) || !text(question.bankId, 1, 160)
+        || !text(question.questionId, 1, 160)
+        || question.key !== question.bankId + ":" + question.questionId
+        || typeof question.sourceChecksum !== "string"
+        || !/^sha256:[a-f0-9]{64}$/.test(question.sourceChecksum)
+        || seenKeys.has(question.key)) return invalidPage();
+      seenKeys.add(question.key);
+    }
+  }
+  return data as DailyChallenge[];
+}
+
+/** Unverified ranks or counts must not be presented as learner achievements. */
+export function readDailyStandings(data: unknown): DailyStandings {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return invalidStandings();
+  const standings = data as Record<string, unknown>;
+  if (!Array.isArray(standings.rows) || standings.rows.length > 100
+    || !count(standings.participants) || standings.rows.length > standings.participants
+    || (standings.yourRank !== null && (!count(standings.yourRank)
+      || standings.yourRank < 1 || standings.yourRank > standings.participants))) return invalidStandings();
+  // The RPC limits rows to the first 100 participants after assigning
+  // dense_rank() by points DESC. Even a truncated page begins at rank one;
+  // a tie crossing the cutoff may hide the caller while preserving their rank.
+  if (standings.rows.length !== Math.min(standings.participants as number, 100)) return invalidStandings();
+  let ownRows = 0;
+  let lastPoints: number | null = null;
+  let lastRank = 0;
+  for (const item of standings.rows) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return invalidStandings();
+    const row = item as Record<string, unknown>;
+    if (!text(row.alias, 2, 32) || !count(row.points) || !count(row.answered) || row.answered > 100
+      || row.points > row.answered || !count(row.rank) || row.rank < 1 || row.rank > standings.participants
+      || typeof row.you !== "boolean") return invalidStandings();
+    if (lastPoints !== null && row.points > lastPoints) return invalidStandings();
+    const expectedRank = lastPoints === null ? 1 : lastRank + (row.points < lastPoints ? 1 : 0);
+    if (row.rank !== expectedRank) return invalidStandings();
+    lastPoints = row.points;
+    lastRank = row.rank;
+    if (row.you) {
+      ownRows += 1;
+      if (ownRows > 1 || row.rank !== standings.yourRank) return invalidStandings();
+    }
+  }
+  // At most 100 returned rows. A full page must contain the caller when
+  // a personal rank exists; a truncated page may omit a tied participant.
+  if ((standings.participants as number) <= 100
+    && ownRows !== (standings.yourRank === null ? 0 : 1)) return invalidStandings();
+  // An omitted visible caller cannot outrank the cutoff. Each further dense
+  // rank requires another omitted row and a distinct lower nonnegative score.
+  if (ownRows === 0 && standings.yourRank !== null) {
+    const omitted = (standings.participants as number) - standings.rows.length;
+    if (lastPoints === null || standings.yourRank < lastRank
+      || standings.yourRank > lastRank + Math.min(omitted, lastPoints)) return invalidStandings();
+  }
+  return data as DailyStandings;
+}
+
 export async function listDailyChallenges(accountId: string): Promise<DailyChallenge[]> {
   const { data,error } = await (await academicClient(accountId)).rpc("academic_daily_challenges");
   if (error) throw new Error("Daily challenges could not be loaded. Retry when connected.");
-  if (!Array.isArray(data) || data.length > 24 || data.some(item => !item || typeof item.id !== "string" || typeof item.module !== "string"
-    || !Array.isArray(item.questions) || item.questions.length !== item.questionCount || item.questionCount < 1 || item.questionCount > 100
-    || item.questions.some((q: ChallengeQuestion) => !q || ![q.key,q.bankId,q.questionId,q.sourceChecksum].every(v => typeof v === "string")))) throw new Error("The daily challenge response is invalid.");
-  return data;
+  return readDailyChallenges(data);
 }
 export async function challengeStandings(accountId: string, challenge: string): Promise<DailyStandings> {
   const { data,error } = await (await academicClient(accountId)).rpc("academic_challenge_standings",{ challenge });
-  if (error || !data || !Array.isArray(data.rows) || data.rows.length > 100) throw new Error("Standings could not be refreshed. Your personal answers remain saved.");
-  return data;
+  if (error) invalidStandings();
+  return readDailyStandings(data);
 }
 export async function joinChallenge(accountId: string, challenge: string, alias: string, visible: boolean): Promise<void> {
   const { error } = await (await academicClient(accountId)).rpc("academic_join_challenge",{ challenge,display_alias:alias,participate:visible });
