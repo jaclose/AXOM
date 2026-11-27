@@ -9,7 +9,7 @@ import { COURSE_QUIZ_LAUNCH_KEY } from "../../lib/course-engine/quizLaunch";
 import { closeWorkspace, openEmptyWorkspace, reloadWorkspace } from "../../lib/question-content/persistenceHarness.testing";
 import { ConnectedCoursePlan } from "./ConnectedCoursePlan";
 
-const mocks = vi.hoisted(() => ({ preview: vi.fn(), download: vi.fn(), enroll: vi.fn() }));
+const mocks = vi.hoisted(() => ({ preview: vi.fn(), download: vi.fn(), enroll: vi.fn(), listPdfs: vi.fn(), downloadPdf: vi.fn() }));
 vi.mock("../../lib/account/accountStore", () => ({
   useAccount: (select: (state: { user: { id: string } }) => unknown) => select({ user: { id: "learner-1" } }),
 }));
@@ -22,6 +22,10 @@ vi.mock("../../lib/academicLibrary/client", () => ({
   enrollAcademicCourse: (...args: unknown[]) => mocks.enroll(...args),
 }));
 vi.mock("./AcademicSharing", () => ({ AcademicSharing: () => null }));
+vi.mock("../../lib/academicLibrary/sourcePdfs", () => ({
+  listAcademicSourcePdfs: (...args: unknown[]) => mocks.listPdfs(...args),
+  downloadAcademicSourcePdf: (...args: unknown[]) => mocks.downloadPdf(...args),
+}));
 vi.mock("../ui/primitives", () => ({
   GButton: ({ children, variant: _variant, size: _size, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; size?: string }) =>
     <button type="button" {...props}>{children}</button>,
@@ -48,6 +52,7 @@ describe("hosted question collection without a weekly plan", () => {
     await openEmptyWorkspace();
     sessionStorage.clear();
     location.hash = "";
+    mocks.listPdfs.mockResolvedValue([]);
     mocks.preview.mockResolvedValue({ id: revision, collection_id: collection, template_text: "", ready_questions: 2, review_questions: 1 });
     mocks.download.mockImplementation(async () => {
       useStore.setState(state => ({ questions: [...state.questions,
@@ -63,17 +68,24 @@ describe("hosted question collection without a weekly plan", () => {
     render(<ConnectedCoursePlan course={course} onBack={vi.fn()} onOpen={vi.fn()} onCustomize={vi.fn()} onSharingSaved={vi.fn()} />);
     expect(await screen.findByRole("heading", { name: "GOER" })).toBeTruthy();
     expect(screen.getByText(/has no weekly plan/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Show original PDFs" })).toBeTruthy();
+    expect(mocks.listPdfs).not.toHaveBeenCalled();
+    expect(mocks.downloadPdf).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Show original PDFs" }));
+    expect(await screen.findByText("No original PDFs are available in this course revision.")).toBeTruthy();
+    expect(mocks.listPdfs).toHaveBeenCalledWith(revision, expect.objectContaining({ key: "learner-1" }));
+    expect(mocks.downloadPdf).not.toHaveBeenCalled();
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.queryByRole("button", { name: /Create Quiz/ })).toBeNull();
     expect(mocks.download).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: /Download questions/ }));
     const practice = await screen.findByRole("button", { name: /Create Quiz/ });
-    expect(mocks.download).toHaveBeenCalledWith(revision, expect.any(Function), expect.objectContaining({ key: "learner-1" }));
+    expect(mocks.download).toHaveBeenCalledWith(revision, expect.any(Function), expect.objectContaining({ key: "learner-1" }), { cacheOriginals: false });
     expect(mocks.enroll).not.toHaveBeenCalled();
     // The durable receipt lets a reload reopen the same downloaded collection.
     await waitFor(() => expect(useStore.getState().documents.some(document => document.id === `academic-${revision}`)).toBe(true));
-    expect(screen.getByText("2 reviewed questions are on this device.")).toBeTruthy();
+    expect(screen.getByText("2 ready questions are on this device.")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Week 1" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Week 2" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Week 3" })).toBeTruthy();
@@ -90,6 +102,18 @@ describe("hosted question collection without a weekly plan", () => {
       module: "GOER", term: "Term 5", questionIds: ["q1", "q2"], setIds: ["set-1"],
     });
     expect(location.hash).toBe("#questions");
+  });
+
+  it.each([
+    ["pending", "Academic approval is pending for this revision. Ready counts do not verify its answers or explanations."],
+    ["rejected", "This revision was returned for changes. It is not approved for sharing."],
+    ["approved", "This revision has academic approval."],
+  ] as const)("distinguishes %s approval from the ready question count", async (review_status, notice) => {
+    render(<ConnectedCoursePlan course={{ ...course, owned: true, review_status }} onBack={vi.fn()} onOpen={vi.fn()} onCustomize={vi.fn()} onSharingSaved={vi.fn()} />);
+    expect(await screen.findByText(notice)).toBeTruthy();
+    expect(screen.getByText("ready questions").querySelector("b")?.textContent).toBe("2");
+    expect(screen.queryByText(/reviewed questions/)).toBeNull();
+    expect(mocks.download).not.toHaveBeenCalled();
   });
 
   it("keeps a source question without a week in an explicit unassigned group", async () => {

@@ -164,14 +164,14 @@ function HostAccountPage() {
             <div><span className="host-overview-eyebrow">CURRENT SNAPSHOT</span>
               <h2 id="host-overview-title">Attention queue</h2></div>
             <p>{attentionCount === 0
-              ? "Review and moderation queues are clear."
-              : `${attentionCount} ${attentionCount === 1 ? "item" : "items"} in review and moderation queues.`}</p>
+              ? "Community submission and moderation queues are clear."
+              : `${attentionCount} ${attentionCount === 1 ? "item" : "items"} in Community submission and moderation queues.`}</p>
           </div>
           <div className="host-priority-metrics" data-has-attention={attentionCount > 0} aria-labelledby="host-overview-title">
             <div className="host-priority-metric">
               <span className="host-priority-icon"><CircleAlert size={18} aria-hidden="true" /></span>
               <strong>{dashboard.overview.academic_review_pending}</strong>
-              <span>Review submissions</span>
+              <span>Community submissions</span>
             </div>
             <div className="host-priority-metric">
               <span className="host-priority-icon"><ShieldX size={18} aria-hidden="true" /></span>
@@ -184,7 +184,7 @@ function HostAccountPage() {
               ["Registered accounts", dashboard.overview.registered_accounts, Users],
               ["Community profiles", dashboard.overview.shared_profiles, Users],
               ["AI requests, 7 days", dashboard.overview.ai_requests_7d, Zap],
-              ["Approved shared collections", dashboard.overview.academic_approved, BarChart3],
+              ["Approved Community collections", dashboard.overview.academic_approved, BarChart3],
             ] as const).map(([label, value, Icon]) => <div key={label}>
               <dt><Icon size={15} aria-hidden="true" />{label}</dt>
               <dd data-restricted={value === null}>{value ?? "Restricted"}</dd>
@@ -209,7 +209,16 @@ function HostAccountPage() {
           {!normalizedSearch && accounts.length === 0 && <p className="sub">No accounts to show.</p>}
           <p className="sub">Recent view shows up to 100 accounts. Search by name or email across the full directory. Project CEO access is bound to a verified account ID, never an editable name.</p>
         </GlassCard>}
-        <AcademicReviewQueue />
+        {owner && <AcademicReviewQueue />}
+        <GlassCard pad>
+          <PanelHeader headingLevel={2} title="Community QBank submissions" sub="Current revisions intentionally submitted to Community Uploads. Pending review never implies approval." />
+          {dashboard.queue.length === 0 ? <p className="sub">No Community Question Banks await review.</p> :
+            <div className="host-queue">{dashboard.queue.map(item => <div className="host-queue-row" key={item.collection_id}>
+              <div><b>{item.title}</b><small>{item.module} · {item.term} · submitted for review · {date(item.updated_at)}</small></div>
+              <div><Tag tone="orange">Pending</Tag><small>{item.ready_questions} candidate-ready · {item.review_questions} review</small></div>
+            </div>)}</div>}
+          <p className="sub">Approval is intentionally not a one-click host operation. Source provenance, rights and answer-review evidence must be validated through the academic review process first.</p>
+        </GlassCard>
         {userId && <QuestionSetLibraryReviewQueue accountId={userId} />}
         {userId && (role === "owner" || role === "admin") && <JournalFeedbackReview accountId={userId} />}
         <GlassCard pad>

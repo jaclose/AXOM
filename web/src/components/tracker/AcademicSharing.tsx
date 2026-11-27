@@ -5,6 +5,7 @@ import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
 import { inspectStoredRevisionExplanations, type ExplanationReviewReceipt } from "../../lib/academicLibrary/explanationReview";
 import { offerCoursePublicly, publicOfferState, type PublicOfferState } from "../../lib/academicLibrary/publicCatalog";
 import { GButton } from "../ui/primitives";
+import { AcademicReviewFiles } from "./AcademicReviewFiles";
 
 /** Sharing changes access to the canonical collection, never a learner backup. */
 export function AcademicSharing({ course, onSaved }: { course: AcademicCourse; onSaved: () => void }) {
@@ -161,6 +162,7 @@ function AcademicReview({ course, accountId, onSaved }: { course: AcademicCourse
   const status = course.review_status === "approved" ? "Approved" : course.review_status === "rejected" ? "Not approved" : "Waiting for review";
   return <div className="course-review" role="group" aria-label="Academic review">
     <p><b>Review status: {status}.</b> {course.visibility === "private" ? "Its owner keeps it private." : course.visibility === "group" ? "Its owner shares it with a group." : "Its owner shares it with every signed-in account."}</p>
+    {(course.ready_questions > 0 || course.review_questions > 0) && <AcademicReviewFiles course={course} accountId={accountId} />}
     <GButton disabled={busy} onClick={() => void checkExplanations()}>Check stored explanations</GButton>
     {receipt && <p role="status">{receipt.explainedReadyQuestions} of {receipt.readyQuestions} ready questions have an explanation in this stored revision. {receipt.missingExplanations} missing. Presence does not verify the rationale against its source.</p>}
     <label className="course-review-check"><input type="checkbox" checked={checked} disabled={busy} onChange={event => setChecked(event.target.checked)} />

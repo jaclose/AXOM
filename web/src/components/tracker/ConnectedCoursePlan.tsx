@@ -21,6 +21,7 @@ import { parseWeek, questionScope } from "../../lib/course-engine/scope";
 import { splitAcademicPlanSections } from "../../lib/academicLibrary/coursePlan";
 import { academicAccountScope } from "../../lib/academicLibrary/accountScope";
 import { AcademicSharing } from "./AcademicSharing";
+import { CourseSourcePdfs } from "./CourseSourcePdfs";
 import { downloadCourseQuestions, isAcademicCourseDownloaded, readDownloadReference, saveDownloadReference, type DownloadReference } from "../../lib/academicLibrary/downloadReference";
 
 const termIdentity = (value: string): string => {
@@ -239,15 +240,20 @@ export function ConnectedCoursePlan({ course, onBack, onOpen, onCustomize, onSha
   return <>
     {templates === undefined && <><GButton onClick={onBack}>All courses</GButton><p role="status">{error ? "Preview unavailable" : "Opening the weekly plan…"}</p></>}
     {error && <div role="alert"><p>{error}</p><GButton onClick={() => setRetry(value => value + 1)}>Retry preview</GButton></div>}
+    {templates !== undefined && <p className="course-connection-status" role="status">{course.review_status === "approved"
+      ? "This revision has academic approval." : course.review_status === "rejected"
+        ? "This revision was returned for changes. It is not approved for sharing."
+        : "Academic approval is pending for this revision. Ready counts do not verify its answers or explanations."}</p>}
     {templates?.length === 0 && <ConnectedQuestionCollection course={course} downloaded={downloaded} questions={state.questions} sets={state.questionSets}
       courses={state.courses} terms={state.terms} onDevice={fullyDownloaded}
       busy={downloading} message={message} onBack={onBack} onDownload={() => void downloadQuestions()} onSharingSaved={onSharingSaved} />}
-    {templates?.length !== 0 && book && <><p className="course-connection-status" role="status">{message || (downloaded ? (downloaded.questionIds.every(id => state.questions.some(question => question.id === id)) ? "Course files downloaded on this device" : "Saved in your account. Download this course to continue on this device.") : `${course.ready_questions} reviewed questions available to download. Load Course downloads this revision for study.`)}</p>
+    {templates?.length !== 0 && book && <><p className="course-connection-status" role="status">{message || (downloaded ? (downloaded.questionIds.every(id => state.questions.some(question => question.id === id)) ? "Course files downloaded on this device" : "Saved in your account. Download this course to continue on this device.") : `${course.ready_questions} ready questions available to download. Load Course downloads this revision for study.`)}</p>
       {downloaded && !downloaded.questionIds.every(id => state.questions.some(question => question.id === id)) && <GButton disabled={downloading} onClick={() => { setError(""); setDownloading(true); void downloadAccountContent({ questionIds: downloaded.questionIds, documentIds: downloaded.documentIds }).catch(cause => setError(cause instanceof Error ? cause.message : "Download unavailable. Retry when connected.")).finally(() => setDownloading(false)); }}>Download course to this device</GButton>}
       <AcademicSharing course={course} onSaved={onSharingSaved} />
       {downloaded?.pendingWeeks && <p role="status">Enrollment is saved on this device and needs an account retry. Load Course again when connected.</p>}
       <CoursePlan book={book} bank={bank} availableQuestions={course.ready_questions} onBack={onBack} onOpen={onOpen} onCustomize={onCustomize} onLoad={load} />
     </>}
+    {templates !== undefined && <CourseSourcePdfs key={`${accountId}:${course.current_revision_id}`} revisionId={course.current_revision_id} />}
   </>;
 }
 
@@ -314,7 +320,7 @@ function ConnectedQuestionCollection({ course, downloaded, questions, sets, cour
       <div className="course-plan-cover" aria-hidden="true"><span>{course.term}</span><strong>{course.module}</strong><BookOpen size={40} strokeWidth={1} /></div>
       <div><p className="course-eyebrow">{course.academic_term || course.term}{course.cohort ? ` · ${course.cohort}` : ""}</p><h1 tabIndex={-1}>{course.module}</h1>
         <p>{course.title.trim() !== course.module.trim() ? course.title : "Question collection"}</p>
-        <div className="course-plan-facts"><span><b>{course.ready_questions}</b> reviewed {course.ready_questions === 1 ? "question" : "questions"}</span>{course.review_questions > 0 && <span><b>{course.review_questions}</b> awaiting review</span>}</div>
+        <div className="course-plan-facts"><span><b>{course.ready_questions}</b> ready {course.ready_questions === 1 ? "question" : "questions"}</span>{course.review_questions > 0 && <span><b>{course.review_questions}</b> held from practice</span>}</div>
       </div>
     </div>
     <div className="course-plan-layout">
@@ -328,14 +334,14 @@ function ConnectedQuestionCollection({ course, downloaded, questions, sets, cour
             {group.week !== undefined && group.readyIds.length > 0 && group.readyIds.length <= MAX_COURSE_QUIZ_QUESTIONS && <GButton size="sm" onClick={() => practice(group.week)}><Play size={ICON_SIZE.body} /> Quiz week {group.week}</GButton>}
           </div>
         </article>) : <p className="course-empty">No questions from this collection are on this device yet.</p>
-          : !onDevice && <p className="course-empty">Download the reviewed questions to see their source weeks.</p>}
+          : !onDevice && <p className="course-empty">Download the questions to see their source weeks.</p>}
         <AcademicSharing course={course} onSaved={onSharingSaved} />
       </div>
       <aside className="course-plan-actions" aria-label="Question collection actions">
         <h2>Study these questions</h2>
-        <p>{onDevice && scopeValid ? `${practiceIds.length} reviewed ${practiceIds.length === 1 ? "question is" : "questions are"} on this device.` : onDevice
+        <p>{onDevice && scopeValid ? `${practiceIds.length} ready ${practiceIds.length === 1 ? "question is" : "questions are"} on this device.` : onDevice
           ? "Practice is paused until this collection's saved filing matches its questions and sets." : course.ready_questions < 1
-          ? "No reviewed questions are ready to download yet." : `Download ${course.ready_questions} reviewed ${course.ready_questions === 1 ? "question" : "questions"} and their images to practice them, including offline.`}</p>
+          ? "No questions are ready to download yet." : `Download ${course.ready_questions} ready ${course.ready_questions === 1 ? "question" : "questions"} and their images to practice them, including offline.`}</p>
         {!onDevice && <GButton variant="primary" disabled={busy || course.ready_questions < 1} onClick={onDownload}><Download size={ICON_SIZE.emphasis} /> {busy ? "Downloading…" : "Download questions"}</GButton>}
         {onDevice && scopeValid && practiceIds.length > MAX_COURSE_QUIZ_QUESTIONS && <p>This collection holds more than {MAX_COURSE_QUIZ_QUESTIONS} questions. Choose its sets in Question Bank to build a block.</p>}
         {onDevice && scopeValid && practiceIds.length <= MAX_COURSE_QUIZ_QUESTIONS && <GButton variant="primary" disabled={!practiceIds.length} onClick={() => practice()}><Play size={ICON_SIZE.emphasis} /> Create Quiz</GButton>}

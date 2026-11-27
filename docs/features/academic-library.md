@@ -102,7 +102,19 @@ course has been offered.
 
 ### Submitted course review
 
-The local Course Library shows appointed academic reviewers a paged list of
+Course Library and the verified owner's Host dashboard share the same appointed
+academic-reviewer queue. Host's Community submission counts remain explicitly
+separate from ordinary shared-course approvals. Owner access to Host never replaces
+the queue's independent server-side reviewer check.
+
+Ready question counts describe import eligibility, not academic approval or a
+completed source review. Connected previews show the current revision's approved,
+pending or returned status separately. Pending revisions explicitly say that
+ready counts do not verify answers or explanations; held questions remain excluded
+from practice. Downloaded counts also do not establish approval. These labels do
+not change owner access, reviewer permissions, question gates or server decisions.
+
+The queue shows appointed academic reviewers a paged list of
 ordinary shared, pending courses from all owners. The list contains bounded
 metadata and an owner display name, never email, owner ID, question bodies or
 learner progress. Community submissions stay in their separate exact-revision
@@ -129,6 +141,94 @@ the queue. It requires the approving reviewer to be the same account that
 attested to the current revision, for both ordinary and Community decisions.
 Apply both migrations in order and verify the two-reviewer denial case before
 calling the review flow live.
+
+### Tracker-only approval
+
+Forward migration `20261122002007_academic_tracker_review.sql` adds a separate
+review path for ordinary shared, pending tracker revisions with zero ready and
+zero held questions. It accepts only a catalog and one to 24 plain-text template
+files. The existing question and Community approval functions remain unchanged.
+
+The reviewer checks the exact stored catalog and every template through the
+authenticated, size- and SHA-256-verified reader. The catalog must contain no
+question sources, and its joined templates must match the revision's preview.
+Module, term, readable activities and explicitly stated weeks are checked. Source
+uncertainty stays visible; approval does not infer missing weeks or certify a
+calendar. This inspection does not import a workspace or create practice records.
+
+An explicit plan-review confirmation precedes the approval RPC. It derives the
+reviewer identity from the authenticated session, locks the collection and revision,
+rechecks pending visibility, hashes, manifest and activity observations, then records
+the review and approval atomically. Account changes, changed revisions and stale
+receipts require a fresh inspection. The audit keeps revision hashes and time if a
+reviewer's account is deleted. SQL validates metadata and stored plan structure;
+the trusted reviewer client checks private Storage bytes and source notes.
+
+### Question downloads and original PDFs
+
+The ordinary Download questions action uses the existing canonical installer with
+original-file caching disabled. Required bank data, verified question and explanation
+images, durable workspace saves and safety backups remain mandatory. A partial save
+cannot produce a complete download receipt. Private imports, reviewer copies and
+other full-course callers retain their original-file caching default.
+
+Failed source receipts retain the source position, last preparation phase and a bounded error-type fallback when the message is empty; figure-write failures also identify the filename and write position without changing installation, integrity or durability gates.
+
+Original PDFs appear separately in the course preview. Opening the preview makes
+no catalog or PDF request. Show original PDFs explicitly reads the exact revision's
+verified catalog and manifest; each requested PDF passes the existing
+permission, byte-size and checksum checks before a browser download starts. Opening
+the list does not download PDFs, enroll weeks or write source binaries into the local
+cache. Missing originals remain explicitly unavailable. Account or revision changes
+invalidate pending reads and downloads.
+
+Academic reviewers can explicitly export stored review files without installing a
+collection. The evidence ZIP contains the exact hash-checked catalog and its declared
+question-bank JSONs under `stored-revision/`, plus the complete revision file manifest
+and an omission notice. It excludes binary images, original PDFs, tracker templates,
+learner data and credentials. Account or current-revision changes discard a pending
+export. This is review evidence rather than a complete course package or an approval receipt; source images
+and PDFs still require their ordinary review, and all approval gates remain intact.
+
+Download full source package is a separate, explicit reviewer action. It retrieves
+every file in the exact current revision, including images, original files and any
+templates, using the same authenticated size and checksum checks. Files retain their
+relative paths under `stored-revision/`; the README and sanitized revision manifest
+sit outside that folder, so the existing ZIP reader selects only the stored package.
+The stored catalog identity is unchanged. Export does not install, cache or modify
+learner data, and does not approve the material. Account or revision changes discard
+the pending result. Only one review or source export runs at a time, with sequential
+file reads and the existing 1,500-file, 50 MiB-per-file and 512 MiB-total bounds.
+ZIP construction retains input and output in memory, so large packages require
+available browser memory; it is not a streaming download to disk. Later publication
+still requires the ordinary target-identity, source, image and approval checks.
+
+Downloading a newer hosted revision reconciles matching source questions only after
+the signed-in account can read the exact current collection revision and its verified
+files. Account-scoped download receipts locate prior immutable server banks; the
+editable local review document is never treated as an untouched source baseline.
+Unchanged source-owned text receives the new explanations and source holds. Existing
+question IDs, attempts, notes, annotations, bookmarks, filing and set membership remain.
+The saved answer key is not automatically changed. A proposed different key, a changed
+exhibit, a local source edit or an unavailable baseline preserves the saved work and
+adds a visible review hold; those records are excluded from graded practice. Existing
+learner review holds also remain. Removed questions without an explicit bank ID are
+retracted only when the prior verified bank and account receipt identify the exact
+local record; unrelated records sharing a source checksum stay untouched.
+Unchanged images retain the canonical integrity and
+repair path. A durable compare-and-swap protects concurrent edits; failed writes restore
+each whole source projection, or preserve and hold a concurrently changed projection.
+A partial update cannot create a complete download receipt. Local ZIP imports retain
+their existing conservative review merge. This reconciliation runs when the learner
+downloads the current revision; it is not a background rewrite of offline copies.
+
+For a source-only publication, a uniform week explicitly declared by the source can
+survive its reviewed course filing only when the filing evidence is `source-metadata`
+and every question agrees on module, term and week. Cumulative, undeclared, mixed and
+human-reviewed unassigned sources stay unassigned. A partial-download retry may repair
+absent or compatible source-week filing through the canonical durable refile operation;
+conflicting learner filing stops the repair. Existing notes, attempts, identities and
+set membership are preserved. A complete receipt is not silently migrated.
 
 The additive `20261011190000_academic_library.sql` migration defines collections,
 immutable revisions, file manifests, reviewer/group access and personal enrollments.

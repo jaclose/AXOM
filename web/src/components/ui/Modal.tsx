@@ -5,7 +5,7 @@ import { GhostButton } from "./primitives";
 import { ICON_SIZE } from "../../lib/iconSize";
 
 export function Modal({
-  title, onClose, children, footer, headerLead, className = "", bodyClassName = "", shouldRestoreFocus,
+  title, onClose, children, footer, headerLead, className = "", bodyClassName = "", shouldRestoreFocus, portalContainer, onKeyDown,
 }: {
   title: string;
   onClose: () => void;
@@ -15,6 +15,8 @@ export function Modal({
   className?: string;
   bodyClassName?: string;
   shouldRestoreFocus?: () => boolean;
+  portalContainer?: Element | DocumentFragment;
+  onKeyDown?: React.KeyboardEventHandler<HTMLDivElement>;
 }) {
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -73,7 +75,7 @@ export function Modal({
   return createPortal(
     <div className="modal-scrim" onMouseDown={onClose}>
       <div ref={dialogRef} className={`modal ${className}`} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}
-        onMouseDown={(e) => e.stopPropagation()}>
+        onMouseDown={(e) => e.stopPropagation()} onKeyDown={onKeyDown}>
         <div className="spread">
           {headerLead ? <div className="modal-header-branded">{headerLead}<h3 id={titleId}>{title}</h3></div> : <h3 id={titleId}>{title}</h3>}
           <GhostButton onClick={onClose} aria-label="Close"><X size={ICON_SIZE.emphasis} /></GhostButton>
@@ -82,7 +84,7 @@ export function Modal({
         {footer && <div className="modal-actions">{footer}</div>}
       </div>
     </div>,
-    document.body,
+    portalContainer ?? document.body,
   );
 }
 

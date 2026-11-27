@@ -21,7 +21,7 @@ import { canonicalModuleKey } from "../course-engine/vocabulary";
 import type { ImportDestination, ReviewedDraft, ReviewedImportRequest } from "../questionImportSave";
 import type { QuestionSource } from "../questions";
 import { legacyQuestionFields } from "./legacyFields";
-import { MAX_PACKAGE_CHOICES, type ImportPackage, type PackageIssue, type PackageQuestion, type QuestionAsset } from "./package";
+import { MAX_PACKAGE_CHOICES, questionScope, type ImportPackage, type PackageIssue, type PackageQuestion, type QuestionAsset } from "./package";
 import { questionReadiness, type Readiness, type ReadinessVerdict } from "./readiness";
 
 export interface PackageImportOptions {
@@ -40,8 +40,13 @@ export interface PackageImportOptions {
   /** Reviewed filing layered over source-declared package scope. The package
    * and every question retain their original scope as evidence. */
   reviewedFiling?: { readonly module: string; readonly term: number };
+  /** Internal projection of a source-metadata filing. Only a uniformly
+   * source-declared week may survive its source-only course envelope. */
+  preserveSourceDeclaredWeek?: boolean;
   /** Exact-catalog, one-time refresh of untouched source-owned fields on reuse. */
   refreshEquivalentSource?: boolean;
+  /** A verified hosted revision changes source content, never learner filing. */
+  preserveExistingFiling?: boolean;
 }
 
 export interface HeldQuestion {
@@ -79,6 +84,23 @@ export interface PackageReviewedImport {
   withheldAssets: WithheldAsset[];
   /** Where the sets are filed, and whether the curriculum agrees that the module sits in that term. */
   filing: { module: string; week?: number; term: number; curriculumTerm?: string; agrees: boolean };
+}
+
+/** A planless publication does not negate a week explicitly declared by its
+ * source. Never infer a week from a title, an assigned default or mixed scope. */
+export function uniformSourceDeclaredWeek(
+  pkg: ImportPackage, filing: NonNullable<PackageImportOptions["reviewedFiling"]>,
+): number | undefined {
+  const { manifest, questions } = pkg;
+  const week = manifest.course.week;
+  const module = canonicalModuleKey(manifest.course.name);
+  if (manifest.source.sourceWeekDeclared !== true || !Number.isSafeInteger(week) || week <= 0 || week >= 100
+    || !questions.length || !module || canonicalModuleKey(filing.module) !== module
+    || filing.term !== manifest.course.term) return undefined;
+  return questions.every(question => {
+    const scope = questionScope(manifest, question);
+    return canonicalModuleKey(scope.course) === module && scope.term === filing.term && scope.week === week;
+  }) ? week : undefined;
 }
 
 const FILE_TYPE: Record<string, string> = { pdf: "pdf", docx: "docx", doc: "docx", pptx: "pptx", txt: "text", md: "text" };
@@ -175,9 +197,12 @@ export function packageImportVerdicts(pkg: ImportPackage, issues: readonly Packa
 export function packageToReviewedImport(pkg: ImportPackage, issues: readonly PackageIssue[], options: PackageImportOptions = {}): PackageReviewedImport {
   const { manifest } = pkg;
   const reviewedFiling = checkedReviewedFiling(options.reviewedFiling);
+  const sourceWeek = reviewedFiling && options.preserveSourceDeclaredWeek
+    ? uniformSourceDeclaredWeek(pkg, reviewedFiling) : undefined;
   // A source with week 0 is unassigned; preserve that raw value in content, not in the learner's week list.
   const filing: { module: string; term: number; week?: number } = reviewedFiling
-    ?? { module: manifest.course.name, term: manifest.course.term,
+    ? { ...reviewedFiling, ...(sourceWeek !== undefined ? { week: sourceWeek } : {}) }
+    : { module: manifest.course.name, term: manifest.course.term,
       ...(manifest.course.week > 0 ? { week: manifest.course.week } : {}) };
   const held: HeldQuestion[] = [];
   const withheldAssets: WithheldAsset[] = [];

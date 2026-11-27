@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Blob as NativeBlob, File as NativeFile } from "node:buffer";
+import { IDBObjectStore as FakeIDBObjectStore } from "fake-indexeddb";
 import { useStore } from "../store";
 import { closeWorkspace, openEmptyWorkspace, reloadWorkspace } from "../question-content/persistenceHarness.testing";
 import { sha256 } from "../question-content/assets";
 import { auditedRhpsSourceRefresh, bankFiles, folderLibraryReader, installPrivateLibrary, mergeStoredReview, readCatalog, readPreparedBank, safeLibraryPath } from "./install";
 import { PRIVATE_LIBRARY_DOCUMENT, PRIVATE_LIBRARY_FORMAT, PRIVATE_REVIEW_DOCUMENT, type PreparedBank, type PrivateLibraryCatalog } from "./types";
 import { privateReviewMedia } from "./media";
-import { collectQuestionAttachmentPayloads, deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob, listQuestionAttachmentBlobKeys, restoreQuestionAttachmentPayloads, runQuestionAttachmentMaintenance } from "../questionAttachments";
+import { collectQuestionAttachmentPayloads, deleteQuestionAttachmentBlobs, getQuestionAttachmentBlob, listQuestionAttachmentBlobKeys, setMissingAttachmentLoader, restoreQuestionAttachmentPayloads, runQuestionAttachmentMaintenance } from "../questionAttachments";
 import { buildCourseBooks } from "../bookshelf/courseBooks";
 import { withPreparedCourses, loadPreparedCourse } from "../bookshelf/preparedCourses";
 import { academicBindings, academicRecord } from "../academicLibrary/contentReferences";
@@ -15,6 +16,7 @@ import { CURRICULA } from "../curricula";
 import { assessBank } from "../question-content/assessBank";
 import { STORAGE_KEYS } from "../brand";
 import { createLocalBackup, refreshLocalBackupSummaries, resetLocalBackupRuntimeForTests } from "../localBackup";
+import { ATTACHMENT_STORE_NAME } from "../localVault";
 
 const encode = (value: unknown) => new TextEncoder().encode(typeof value === "string" ? value : JSON.stringify(value));
 
@@ -479,6 +481,160 @@ describe("prepared private library installation", () => {
   });
 });
 
+describe("private library failure diagnostics", () => {
+  it.each([
+    { label: "an empty-message DOMException", cause: () => new DOMException("", "NotReadableError"), detail: "NotReadableError" },
+    { label: "a named error from another realm", cause: () => ({ name: "AbortError", message: "" }), detail: "AbortError" },
+    { label: "an empty generic Error", cause: () => new Error("  "), detail: "Installation failed without an error message." },
+    { label: "an unknown thrown value", cause: () => "unstructured private diagnostic payload", detail: "Installation failed without an error message." },
+    { label: "a throwing error-name getter", cause: () => Object.defineProperty({}, "name", { get() { throw new Error("private getter failure"); } }), detail: "Installation failed without an error message." },
+    { label: "a malformed Error message", cause: () => Object.defineProperty(new Error(), "message", { value: { private: "unstructured private diagnostic payload" } }), detail: "Installation failed without an error message." },
+    { label: "an existing useful message", cause: () => new Error("The expected checksum differs."), detail: "The expected checksum differs." },
+  ])("records a source index and phase for $label", async ({ cause, detail }) => {
+    const b = await bundle();
+    b.catalog.sources.unshift({
+      id: "reference-only", name: "reference.txt", sourcePath: "reference.txt", checksum: "b".repeat(64),
+      status: "reference/template-only", reason: "Reference only", ready: 0, review: 0,
+    });
+    b.files.set("catalog.json", encode(b.catalog));
+    const read = async (path: string) => {
+      if (path === "banks/test/bank.json") throw cause();
+      return b.read(path);
+    };
+
+    const result = await installPrivateLibrary(read);
+
+    expect(result).toMatchObject({ status: "partial", questionIds: [] });
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toContain("sample.txt: Source 2 of 2, opening question package:");
+    expect(result.warnings[0]).toContain(detail);
+    expect(result.warnings[0]).not.toContain("unstructured private diagnostic payload");
+    expect(result.warnings[0]).not.toContain("private getter failure");
+    expect(result.warnings[0]).not.toContain("QuotaExceededError");
+    await reloadWorkspace();
+    const catalog = useStore.getState().documents.find(document => document.fileType === PRIVATE_LIBRARY_DOCUMENT)!;
+    expect(JSON.parse(catalog.rawText).sources[1]).toMatchObject({ status: "failed", ready: 0, reason: expect.stringContaining(detail) });
+    expect(useStore.getState().questions).toHaveLength(0);
+  });
+
+  it("retains the named failure and prior learner work when a retry cannot open its source", async () => {
+    const b = await bundle();
+    await installPrivateLibrary(b.read);
+    const question = useStore.getState().questions[0];
+    useStore.getState().updateQuestion(question.id, { notes: "My retained reasoning", tags: ["my-tag"] });
+    await reloadWorkspace();
+    const before = structuredClone(useStore.getState().questions);
+
+    const result = await installPrivateLibrary(async path => {
+      if (path === "banks/test/bank.json") throw new DOMException("", "NotReadableError");
+      return b.read(path);
+    });
+
+    expect(result).toMatchObject({ status: "partial", questionIds: [question.id] });
+    expect(result.warnings[0]).toMatch(/opening question package:.*NotReadableError.*1 previously saved answer-ready question remains/);
+    await reloadWorkspace();
+    expect(useStore.getState().questions).toEqual(before);
+    const catalog = useStore.getState().documents.find(document => document.fileType === PRIVATE_LIBRARY_DOCUMENT)!;
+    expect(JSON.parse(catalog.rawText).sources[0]).toMatchObject({ status: "failed", ready: 1, reason: expect.stringContaining("NotReadableError") });
+  });
+
+  it("does not credit a sibling bank's saved questions to a bank that fails to open", async () => {
+    const b = await bundle();
+    const second = readPreparedBank(JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)));
+    second.pkg.manifest.bank.id = "second-bank";
+    second.pkg.questions[0].id = "second-question";
+    second.pkg.questions[0].stem = [{ type: "text", text: "Which separate second-bank option is supported?" }];
+    b.catalog.sources.push({ ...b.catalog.sources[0], id: "second-source-bank", bankFile: "banks/second/bank.json" });
+    b.files.set("catalog.json", encode(b.catalog));
+    b.files.set("banks/second/bank.json", encode(second));
+    expect((await installPrivateLibrary(b.read)).status).toBe("complete");
+    await reloadWorkspace();
+    const before = structuredClone(useStore.getState().questions);
+    expect(before).toHaveLength(2);
+    const sibling = before.find(question => question.content?.id === "second-question")!;
+    const first = before.find(question => question.content?.id === "sample-1")!;
+
+    const result = await installPrivateLibrary(async path => {
+      if (path === "banks/second/bank.json") throw new DOMException("", "NotReadableError");
+      return b.read(path);
+    });
+
+    expect(result.status).toBe("partial");
+    expect(result.questionIds).toContain(first.id);
+    expect(result.questionIds).not.toContain(sibling.id);
+    expect(result.warnings[0]).toContain("Source 2 of 2, opening question package:");
+    expect(result.warnings[0]).not.toContain("remains on this device");
+    await reloadWorkspace();
+    expect(useStore.getState().questions).toEqual(before);
+    const catalog = useStore.getState().documents.find(document => document.fileType === PRIVATE_LIBRARY_DOCUMENT)!;
+    expect(JSON.parse(catalog.rawText).sources[1]).toMatchObject({ status: "failed", ready: 0 });
+  });
+
+  it("identifies the original-file read phase without implying a question or image write", async () => {
+    const b = await bundle();
+    b.catalog.sources[0] = { ...b.catalog.sources[0], bankFile: undefined, originalFile: "originals/sample.txt", ready: 0 };
+    b.files.set("catalog.json", encode(b.catalog));
+    const result = await installPrivateLibrary(async path => {
+      if (path === "originals/sample.txt") throw new DOMException("", "NotReadableError");
+      return b.read(path);
+    });
+    expect(result.warnings[0]).toMatch(/Source 1 of 1, reading original file:.*NotReadableError/);
+    expect(result.questionIds).toEqual([]);
+  });
+
+  it("identifies a blank-message figure read failure before any media or question is saved", async () => {
+    const b = await bundle();
+    const bank = readPreparedBank(JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)));
+    const checksum = `sha256:${"c".repeat(64)}`;
+    bank.pkg.questions[0].assets = [{ id: "unreadable", filename: "unreadable.png", mimeType: "image/png", role: "stem", questionId: "sample-1", checksum }];
+    bank.pkg.questions[0].stem.push({ type: "image", assetId: "unreadable", role: "stem" });
+    b.files.set("banks/test/bank.json", encode(bank));
+    const result = await installPrivateLibrary(async path => {
+      if (path === "banks/test/assets/unreadable.png") throw new DOMException("", "NotReadableError");
+      return b.read(path);
+    });
+    expect(result).toMatchObject({ status: "partial", questionIds: [] });
+    expect(result.warnings[0]).toMatch(/preparing figure assets:.*unreadable\.png.*NotReadableError/);
+    expect(await getQuestionAttachmentBlob(`private-library:${checksum}`, { localOnly: true })).toBeUndefined();
+  });
+
+  it("reports the exact figure write position and empty-message browser error without importing questions", async () => {
+    stubSuccessfulImageDecode();
+    const b = await bundle();
+    const bank = readPreparedBank(JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)));
+    const png = new Uint8Array([137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1]);
+    const second = new Uint8Array([...png, 1]);
+    const checksums = await Promise.all([sha256(png), sha256(second)]);
+    bank.pkg.questions[0].assets = checksums.map((checksum, index) => ({
+      id: `figure-${index + 1}`, filename: `figure-${index + 1}.png`, mimeType: "image/png", role: "stem", questionId: "sample-1", checksum,
+    }));
+    bank.pkg.questions[0].stem.push(...bank.pkg.questions[0].assets.map(asset => ({ type: "image" as const, assetId: asset.id, role: "stem" as const })));
+    b.files.set("banks/test/bank.json", encode(bank));
+    b.files.set("banks/test/assets/figure-1.png", png);
+    b.files.set("banks/test/assets/figure-2.png", second);
+    const keys = checksums.map(checksum => `private-library:${checksum}`);
+    await deleteQuestionAttachmentBlobs(keys);
+    const originalPut = FakeIDBObjectStore.prototype.put;
+    const put = vi.spyOn(FakeIDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, value, key) {
+      if (this.name === ATTACHMENT_STORE_NAME && Array.isArray(key) && key[2] === keys[1])
+        throw new DOMException("", "QuotaExceededError");
+      return originalPut.call(this, value, key);
+    });
+    try {
+      const result = await installPrivateLibrary(b.read);
+      expect(result).toMatchObject({ status: "partial", questionIds: [] });
+      expect(result.warnings[0]).toMatch(/Source 1 of 1, preparing figure assets:.*save figure 2 of 2: figure-2\.png.*QuotaExceededError/);
+      expect(result.warnings[0]).not.toContain("Image integrity check failed");
+      expect(useStore.getState().questions).toHaveLength(0);
+      expect(await getQuestionAttachmentBlob(keys[0], { localOnly: true })).toMatchObject({ byteSize: png.length });
+      expect(await getQuestionAttachmentBlob(keys[1], { localOnly: true })).toBeUndefined();
+    } finally {
+      put.mockRestore();
+      await deleteQuestionAttachmentBlobs(keys);
+    }
+  });
+});
+
 describe("shared image identity in prepared libraries", () => {
   it("resolves root-level bank media beside bank.json", async () => {
     stubSuccessfulImageDecode();
@@ -501,6 +657,31 @@ describe("shared image identity in prepared libraries", () => {
 
     expect(files.map(file => file.name)).toEqual(["root-figure.png"]);
     expect(read).toHaveBeenCalledOnce();
+  });
+
+  it("imports a verified ZIP image when the linked cloud-image resolver fails", async () => {
+    stubSuccessfulImageDecode();
+    const b = await bundle();
+    const bank = JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)) as PreparedBank;
+    const png = new Uint8Array([
+      137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,
+    ]);
+    const checksum = await sha256(png);
+    bank.pkg.questions[0].assets = [{
+      id: "verified-figure", filename: "verified-figure.png", mimeType: "image/png",
+      role: "stem", questionId: "sample-1", checksum,
+    }];
+    b.files.set("banks/test/assets/verified-figure.png", png);
+    await deleteQuestionAttachmentBlobs([`private-library:${checksum}`]);
+    const unregister = setMissingAttachmentLoader(async () => {
+      throw new Error("Questions reference conflicting image originals. The workspace has not been marked protected.");
+    });
+    try {
+      const files = await bankFiles(bank, b.read, "banks/test/bank.json");
+      expect(files.map(file => file.name)).toEqual(["verified-figure.png"]);
+      const stored = await getQuestionAttachmentBlob(`private-library:${checksum}`, { localOnly: true });
+      expect(stored?.byteSize).toBe(png.length);
+    } finally { unregister(); }
   });
 
   it("materializes a reused source-page image once even when question-local asset IDs differ", async () => {

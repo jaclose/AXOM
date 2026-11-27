@@ -2,6 +2,10 @@ import type { StateStorage } from "zustand/middleware";
 import { userIdFromName } from "./userIdentity";
 import { STORAGE_KEYS } from "./brand";
 import { markVaultWrite, markVaultWriteFailure } from "./vaultActivity";
+import {
+  isPackedFallbackError, PackedFallbackError, packedFallbackKey, packVaultFallback, unpackVaultFallback,
+  type LegacyFallbackBinding, type PackedFallbackCopy,
+} from "./packedVaultFallback";
 
 export const DB_NAME = STORAGE_KEYS.vaultDb;
 export const STORE_NAME = "state";
@@ -30,6 +34,7 @@ const fallbackMarkerKey = (name: string) => `${name}:fallback-newer`;
 let vaultWriteSequence = 0;
 const vaultWriteFailures = new Map<number, Error>();
 const observedVaultSnapshots = new Map<string, string | null>();
+const observedVaultUsers = new Map<string, string>();
 const conflictedWorkspaceKeys = new Set<string>();
 /** A blocked versionchange request cannot be cancelled. Fail later upgrade
  * attempts promptly until that queued request either succeeds or errors. */
@@ -56,6 +61,7 @@ export function isVaultConflictError(error: unknown): error is Error & { code?: 
 /** Test isolation for the one module-local runtime that represents a browser tab. */
 export function resetLocalVaultRuntimeForTests(): void {
   observedVaultSnapshots.clear();
+  observedVaultUsers.clear();
   conflictedWorkspaceKeys.clear();
   vaultUpgradeBlocked = false;
 }
@@ -100,9 +106,10 @@ function localFallback(): Storage | null {
 }
 
 function describeStorageFailure(error: unknown): string {
-  if (!(error instanceof Error)) return "unknown error";
+  if (typeof error !== "object" || error === null || !("message" in error) || typeof error.message !== "string") return "unknown error";
   const detail = error.message.replace(/\s+/g, " ").trim();
-  return (detail || error.name).slice(0, 180);
+  const name = "name" in error && typeof error.name === "string" ? error.name : "unknown error";
+  return (detail || name).slice(0, 180);
 }
 
 function combinedStorageFailure(indexedDbError: unknown, fallbackError: unknown): Error {
@@ -266,6 +273,8 @@ function observesWorkspace(name: string): boolean {
 function rememberVaultSnapshot(name: string, value: string | null): void {
   if (!observesWorkspace(name) || !conflictedWorkspaceKeys.has(name)) {
     observedVaultSnapshots.set(name, workspaceFingerprint(value));
+    if (value !== null) observedVaultUsers.set(name, persistedUserId(value));
+    else observedVaultUsers.delete(name);
   }
 }
 
@@ -308,7 +317,7 @@ function encodeFallbackMarker(valueFingerprint: string, baseFingerprint: string 
  * IndexedDB. A copy mirrored by an older build carries no marker and can be
  * stale, so it never overrides the vault.
  */
-function newerFallbackCopy(fallbackStore: Storage | null, name: string): NewerFallbackCopy | null {
+function newerFallbackCopy(fallbackStore: Pick<Storage, "getItem"> | null, name: string): NewerFallbackCopy | null {
   try {
     const marker = fallbackStore?.getItem(fallbackMarkerKey(name));
     if (!marker) return null;
@@ -340,6 +349,163 @@ function newerFallbackCopy(fallbackStore: Storage | null, name: string): NewerFa
   } catch {
     return null;
   }
+}
+
+/** Resolve a marked fallback from an immutable safety snapshot without writing
+ * either storage tier. A modern marker identifies the vault base it supersedes;
+ * a competing vault commit keeps precedence just as it does during hydration.
+ * Unmarked mirrors remain subject to the caller's existing vault-first lookup. */
+export function resolveMarkedVaultSnapshotRecord(
+  indexedDb: Readonly<Record<string, string>> | undefined,
+  local: Readonly<Record<string, string>>,
+  name: string,
+): string | undefined {
+  if (local[fallbackMarkerKey(name)] === undefined) return undefined;
+  const newer = newerFallbackCopy({ getItem: key => local[key] ?? null }, name);
+  if (!newer) throw new Error("The safety snapshot has an invalid newer-fallback marker.");
+
+  let current = indexedDb ? resolveVaultSnapshotRecord(indexedDb, name) : undefined;
+  if (!current && indexedDb) {
+    const activeUser = indexedDb[activeUserKey(name)];
+    if (activeUser) current = resolveVaultSnapshotRecord(indexedDb, scopedStateKey(name, activeUser));
+  }
+  if (!current || current === newer.value || workspaceFingerprint(current) === newer.baseFingerprint) return newer.value;
+  if (newer.baseFingerprint === undefined) {
+    throw new Error("The safety snapshot cannot establish which workspace copy is newer.");
+  }
+  return current;
+}
+
+function legacyFallbackBinding(storage: Pick<Storage, "getItem">, name: string, userId: string): LegacyFallbackBinding {
+  return {
+    primaryFingerprint: workspaceFingerprint(storage.getItem(name)),
+    scopedFingerprint: workspaceFingerprint(storage.getItem(scopedStateKey(name, userId))),
+    activeUser: storage.getItem(activeUserKey(name)),
+    marker: storage.getItem(fallbackMarkerKey(name)),
+  };
+}
+
+function sameLegacyBinding(left: LegacyFallbackBinding, right: LegacyFallbackBinding): boolean {
+  return left.primaryFingerprint === right.primaryFingerprint && left.scopedFingerprint === right.scopedFingerprint
+    && left.activeUser === right.activeUser && left.marker === right.marker;
+}
+
+async function readPackedFallback(storage: Pick<Storage, "getItem"> | null, name: string): Promise<PackedFallbackCopy | null> {
+  if (!storage || !observesWorkspace(name)) return null;
+  const raw = storage.getItem(packedFallbackKey(name));
+  if (raw === null) return null;
+  const copy = await unpackVaultFallback(raw, name);
+  if (persistedUserId(copy.value) !== copy.userId || snapshotFingerprint(copy.value) !== copy.valueFingerprint
+    || (copy.legacy.activeUser !== null && copy.legacy.activeUser !== copy.userId)) throw new PackedFallbackError();
+  return copy;
+}
+
+function assertPackedLegacyCurrent(storage: Pick<Storage, "getItem"> | null, copy: PackedFallbackCopy): void {
+  if (!storage || !sameLegacyBinding(legacyFallbackBinding(storage, copy.name, copy.userId), copy.legacy)) {
+    throw new VaultConflictError();
+  }
+}
+
+function packedExpectation(copy: PackedFallbackCopy): VaultExpectation {
+  return { fingerprints: [copy.baseFingerprint, copy.valueFingerprint] };
+}
+
+/** Only the new current fallback is retired, after its logical bytes reached IDB.
+ * Historical backups and legacy records are never deleted to make this save fit. */
+function retirePackedFallback(storage: Storage | null, name: string, previousRaw: string | null): void {
+  if (!storage || !observesWorkspace(name)) return;
+  const raw = storage.getItem(packedFallbackKey(name));
+  if (raw !== previousRaw) throw new VaultConflictError();
+  if (raw === null) return;
+  storage.removeItem(packedFallbackKey(name));
+}
+
+/** All asynchronous work precedes a fresh comparison of both fallback records.
+ * The final set is one self-contained value, so a failed write keeps the old one. */
+async function writePackedFallback(
+  storage: Storage | null, name: string, value: string, userId: string,
+  baseFingerprint: string | null | undefined, previous: PackedFallbackCopy | null,
+): Promise<void> {
+  if (!storage || !observesWorkspace(name)) throw new PackedFallbackError("A compressed workspace fallback is unavailable.");
+  const previousRaw = previous?.raw ?? null;
+  if (storage.getItem(packedFallbackKey(name)) !== previousRaw) throw new VaultConflictError();
+  if (previous) assertPackedLegacyCurrent(storage, previous);
+  const expected = workspaceExpectation(name);
+  if (previous && !expected?.fingerprints.includes(previous.valueFingerprint)) throw new VaultConflictError();
+  if (!previous) assertFallbackStillCurrent(name, newerFallbackCopy(storage, name), expected);
+  const observedUser = observedVaultUsers.get(name);
+  if ((previous && previous.userId !== userId) || (observedUser !== undefined && observedUser !== userId)) throw new PackedFallbackError("The compressed workspace belongs to a different local profile. Keep both copies and export saved work.");
+  const legacy = previous?.legacy ?? legacyFallbackBinding(storage, name, userId);
+  if (legacy.activeUser !== null && legacy.activeUser !== userId) throw new PackedFallbackError("The browser fallback belongs to a different local profile. Keep both copies and export saved work.");
+  const base = previous ? previous.baseFingerprint : baseFingerprint;
+  if (base === undefined) throw new PackedFallbackError("AXOM cannot establish the saved base for this fallback. Keep this tab open and export saved work.");
+  const encoded = await packVaultFallback(value, { name, userId, valueFingerprint: snapshotFingerprint(value), baseFingerprint: base, legacy });
+  if (!encoded) throw new PackedFallbackError("This browser could not create a smaller, restorable workspace fallback.");
+
+  // A competing IDB commit during compression is authoritative conflict evidence.
+  // Unavailable IDB is why a fallback exists; its recorded base still gates promotion.
+  const allowed = [base, previous?.valueFingerprint, snapshotFingerprint(value)];
+  await assertPackedVaultBase(name, allowed);
+  if (storage.getItem(packedFallbackKey(name)) !== previousRaw
+    || !sameLegacyBinding(legacyFallbackBinding(storage, name, userId), legacy)) throw new VaultConflictError();
+  storage.setItem(packedFallbackKey(name), encoded);
+  const readback = storage.getItem(packedFallbackKey(name));
+  if (readback !== encoded) throw new PackedFallbackError("The compressed workspace could not be read back after saving.");
+  const decoded = await readPackedFallback(storage, name);
+  if (!decoded || decoded.value !== value) throw new PackedFallbackError();
+  await assertPackedVaultBase(name, allowed);
+  if (storage.getItem(packedFallbackKey(name)) !== encoded
+    || !sameLegacyBinding(legacyFallbackBinding(storage, name, userId), legacy)) throw new VaultConflictError();
+}
+
+async function assertPackedVaultBase(name: string, allowed: readonly (string | null | undefined)[]): Promise<void> {
+  if (vaultUpgradeBlocked) return; // A second open would queue behind that blocked upgrade.
+  let fingerprint: string | null | undefined;
+  try {
+    // Chunk manifests already bind the complete logical value. Avoid loading a
+    // multi-megabyte source library twice merely to compare its recorded base.
+    let raw = await withStore<string | undefined>("readonly", store => store.get(name), openExistingVault);
+    if (!raw) {
+      const active = await withStore<string | undefined>("readonly", store => store.get(activeUserKey(name)), openExistingVault);
+      if (active) raw = await withStore<string | undefined>("readonly", store => store.get(scopedStateKey(name, active)), openExistingVault);
+    }
+    fingerprint = workspaceFingerprint(raw);
+  } catch { /* An unreadable vault is why this separate fallback exists. */ }
+  if (fingerprint !== undefined && !allowed.includes(fingerprint)) throw new VaultConflictError();
+}
+
+/** One read-only selector for captured backups and update checkpoints. Plain and
+ * chunked legacy snapshots retain their existing order; a packed copy must prove
+ * its identity and its relationship to both captured storage tiers. */
+export async function resolveWorkspaceSnapshotRecord(
+  indexedDb: Readonly<Record<string, string>> | undefined,
+  local: Readonly<Record<string, string>>,
+  name: string,
+): Promise<string | undefined> {
+  const storage = { getItem: (key: string) => local[key] ?? null };
+  const packed = await readPackedFallback(storage, name);
+  if (packed) {
+    assertPackedLegacyCurrent(storage, packed);
+    let vault = indexedDb ? resolveVaultSnapshotRecord(indexedDb, name) : undefined;
+    if (!vault && indexedDb?.[activeUserKey(name)]) {
+      vault = resolveVaultSnapshotRecord(indexedDb, scopedStateKey(name, indexedDb[activeUserKey(name)]));
+    }
+    if (vault !== undefined && !packedExpectation(packed).fingerprints.includes(workspaceFingerprint(vault))) throw new VaultConflictError();
+    return packed.value;
+  }
+  const marked = resolveMarkedVaultSnapshotRecord(indexedDb, local, name);
+  if (marked !== undefined) return marked;
+  for (const records of [indexedDb, local]) {
+    if (!records) continue;
+    const primary = resolveVaultSnapshotRecord(records, name);
+    if (primary) return primary;
+    const scoped = Object.keys(records).sort().find(key => key.startsWith(`${name}:user:`));
+    if (scoped) {
+      const value = resolveVaultSnapshotRecord(records, scoped);
+      if (value) return value;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -563,36 +729,47 @@ async function writeVault(
         tx.abort();
         return;
       }
-      const currentPrefix = chunkPrefix(name, userId);
-      const nextChunkCount = plan.manifest?.chunkPrefix === currentPrefix ? plan.manifest.chunkCount : 0;
-      for (const raw of previous) {
-        const manifest = readChunkedValueManifest(raw);
-        if (!manifest || manifest.chunkPrefix !== currentPrefix) continue;
-        for (let index = nextChunkCount; index < manifest.chunkCount; index += 1) {
-          store.delete(`${manifest.chunkPrefix}:${index}`);
+      try {
+        const currentPrefix = chunkPrefix(name, userId);
+        const nextChunkCount = plan.manifest?.chunkPrefix === currentPrefix ? plan.manifest.chunkCount : 0;
+        for (const raw of previous) {
+          const manifest = readChunkedValueManifest(raw);
+          if (!manifest || manifest.chunkPrefix !== currentPrefix) continue;
+          for (let index = nextChunkCount; index < manifest.chunkCount; index += 1) {
+            store.delete(`${manifest.chunkPrefix}:${index}`);
+          }
         }
+        if (plan.manifest) {
+          // Preserve unchanged chunks so a small edit does not rewrite megabytes.
+          plan.chunks.forEach((chunk, index) => {
+            const key = `${plan.manifest!.chunkPrefix}:${index}`;
+            const existing = store.get(key);
+            existing.onsuccess = () => {
+              if (existing.result === chunk) return;
+              try {
+                store.put(chunk, key);
+              } catch (error) {
+                failWrite(error);
+              }
+            };
+          });
+        }
+        store.put(plan.storedValue, name);
+        if (userId) {
+          store.put(userId, activeUserKey(name));
+          store.put(plan.storedValue, scopedStateKey(name, userId));
+        }
+      } catch (error) {
+        // A browser can refuse a write synchronously (quota, a value it cannot
+        // clone, a closing database). Thrown from this request callback, that
+        // escaped as an uncaught page error, and the save was rejected as a
+        // bare AbortError instead of its real cause.
+        failWrite(error);
       }
-      if (plan.manifest) {
-        // Preserve unchanged chunks so a small edit does not rewrite megabytes.
-        plan.chunks.forEach((chunk, index) => {
-          const key = `${plan.manifest!.chunkPrefix}:${index}`;
-          const existing = store.get(key);
-          existing.onsuccess = () => {
-            if (existing.result === chunk) return;
-            try {
-              store.put(chunk, key);
-            } catch (error) {
-              chunkWriteFailure = error instanceof Error ? error : new Error(String(error));
-              tx.abort();
-            }
-          };
-        });
-      }
-      store.put(plan.storedValue, name);
-      if (userId) {
-        store.put(userId, activeUserKey(name));
-        store.put(plan.storedValue, scopedStateKey(name, userId));
-      }
+    };
+    const failWrite = (error: unknown) => {
+      chunkWriteFailure ??= error instanceof Error ? error : new Error(String(error));
+      try { tx.abort(); } catch { /* already aborted or finished; onabort/onerror settle the promise */ }
     };
 
     const primary = store.get(name);
@@ -713,6 +890,26 @@ const vaultStorage: StateStorage = {
     // the vault. Reading the vault first used to hand back the older copy, and
     // the next successful save then deleted the newer one.
     const fallbackStore = localFallback();
+    const packed = await readPackedFallback(fallbackStore, name);
+    if (packed) {
+      assertPackedLegacyCurrent(fallbackStore, packed);
+      try {
+        await writeVault(name, packed.value, packed.userId, packedExpectation(packed));
+        assertPackedLegacyCurrent(fallbackStore, packed);
+        retirePackedFallback(fallbackStore, name, packed.raw);
+        clearFallbackCopy(fallbackStore, name, packed.userId);
+      } catch (error) {
+        // Keep both competing records. Choosing either would conceal work from
+        // a newer/older tab that cannot understand the other's storage format.
+        if (isVaultConflictError(error)) {
+          conflictedWorkspaceKeys.add(name);
+          throw error;
+        }
+        // A verified packed copy remains durable while IDB is unavailable/full.
+      }
+      rememberVaultSnapshot(name, packed.value);
+      return packed.value;
+    }
     const newer = newerFallbackCopy(fallbackStore, name);
     if (newer !== null) {
       const userId = persistedUserId(newer.value);
@@ -779,14 +976,21 @@ const vaultStorage: StateStorage = {
     const userId = persistedUserId(value);
     const fallbackStore = localFallback();
     let fallbackBaseFingerprint: string | null | undefined;
+    let currentPacked: PackedFallbackCopy | null = null;
     try {
       const expected = workspaceExpectation(name);
+      currentPacked = await readPackedFallback(fallbackStore, name);
+      if (currentPacked) {
+        assertPackedLegacyCurrent(fallbackStore, currentPacked);
+        if (currentPacked.userId !== userId) throw new PackedFallbackError("The compressed workspace belongs to a different local profile. Keep both copies and export saved work.");
+        if (!expected?.fingerprints.includes(currentPacked.valueFingerprint)) throw new VaultConflictError();
+      }
       const currentFallback = newerFallbackCopy(fallbackStore, name);
-      assertFallbackStillCurrent(name, currentFallback, expected);
-      fallbackBaseFingerprint = currentFallback !== null
+      if (!currentPacked) assertFallbackStillCurrent(name, currentFallback, expected);
+      fallbackBaseFingerprint = currentPacked !== null ? currentPacked.baseFingerprint : currentFallback !== null
         ? currentFallback.baseFingerprint
         : observedVaultFingerprint(name);
-      if (currentFallback === null && fallbackBaseFingerprint === undefined) {
+      if (currentPacked === null && currentFallback === null && fallbackBaseFingerprint === undefined) {
         try {
           fallbackBaseFingerprint = workspaceFingerprint(await readVaultSnapshot(name));
         } catch {
@@ -799,18 +1003,33 @@ const vaultStorage: StateStorage = {
       // A fallback save can replace only the vault snapshot on which its chain
       // began, or an idempotent promotion of the same fallback. A competing
       // commit is rejected inside the IndexedDB transaction.
-      const vaultExpectation = currentFallback !== null
+      const vaultExpectation = currentPacked !== null ? packedExpectation(currentPacked) : currentFallback !== null
         ? fallbackExpectation(currentFallback)
         : expected;
       await writeVault(name, value, userId, vaultExpectation);
+      if (currentPacked) assertPackedLegacyCurrent(fallbackStore, currentPacked);
+      retirePackedFallback(fallbackStore, name, currentPacked?.raw ?? null);
       clearFallbackCopy(fallbackStore, name, userId);
       rememberVaultSnapshot(name, value);
       markVaultWrite("indexeddb");
     } catch (indexedDbError) {
-      if (isVaultConflictError(indexedDbError)) {
-        if (observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
+      if (isVaultConflictError(indexedDbError) || isPackedFallbackError(indexedDbError)) {
+        if (isVaultConflictError(indexedDbError) && observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
         vaultWriteFailures.set(writeSequence, indexedDbError);
-        markVaultWriteFailure();
+        markVaultWriteFailure(new Date(), indexedDbError);
+        return;
+      }
+      if (currentPacked) {
+        try {
+          await writePackedFallback(fallbackStore, name, value, userId, fallbackBaseFingerprint, currentPacked);
+          rememberVaultSnapshot(name, value);
+          markVaultWrite("local-fallback");
+        } catch (error) {
+          if (isVaultConflictError(error)) conflictedWorkspaceKeys.add(name);
+          const failure = isVaultConflictError(error) ? error : combinedStorageFailure(indexedDbError, error);
+          vaultWriteFailures.set(writeSequence, failure);
+          markVaultWriteFailure(new Date(), failure);
+        }
         return;
       }
       // Try the established localStorage recovery path for any workspace.
@@ -858,14 +1077,25 @@ const vaultStorage: StateStorage = {
             fallbackStore?.removeItem(fallbackMarkerKey(name));
           }
         } catch { /* the last successful copy remains available for recovery */ }
-        vaultWriteFailures.set(
-          writeSequence,
-          isVaultConflictError(failure)
-            ? failure
-            : combinedStorageFailure(indexedDbError, failure),
-        );
+        if (!isVaultConflictError(failure) && observesWorkspace(name)) {
+          try {
+            await writePackedFallback(fallbackStore, name, value, userId, fallbackBaseFingerprint, null);
+            rememberVaultSnapshot(name, value);
+            markVaultWrite("local-fallback");
+            return;
+          } catch (packedError) {
+            if (isVaultConflictError(packedError)) {
+              conflictedWorkspaceKeys.add(name);
+              failure = packedError;
+            } else if (fallbackStore) {
+              failure = new Error(`Plain fallback: ${describeStorageFailure(failure).replace(/\.+$/, "")}. Compressed fallback: ${describeStorageFailure(packedError).replace(/\.+$/, "")}`, { cause: packedError });
+            }
+          }
+        }
+        const recordedFailure = isVaultConflictError(failure) ? failure : combinedStorageFailure(indexedDbError, failure);
+        vaultWriteFailures.set(writeSequence, recordedFailure);
         // Ordinary saves are best-effort, so say so: this one is on no disk.
-        markVaultWriteFailure();
+        markVaultWriteFailure(new Date(), recordedFailure);
       }
     }
   },
@@ -882,10 +1112,13 @@ const vaultStorage: StateStorage = {
     }
     fallback?.removeItem(name);
     fallback?.removeItem(fallbackMarkerKey(name));
+    if (observesWorkspace(name)) fallback?.removeItem(packedFallbackKey(name));
     fallback?.removeItem(activeUserKey(name));
     if (active) fallback?.removeItem(scopedStateKey(name, active));
     try {
       await removeVaultRecords(name, active);
+      conflictedWorkspaceKeys.delete(name);
+      rememberVaultSnapshot(name, null);
     } catch {
       // No-op; best effort cleanup.
     }
@@ -902,17 +1135,24 @@ async function replaceVaultItem(name: string, value: string): Promise<void> {
   const writeSequence = ++vaultWriteSequence;
   const userId = persistedUserId(value);
   try {
+    const fallback = localFallback();
+    const previousPacked = observesWorkspace(name) ? fallback?.getItem(packedFallbackKey(name)) ?? null : null;
     await writeVault(name, value, userId);
-    clearFallbackCopy(localFallback(), name, userId);
+    // Explicit verified restore already authorizes replacing the live workspace;
+    // retire only the fallback captured before that write. A concurrent save
+    // remains available and makes this replacement fail explicitly.
+    retirePackedFallback(fallback, name, previousPacked);
+    clearFallbackCopy(fallback, name, userId);
     conflictedWorkspaceKeys.delete(name);
     rememberVaultSnapshot(name, value);
     markVaultWrite("indexeddb");
   } catch (error) {
+    if (isVaultConflictError(error) && observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
     vaultWriteFailures.set(
       writeSequence,
       error instanceof Error ? error : new Error("AXOM could not replace the local workspace."),
     );
-    markVaultWriteFailure();
+    markVaultWriteFailure(new Date(), error);
   }
 }
 

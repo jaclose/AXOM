@@ -13,6 +13,7 @@ import {
 } from "./localVault";
 import { STORAGE_KEYS } from "./brand";
 import { readVaultWriteFailure } from "./vaultActivity";
+import { packedFallbackKey } from "./packedVaultFallback";
 
 const values = new Map<string, string>();
 const storage = {
@@ -321,7 +322,7 @@ describe("IndexedDB-first local vault", () => {
     vi.stubGlobal("localStorage", {
       ...storage,
       setItem: (name: string, value: string) => {
-        if (name === key) throw new DOMException("Setting the workspace exceeded the quota.", "QuotaExceededError");
+        if (name === key || name === packedFallbackKey(key)) throw new DOMException("Setting the workspace exceeded the quota.", "QuotaExceededError");
         storage.setItem(name, value);
       },
     });
@@ -332,7 +333,9 @@ describe("IndexedDB-first local vault", () => {
       expect(() => assertVaultWritesSince(checkpoint))
         .toThrow(/IndexedDB save failed: Local vault upgrade is blocked by another tab/);
       expect(() => assertVaultWritesSince(checkpoint))
-        .toThrow(/Browser fallback failed: Setting the workspace exceeded the quota/);
+        .toThrow(/Browser fallback failed: Plain fallback: Setting the workspace exceeded the quota/);
+      expect(() => assertVaultWritesSince(checkpoint))
+        .toThrow(/Compressed fallback: Setting the workspace exceeded the quota/);
       expect(await getDirect(oldConnection, key)).toBe(base);
       expect(localStorage.getItem(key)).toBeNull();
     } finally {
@@ -486,7 +489,7 @@ describe("IndexedDB-first local vault", () => {
     vi.stubGlobal("localStorage", {
       ...storage,
       setItem: (name: string, value: string) => {
-        if (name === key) throw new DOMException("The fallback exceeded storage quota.", "QuotaExceededError");
+        if (name === key || name === packedFallbackKey(key)) throw new DOMException("The fallback exceeded storage quota.", "QuotaExceededError");
         originalSetItem(name, value);
       },
     });

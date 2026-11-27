@@ -12,7 +12,7 @@ import { GButton, GhostButton, Tag } from "../ui/primitives";
 import { pushToast } from "../../lib/toast";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { subscribeVault, useLastVaultWrite } from "./SettingsSections";
-import { readVaultWriteFailure } from "../../lib/vaultActivity";
+import { readVaultWriteFailure, readVaultWriteFailureDetail } from "../../lib/vaultActivity";
 import { assertVaultWritesSince, getVaultWriteCheckpoint, localVaultStorage, flushLocalVaultWrites } from "../../lib/localVault";
 import { toPortableState } from "../../lib/backup";
 import { TechnicalDetails } from "./TechnicalDetails";
@@ -33,6 +33,7 @@ async function probeIndexedDb(): Promise<boolean> {
 export function DataHealthPanel({ onOpenBackup }: { onOpenBackup?: () => void } = {}) {
   const s = useStore();
   const failure = useSyncExternalStore(subscribeVault, readVaultWriteFailure, () => null);
+  const failureDetail = useSyncExternalStore(subscribeVault, readVaultWriteFailureDetail, () => null);
   const lastWrite = useLastVaultWrite();
   const [saving, setSaving] = useState(false);
   async function retrySave() {
@@ -55,6 +56,7 @@ export function DataHealthPanel({ onOpenBackup }: { onOpenBackup?: () => void } 
   }
   const [idbOk, setIdbOk] = useState<boolean | null>(null);
   const [storageUsed, setStorageUsed] = useState<string>("Checking…");
+  const [storageQuota, setStorageQuota] = useState<string>("Checking…");
 
   useEffect(() => {
     let stopped = false;
@@ -66,13 +68,17 @@ export function DataHealthPanel({ onOpenBackup }: { onOpenBackup?: () => void } 
     let stopped = false;
     if (!navigator.storage?.estimate) {
       setStorageUsed("Unavailable");
+      setStorageQuota("Unavailable");
       return;
     }
     navigator.storage.estimate()
-      .then(({ usage }) => {
-        if (!stopped) setStorageUsed(formatBytes(usage ?? 0));
+      .then(({ usage, quota }) => {
+        if (!stopped) {
+          setStorageUsed(formatEstimate(usage));
+          setStorageQuota(formatEstimate(quota));
+        }
       })
-      .catch(() => { if (!stopped) setStorageUsed("Unavailable"); });
+      .catch(() => { if (!stopped) { setStorageUsed("Unavailable"); setStorageQuota("Unavailable"); } });
     return () => { stopped = true; };
   }, []);
 
@@ -155,19 +161,26 @@ export function DataHealthPanel({ onOpenBackup }: { onOpenBackup?: () => void } 
       <TechnicalDetails>
         <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
           <Tag tone={failure || idbOk === false ? "orange" : idbOk === null ? "neutral" : "green"}>
-            <Database size={ICON_SIZE.microInline} /> {idbOk === null ? "Checking storage…" : idbOk ? "IndexedDB available" : "localStorage fallback"}
+            <Database size={ICON_SIZE.microInline} /> {idbOk === null ? "Checking storage…" : idbOk ? "IndexedDB opened" : "IndexedDB unavailable"}
           </Tag>
-          <Tag tone="neutral"><HardDrive size={ICON_SIZE.microInline} /> Whole browser storage: {storageUsed}</Tag>
+          <Tag tone="neutral"><HardDrive size={ICON_SIZE.microInline} /> Browser-reported origin use: {storageUsed}</Tag>
+          <Tag tone="neutral">Browser-reported quota: {storageQuota}</Tag>
           <Tag tone={failure ? "orange" : lastWrite ? "green" : "neutral"}><ShieldCheck size={ICON_SIZE.microInline} /> {failure ? "Autosave needs attention" : lastWrite ? "Last save confirmed" : "Save not yet confirmed"}</Tag>
           <Tag tone={duplicateSources ? "orange" : "green"}>
             <FileFingerprintIcon /> {duplicateSources ? `${duplicateSources} duplicate source${duplicateSources === 1 ? "" : "s"}` : "Source checksums healthy"}
           </Tag>
         </div>
+        <p>Opening IndexedDB and a browser storage estimate do not confirm that another write will succeed. Only a verified save confirms that your workspace is stored.</p>
+        {failure && failureDetail && <p>Latest save failure: {failureDetail}</p>}
         <p>{orphans.totalIssues === 0 ? "Question-bank links are healthy: no orphaned questions, sets, or documents." : `${orphans.totalIssues} dangling link${orphans.totalIssues === 1 ? "" : "s"} across questions, sets, and documents.`}</p>
         <p>Workspace records: {formatBytes(new TextEncoder().encode(JSON.stringify(toPortableState(s))).length)} before compression. Browser storage also includes images, safety snapshots and cached app files. It is not your account size.</p>
       </TechnicalDetails>
     </div>
   );
+}
+
+function formatEstimate(bytes: number | undefined) {
+  return typeof bytes === "number" && Number.isFinite(bytes) && bytes >= 0 ? formatBytes(bytes) : "Unavailable";
 }
 
 function formatBytes(bytes: number) {

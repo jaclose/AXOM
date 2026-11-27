@@ -13,6 +13,7 @@ import { SourceTeaching } from "./SourceTeaching";
 import { QuestionReviewSlides } from "./QuestionReviewSlides";
 import { QuestionViewControls, QuestionViewFrame, useQuestionView } from "./QuestionView";
 import { ChoiceTeaching } from "./ChoiceTeaching";
+import { QuestionSourceIdentity } from "./QuestionSourceIdentity";
 
 /** Reopens a completed run without submitting, rescoring, or creating attempts. */
 export function SessionReviewModal({ session, onClose, onPractice }: {
@@ -74,6 +75,7 @@ export function SessionReviewModal({ session, onClose, onPractice }: {
             <span className="sub">Your answer: {answer?.answerKey ?? "Not answered"}</span>
             {answer?.flagged && <span className="sub">Flagged in this block</span>}
           </div>
+          <QuestionSourceIdentity question={question} />
           <QuestionViewFrame view={presentation.view}>
           {presentation.view === "slides" && <QuestionReviewSlides question={question} source={source} />}
           <QuestionContent question={question} part="stem" mode="question" fallback={<p className="question-stem">{question.stem}</p>} />

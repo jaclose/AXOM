@@ -1,4 +1,5 @@
 import { QuestionContent, QuestionSupportingContent } from "../questions/QuestionContent";
+import { QuestionSourceIdentity } from "../questions/QuestionSourceIdentity";
 import { isAssetVisible } from "../../lib/question-content/visibility";
 // ===========================================================================
 // The Examplify (ExamSoft) interface, as a renderer over the shared exam
@@ -279,6 +280,7 @@ export function ExamplifyExam({ exam, title, timeLimitSeconds, onClose, unreview
             </div>
           </div>
 
+          <QuestionSourceIdentity question={question} />
           {!collapsed && (
             <div className={`xfy-stem ${tool === "highlight" ? "tool-highlight" : ""} ${tool === "erase" ? "tool-erase" : ""}`}>
               <div aria-label={question.content ? "Question stem" : undefined} tabIndex={question.content ? -1 : undefined} ref={question.content ? exam.stemRef : undefined}><QuestionContent question={question} part="stem"

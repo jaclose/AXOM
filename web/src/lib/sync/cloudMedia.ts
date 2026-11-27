@@ -31,24 +31,37 @@ export function workspaceMedia(state: NoctyriumState): Map<string, Reference> {
       // A source checksum attests image bytes, not academic ownership. It may
       // not authorize a revocable course binding for a new local attachment.
       const declared = content?.assets.find(asset => asset.id === attachment.assetId)?.checksum;
-      const checksum = declared?.replace(/^sha256:/, "");
-      if (checksum !== undefined && !/^[a-f0-9]{64}$/.test(checksum)) {
+      const sourceChecksum = declared?.replace(/^sha256:/, "");
+      if (sourceChecksum !== undefined && !/^[a-f0-9]{64}$/.test(sourceChecksum)) {
         throw new Error("A source image has an invalid declared checksum. The workspace has not been marked protected.");
       }
+      // This key is an immutable byte digest, unlike a mutable image ID.
+      // It must agree with any stronger source-declared checksum, and may
+      // legitimately be reused by questions or reviews saved at other times.
+      const originalHash = /^private-library:sha256:([a-f0-9]{64})$/.exec(attachment.blobKey)?.[1];
+      if (originalHash && sourceChecksum && sourceChecksum !== originalHash) {
+        throw new Error("Questions reference conflicting image originals. The workspace has not been marked protected.");
+      }
+      const checksum = sourceChecksum ?? originalHash;
       const prior = refs.get(attachment.blobKey);
       if (prior) {
-        // Several questions may share one original, but every reference must
-        // agree on its identity. Do not let Map.set discard conflicting evidence.
+        // Only digest-addressed originals can be reused across different
+        // review timestamps. Mutable keys must retain exact timestamp checks.
         if (prior.attachment.byteSize !== attachment.byteSize
-          || prior.attachment.updatedAt !== attachment.updatedAt
+          || (!originalHash && prior.attachment.updatedAt !== attachment.updatedAt)
           || prior.attachment.mimeType !== attachment.mimeType
-          || (prior.checksum && checksum && prior.checksum !== checksum)) {
+          || (prior.checksum && checksum && prior.checksum !== checksum)
+          || (originalHash && (!Number.isFinite(Date.parse(prior.attachment.updatedAt))
+            || !Number.isFinite(Date.parse(attachment.updatedAt))))) {
           throw new Error("Questions reference conflicting image originals. The workspace has not been marked protected.");
         }
-        // Keep the last referencing question for cloud-cache reconstruction,
-        // while retaining a source checksum declared by any earlier reference.
-        refs.set(attachment.blobKey, { questionId: question.id, attachment,
-          checksum: checksum ?? prior.checksum });
+        // Preserve the oldest existing timestamp on a shared immutable image:
+        // this is deterministic and leaves single-reference saved manifests
+        // backward-compatible, while never changing the actual blob key/hash.
+        const usePrior = originalHash && Date.parse(prior.attachment.updatedAt) <= Date.parse(attachment.updatedAt);
+        const owner = usePrior ? prior : { questionId: question.id, attachment, checksum };
+        refs.set(attachment.blobKey, { questionId: owner.questionId,
+          attachment: owner.attachment, checksum: checksum ?? prior.checksum });
       } else {
         refs.set(attachment.blobKey, { questionId: question.id, attachment, checksum });
       }

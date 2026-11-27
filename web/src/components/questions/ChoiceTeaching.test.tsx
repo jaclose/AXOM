@@ -20,7 +20,7 @@ describe("ChoiceTeaching", () => {
     const source = { ...question, explanation: "PowerPoint slide note 12 explicitly marks B. The supplied notes do not provide a teaching rationale." };
     const before = JSON.stringify(source);
     render(<ChoiceTeaching question={source} pickedKey="A" />);
-    expect(screen.getByText("1 of 3 explained")).toBeTruthy();
+    expect(screen.getByText("1 separate explanation")).toBeTruthy();
     expect(screen.queryByText("The core explanation above covers why this answer is correct.")).toBeNull();
     expect(JSON.stringify(source)).toBe(before);
   });
@@ -31,10 +31,33 @@ describe("ChoiceTeaching", () => {
     const rows = [...document.querySelectorAll("[data-choice-key]")];
     expect(rows.map((row) => row.getAttribute("data-choice-key"))).toEqual(["B", "A", "C"]);
     expect(rows.slice(0, 2).every((row) => row.hasAttribute("open"))).toBe(true);
-    expect(screen.getByText("The core explanation above covers why this answer is correct.")).toBeTruthy();
+    expect(screen.getByText("1 separate explanation")).toBeTruthy();
     expect(screen.getByText("Alpha conflicts with the stated mechanism.")).toBeTruthy();
-    expect(screen.getByText("No reviewed explanation has been added for this choice yet.")).toBeTruthy();
+    expect(screen.getAllByText("No separate explanation")).toHaveLength(2);
+    expect(screen.getAllByText(/See the main explanation above/)).toHaveLength(2);
+    expect(screen.queryByText("Pending review")).toBeNull();
     expect(JSON.stringify(question)).toBe(before);
+  });
+
+  it("does not treat a main explanation as a separate choice rationale", () => {
+    const source = { ...question, choiceRationales: undefined };
+    const before = JSON.stringify(source);
+    const { container } = render(<ChoiceTeaching question={source} pickedKey="A" />);
+    expect(container.childElementCount).toBe(0);
+    expect(JSON.stringify(source)).toBe(before);
+  });
+
+  it("counts only nonempty explicit rationales for actual choices", () => {
+    const source = { ...question, choiceRationales: { A: "Alpha fails the stated condition.", B: "Beta meets the stated condition.", C: "  ", Z: "An old option is no longer present." } };
+    const before = JSON.stringify(source);
+    render(<ChoiceTeaching question={source} pickedKey="A" />);
+    expect(screen.getByText("2 separate explanations")).toBeTruthy();
+    expect(screen.getByText("Alpha fails the stated condition.")).toBeTruthy();
+    expect(screen.getByText("Beta meets the stated condition.")).toBeTruthy();
+    expect(screen.getAllByText("No separate explanation")).toHaveLength(1);
+    expect(screen.queryByText("An old option is no longer present.")).toBeNull();
+    expect(screen.queryByText("Pending review")).toBeNull();
+    expect(JSON.stringify(source)).toBe(before);
   });
 
   it("does not reveal teaching tied to an unresolved key", () => {

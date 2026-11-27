@@ -50,7 +50,7 @@ for (const width of [1440, 390]) test(`downloads and practices a complete term w
     await page.locator(`[data-course-id="${course.id}"]`).click();
     const collection = page.getByRole("region", { name: `${course.module} question collection` });
     await collection.getByRole("button", { name: "Download questions", exact: true }).click();
-    await expect(collection).toContainText("1 reviewed question is on this device.", { timeout: 30_000 });
+    await expect(collection).toContainText("1 ready question is on this device.", { timeout: 30_000 });
     await collection.getByRole("button", { name: "All courses", exact: true }).click();
   }
   const baseline = await savedState(page);

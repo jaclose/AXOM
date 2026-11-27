@@ -12,6 +12,7 @@ import { prepareReviewedImport, saveReviewedImport, type PreparedReviewedImport,
 import { hasReviewedImportInFlight, type ReviewedFilingScope } from "../questionImportFinalization";
 import type { ReviewedSourceRefreshFields, ReviewedSourceRefreshResult } from "../questionImportFinalization";
 import type { QuestionRecord } from "../questions";
+import { canonicalModuleKey } from "../course-engine/vocabulary";
 import type { ImportPackage, PackageIssue } from "./package";
 import { legacyQuestionFields } from "./legacyFields";
 import { packageToReviewedImport, type HeldQuestion, type PackageImportOptions, type WithheldAsset } from "./toReviewedImport";
@@ -75,7 +76,7 @@ const REFUSAL: Record<string, string> = {
 };
 
 type FilingScope = ReviewedFilingScope;
-type RefileRequest = { setId: string; target: FilingScope };
+type RefileRequest = { setId: string; target: FilingScope; preserveExistingScope?: boolean };
 type RefileResult = { ok: true } | { ok: false; message: string; rollbackFailures: string[] };
 type RefileCommit = NonNullable<ReviewedImportStore["commitReviewedRefiling"]>;
 
@@ -96,8 +97,17 @@ function questionScope(question: QuestionRecord): FilingScope | undefined {
 
 function refileFingerprint(requests: readonly RefileRequest[]): string {
   return JSON.stringify([...requests]
-    .map(({ setId, target }) => ({ setId, target }))
+    .map(({ setId, target, preserveExistingScope }) => ({ setId, target, preserveExistingScope }))
     .sort((left, right) => left.setId.localeCompare(right.setId)));
+}
+
+function compatibleSourceWeekScope(
+  scope: { module?: string; week?: number; courseId?: string } | undefined, target: FilingScope,
+): boolean {
+  if (scope?.module === undefined) return scope?.week === undefined && scope?.courseId === undefined;
+  return canonicalModuleKey(scope.module) === canonicalModuleKey(target.module)
+    && (scope.week === undefined || scope.week === target.week)
+    && scope.courseId === target.courseId;
 }
 
 /**
@@ -148,13 +158,13 @@ async function refileReusedSets(
   requests: readonly RefileRequest[],
 ): Promise<RefileResult> {
   if (!requests.length) return { ok: true };
-  const targets = new Map<string, FilingScope>();
+  const targets = new Map<string, RefileRequest>();
   for (const request of requests) {
     const prior = targets.get(request.setId);
-    if (prior && !sameScope(prior, request.target)) {
+    if (prior && !sameScope(prior.target, request.target)) {
       return { ok: false, message: "The same reused source set was assigned conflicting reviewed filings.", rollbackFailures: [] };
     }
-    targets.set(request.setId, request.target);
+    targets.set(request.setId, { ...request, preserveExistingScope: prior?.preserveExistingScope || request.preserveExistingScope });
   }
 
   const store = workspace.store();
@@ -162,7 +172,7 @@ async function refileReusedSets(
     return { ok: false, message: "This workspace cannot durably update reused source sets' reviewed filings.", rollbackFailures: [] };
   }
   const commit = store.commitReviewedRefiling;
-  const fingerprint = refileFingerprint([...targets].map(([setId, target]) => ({ setId, target })));
+  const fingerprint = refileFingerprint([...targets.values()]);
   return coordinateReviewedRefiling(commit, fingerprint, async () => {
     const before = workspace.library();
     const seenQuestionIds = new Set<string>();
@@ -171,12 +181,16 @@ async function refileReusedSets(
       questions: QuestionRecord[];
       target: FilingScope;
     }> = [];
-    for (const [setId, target] of targets) {
+    for (const { setId, target, preserveExistingScope } of targets.values()) {
       const set = before.questionSets.find((candidate) => candidate.id === setId);
       if (!set) return { ok: false, message: "A reused source set disappeared before its reviewed filing could be saved.", rollbackFailures: [] };
       const questions = set.questionIds.map((id) => before.questions.find((question) => question.id === id));
       if (questions.some((question) => !question)) {
         return { ok: false, message: "A reused source set has a missing question and no reviewed filing was changed.", rollbackFailures: [] };
+      }
+      if (preserveExistingScope && (!compatibleSourceWeekScope(set.scope, target)
+        || (questions as QuestionRecord[]).some(question => !compatibleSourceWeekScope(question, target)))) {
+        return { ok: false, message: "A saved source set or question has a different learner filing. Reconcile it before restoring the source-declared week; no filing was changed.", rollbackFailures: [] };
       }
       for (const question of questions as QuestionRecord[]) {
         if (seenQuestionIds.has(question.id)) {
@@ -480,8 +494,12 @@ export async function saveBank(pkg: ImportPackage, issues: readonly PackageIssue
         }
         refreshed = refresh.updated;
       }
-      const requiresRefiling = Boolean(saved.reused && saved.setId && options.reviewedFiling);
-      if (requiresRefiling) refileRequests.push({ setId: saved.setId!, target: section.request.scope! });
+      const requiresRefiling = Boolean(saved.reused && saved.setId && options.reviewedFiling && !options.preserveExistingFiling);
+      if (requiresRefiling) refileRequests.push({
+        setId: saved.setId!, target: section.request.scope!,
+        ...(options.preserveSourceDeclaredWeek && section.request.scope?.week !== undefined
+          ? { preserveExistingScope: true } : {}),
+      });
       if (saved.images.missing || saved.images.problems.length) result.errors.push(`${name}: some media could not be saved. ${saved.images.problems.join(" ")}`);
       pendingSections.push({
         ...(section.set !== undefined ? { set: section.set } : {}),

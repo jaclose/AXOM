@@ -57,6 +57,29 @@ afterEach(() => {
 });
 
 describe("QuestionDetailModal repair cards", () => {
+  it("keeps source pages and the authored explanation behind Check answer, while displaying the full supplied byline", async () => {
+    const bank = "Synthetic practice · Example Author · Original Practice Questions";
+    const entry: QuestionRecord = { ...question, bank, content: {
+      id: question.id, source: { filename: "Synthetic original.pdf", questionNumber: 7 },
+      stem: [{ type: "text", text: question.stem }],
+      choices: question.options.map(option => ({ id: option.key, label: option.key, blocks: [{ type: "text", text: option.text }] })),
+      correctAnswer: { labels: ["B"], evidence: "printed-key" },
+      explanation: [{ type: "text", text: question.explanation! }],
+      assets: [{ id: "page", questionId: question.id, filename: "source-page.png", mimeType: "image/png", role: "source_page" }],
+      provenance: { method: "authored" },
+    } };
+    const before = JSON.stringify(entry);
+    const view = render(<QuestionDetailModal question={entry} onClose={() => {}} />);
+    expect(screen.getByText(bank)).toBeTruthy();
+    expect(screen.queryByText(question.explanation!)).toBeNull();
+    expect(view.baseElement.querySelectorAll('[data-asset-role="source_page"]')).toHaveLength(0);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "AAlpha" }));
+    await user.click(screen.getByRole("button", { name: "Check answer" }));
+    expect(screen.getByText(question.explanation!)).toBeTruthy();
+    expect(view.baseElement.querySelectorAll('[data-asset-role="source_page"]')).toHaveLength(1);
+    expect(JSON.stringify(entry)).toBe(before);
+  });
   it("reveals a related diagram only after checking a keyed question", async () => {
     const user = userEvent.setup();
     render(<QuestionDetailModal question={{

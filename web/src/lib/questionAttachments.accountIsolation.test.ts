@@ -1,9 +1,9 @@
-import { indexedDB as fakeIndexedDb, IDBKeyRange, IDBObjectStore as FakeObjectStore } from "fake-indexeddb";
+import { indexedDB as fakeIndexedDb, IDBKeyRange, IDBDatabase as FakeDatabase, IDBObjectStore as FakeObjectStore } from "fake-indexeddb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ATTACHMENT_STORE_NAME, DB_NAME, DB_VERSION, ensureVaultStores } from "./localVault";
+import { ATTACHMENT_STORE_NAME, STORE_NAME, DB_NAME, DB_VERSION, ensureVaultStores } from "./localVault";
 import { initializeQuestionAttachmentScope, resetQuestionAttachmentScopeForTests, setQuestionAttachmentAccount } from "./questionAttachmentScope";
 import { adoptDeviceQuestionAttachments, collectQuestionAttachmentPayloads, deleteQuestionAttachmentBlobs,
-  getQuestionAttachmentBlob, listQuestionAttachmentBlobKeys, putQuestionAttachmentBlob,
+  getQuestionAttachmentBlob, listQuestionAttachmentBlobKeys, putQuestionAttachmentBlob, readLegacyLocalBinaryOwner,
   restoreQuestionAttachmentPayloads, runQuestionAttachmentMaintenance, type QuestionImageAttachment } from "./questionAttachments";
 
 const key = "identical-key";
@@ -13,7 +13,7 @@ const questions = [{ id: "same-question", attachments: [meta] }];
 const record = (text: string) => ({ blob: new Blob([text], { type: "image/png" }), mimeType: "image/png" as const,
   byteSize: text.length, questionId: "same-question", updatedAt: meta.updatedAt });
 
-async function raw<T>(run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+async function raw<T>(run: (store: IDBObjectStore) => IDBRequest<T>, storeName = ATTACHMENT_STORE_NAME): Promise<T> {
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => ensureVaultStores(req.result);
@@ -21,8 +21,8 @@ async function raw<T>(run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T>
     req.onerror = () => reject(req.error);
   });
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(ATTACHMENT_STORE_NAME, "readwrite");
-    const req = run(tx.objectStore(ATTACHMENT_STORE_NAME));
+    const tx = db.transaction(storeName, "readwrite");
+    const req = run(tx.objectStore(storeName));
     tx.oncomplete = () => { db.close(); resolve(req.result); };
     tx.onerror = () => { db.close(); reject(tx.error); };
   });
@@ -38,6 +38,122 @@ beforeEach(async () => {
   });
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+describe("permanent legacy image owner receipt", () => {
+  const ownerKey = "axom.attachments.legacy-owner.v1";
+  const quota = () => new DOMException("Synthetic state-store write failure", "QuotaExceededError");
+
+  function blockStateWrites() {
+    const transaction = FakeDatabase.prototype.transaction;
+    return vi.spyOn(FakeDatabase.prototype, "transaction").mockImplementation(function (this: IDBDatabase, stores, mode, options) {
+      if (stores === STORE_NAME && mode === "readwrite") throw quota();
+      return transaction.call(this, stores, mode, options);
+    });
+  }
+
+  it("exports readable legacy bytes with an existing receipt when state-store writes fail", async () => {
+    await raw(store => store.put(record("A"), key));
+    await raw(store => store.put({ owner: "account:A" }, ownerKey), STORE_NAME);
+    initializeQuestionAttachmentScope("A", "A");
+    const transaction = blockStateWrites();
+    expect(await readLegacyLocalBinaryOwner()).toBe("account:A");
+    expect(await collectQuestionAttachmentPayloads(questions, { localOnly: true }))
+      .toEqual({ payloads: [{ ...meta, questionId: "same-question", base64: btoa("A") }], missingBlobKeys: [] });
+    expect(transaction.mock.calls.some(([stores, mode]) => stores === STORE_NAME && mode === "readwrite")).toBe(false);
+    transaction.mockRestore();
+    expect(await raw(store => store.get(ownerKey), STORE_NAME)).toEqual({ owner: "account:A" });
+  });
+
+  it.each([{ owner: "account:B" }, { owner: null }, {}])("keeps a different or unknown existing owner immutable: %j", async receipt => {
+    await raw(store => store.put(record("legacy"), key));
+    await raw(store => store.put(receipt, ownerKey), STORE_NAME);
+    initializeQuestionAttachmentScope("A", "A");
+    const transaction = blockStateWrites();
+    expect(await getQuestionAttachmentBlob(key, { localOnly: true })).toBeUndefined();
+    expect(transaction.mock.calls.some(([stores, mode]) => stores === STORE_NAME && mode === "readwrite")).toBe(false);
+    transaction.mockRestore();
+    expect(await raw(store => store.get(ownerKey), STORE_NAME)).toEqual(receipt);
+    expect(await (await raw(store => store.get(key))).blob.text()).toBe("legacy");
+  });
+
+  it("persists unknown ownership once instead of claiming it for a later signed-in account", async () => {
+    await raw(store => store.put(record("legacy"), key));
+    initializeQuestionAttachmentScope("A");
+    expect(await readLegacyLocalBinaryOwner()).toBeNull();
+    expect(await raw(store => store.get(ownerKey), STORE_NAME)).toEqual({ owner: null });
+    resetQuestionAttachmentScopeForTests();
+    initializeQuestionAttachmentScope("B", "B");
+    expect(await getQuestionAttachmentBlob(key, { localOnly: true })).toBeUndefined();
+    expect(await raw(store => store.get(ownerKey), STORE_NAME)).toEqual({ owner: null });
+  });
+
+  it("does not trust the boot hint when a missing receipt cannot be committed", async () => {
+    await raw(store => store.put(record("A"), key));
+    initializeQuestionAttachmentScope("A", "A");
+    const transaction = blockStateWrites();
+    await expect(getQuestionAttachmentBlob(key, { localOnly: true })).rejects.toMatchObject({ name: "QuotaExceededError" });
+    transaction.mockRestore();
+    expect(await raw(store => store.get(ownerKey), STORE_NAME)).toBeUndefined();
+    expect(await (await raw(store => store.get(key))).blob.text()).toBe("A");
+  });
+
+  it("does not grant ownership when the initial receipt transaction aborts after insertion", async () => {
+    await raw(store => store.put(record("A"), key));
+    initializeQuestionAttachmentScope("A", "A");
+    const add = FakeObjectStore.prototype.add;
+    const spy = vi.spyOn(FakeObjectStore.prototype, "add").mockImplementation(function (this: IDBObjectStore, value, candidate) {
+      const request = add.call(this, value, candidate);
+      if (this.name === STORE_NAME && candidate === ownerKey) this.transaction.abort();
+      return request;
+    });
+    await expect(getQuestionAttachmentBlob(key, { localOnly: true })).rejects.toThrow();
+    spy.mockRestore();
+    expect(await raw(store => store.get(ownerKey), STORE_NAME)).toBeUndefined();
+    expect(await (await raw(store => store.get(key))).blob.text()).toBe("A");
+  });
+
+  it.each(["account:B", null])("rechecks ownership inside the first-write transaction after a competing receipt: %s", async owner => {
+    await raw(store => store.put(record("A"), key));
+    initializeQuestionAttachmentScope("A", "A");
+    const transaction = FakeDatabase.prototype.transaction;
+    let competing = false;
+    const spy = vi.spyOn(FakeDatabase.prototype, "transaction").mockImplementation(function (this: IDBDatabase, stores, mode, options) {
+      if (!competing && stores === STORE_NAME && mode === "readwrite") {
+        competing = true;
+        const winner = transaction.call(this, STORE_NAME, "readwrite");
+        winner.objectStore(STORE_NAME).add({ owner }, ownerKey);
+      }
+      return transaction.call(this, stores, mode, options);
+    });
+    expect(await getQuestionAttachmentBlob(key, { localOnly: true })).toBeUndefined();
+    expect(competing).toBe(true);
+    spy.mockRestore();
+    expect(await raw(store => store.get(ownerKey), STORE_NAME)).toEqual({ owner });
+    expect(await (await raw(store => store.get(key))).blob.text()).toBe("A");
+  });
+
+  it("allows simultaneous first reads to share one committed ownership receipt", async () => {
+    initializeQuestionAttachmentScope("A", "A");
+    const add = vi.spyOn(FakeObjectStore.prototype, "add");
+    expect(await Promise.all([readLegacyLocalBinaryOwner(), readLegacyLocalBinaryOwner()])).toEqual(["account:A", "account:A"]);
+    expect(add.mock.calls.filter(([, candidate]) => candidate === ownerKey)).toHaveLength(1);
+    expect(await raw(store => store.get(ownerKey), STORE_NAME)).toEqual({ owner: "account:A" });
+  });
+
+  it("fails closed when the read-only receipt lookup fails instead of using its boot hint", async () => {
+    await raw(store => store.put(record("A"), key));
+    initializeQuestionAttachmentScope("A", "A");
+    const transaction = FakeDatabase.prototype.transaction;
+    const spy = vi.spyOn(FakeDatabase.prototype, "transaction").mockImplementation(function (this: IDBDatabase, stores, mode, options) {
+      if (stores === STORE_NAME && mode === "readonly") throw new DOMException("Synthetic receipt read failure", "UnknownError");
+      return transaction.call(this, stores, mode, options);
+    });
+    await expect(getQuestionAttachmentBlob(key, { localOnly: true })).rejects.toMatchObject({ name: "UnknownError" });
+    expect(spy.mock.calls.some(([stores, mode]) => stores === STORE_NAME && mode === "readwrite")).toBe(false);
+    spy.mockRestore();
+    expect(await raw(store => store.get(ownerKey), STORE_NAME)).toBeUndefined();
+  });
+});
 
 describe("account-owned attachment bytes", () => {
   it("recovers a blocked v4 upgrade without losing legacy bytes or leaving the late connection open", async () => {

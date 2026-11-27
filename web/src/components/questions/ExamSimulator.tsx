@@ -1,4 +1,5 @@
 import { QuestionContent, QuestionSupportingContent } from "./QuestionContent";
+import { QuestionSourceIdentity } from "./QuestionSourceIdentity";
 import { isAssetVisible } from "../../lib/question-content/visibility";
 // ===========================================================================
 // Exam simulator — practice inside the interface you will actually sit:
@@ -206,6 +207,7 @@ function ClassicExam({ exam, skin, mode, onClose, unreviewedCount = 0, community
         <section className="exam-sim-item" data-exam-scroll aria-labelledby="sim-item-heading"
           data-study-question data-question-id={question.id}>
           <h2 id="sim-item-heading" className="sr-only">Item {index + 1} of {pool.length}</h2>
+          <QuestionSourceIdentity question={question} />
           <div className={`sim-stem ${tool === "highlight" ? "tool-highlight" : ""} ${tool === "erase" ? "tool-erase" : ""}`} data-study-part="stem">
             <div aria-label={question.content ? "Question stem" : undefined} tabIndex={question.content ? -1 : undefined} ref={question.content ? exam.stemRef : undefined}><QuestionContent question={question} part="stem"
               annotations={exam.annotations} onSelection={exam.onSelection} onDeleteAnnotation={exam.onDeleteAnnotation} eraseMode={tool === "erase"} fallback={<AnnotatedQuestionText

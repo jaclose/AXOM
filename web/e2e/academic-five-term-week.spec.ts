@@ -82,7 +82,7 @@ for (const width of [1440, 390]) {
     await catalog.locator(`[data-course-id="${courses[3].id}"]`).click();
     const unrelated = page.getByRole("region", { name: "FTCM question collection" });
     await unrelated.getByRole("button", { name: "Download questions", exact: true }).click();
-    await expect(unrelated).toContainText("1 reviewed question is on this device.");
+    await expect(unrelated).toContainText("1 ready question is on this device.");
     await unrelated.getByRole("button", { name: "All courses", exact: true }).click();
 
     await catalog.locator(`[data-course-id="${planned.id}"]`).click();
@@ -145,13 +145,13 @@ for (const width of [1440, 390]) {
     await catalog.locator(`[data-course-id="${other.id}"]`).click();
     const unrelated = page.getByRole("region", { name: "FTM 1 question collection" });
     await unrelated.getByRole("button", { name: "Download questions", exact: true }).click();
-    await expect(unrelated).toContainText("1 reviewed question is on this device.");
+    await expect(unrelated).toContainText("1 ready question is on this device.");
     await unrelated.getByRole("button", { name: "All courses", exact: true }).click();
     await catalog.locator(`[data-course-id="${sourceOnly.id}"]`).click();
     const collection = page.getByRole("region", { name: "NMI question collection" });
     await expect(collection).toBeVisible();
     await collection.getByRole("button", { name: "Download questions", exact: true }).click();
-    await expect(collection).toContainText("3 reviewed questions are on this device.");
+    await expect(collection).toContainText("3 ready questions are on this device.");
     const downloaded = await courseState(page);
     expect(downloaded.questions).toHaveLength(4);
     expect(downloaded.questions.every(question => !question.needsReview)).toBe(true);
@@ -160,7 +160,7 @@ for (const width of [1440, 390]) {
     await expect(collection.getByText("Week 1", { exact: true })).toBeVisible();
     await expect(collection.getByText("Week 2", { exact: true })).toBeVisible();
     await expect(collection.getByText("Week 3", { exact: true })).toHaveCount(0);
-    await expect(collection).toContainText("2 awaiting review");
+    await expect(collection).toContainText("2 held from practice");
     await expect(collection.getByRole("button", { name: "Quiz week 3", exact: true })).toHaveCount(0);
     await expect(collection.getByRole("button", { name: "Create Quiz", exact: true })).toBeVisible();
     expect(await collection.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);

@@ -238,7 +238,10 @@ describe("private cloud content and media", () => {
     dispose = installCloudMediaCache("account-a", () => state);
     const restored = await getQuestionAttachmentBlob(blobKey);
     expect(await restored!.blob.arrayBuffer()).toEqual(await blob.arrayBuffer());
-    expect(restored!.questionId).toBe("q2");
+    // A shared immutable image retains the first reference at the oldest
+    // timestamp; each question keeps its own attachment identity below.
+    expect(restored!.questionId).toBe("q1");
+    expect(restored!.updatedAt).toBe(first.updatedAt);
     expect(state.questions.map(question => question.attachments?.[0])).toEqual([
       expect.objectContaining({ id: "source-page-one", assetId: "source-page-one", blobKey }),
       expect.objectContaining({ id: "source-page-two", assetId: "source-page-two", blobKey }),

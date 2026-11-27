@@ -1,4 +1,4 @@
-import { indexedDB as fakeIndexedDb, IDBKeyRange } from "fake-indexeddb";
+import { indexedDB as fakeIndexedDb, IDBKeyRange, IDBObjectStore } from "fake-indexeddb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { STORAGE_KEYS } from "./brand";
 import {
@@ -9,6 +9,8 @@ import {
   resetLocalBackupRuntimeForTests,
 } from "./localBackup";
 import { BACKUP_STORE_NAME, DB_NAME, DB_VERSION, localVaultStorage, STORE_NAME } from "./localVault";
+import { makeSeed } from "./seed";
+import { inspectLocalWorkspaceBackup } from "./storageRecovery";
 
 const values = new Map<string, string>();
 const storage = {
@@ -30,6 +32,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -269,6 +272,142 @@ describe("automatic local migration backups", () => {
     const raw = localStorage.getItem(key!);
     expect(raw).toContain("fallback");
     expect((await readLocalBackup(key!))?.oldSchemaVersion).toBe(31);
+  });
+
+  it("stores and verifies a compressed fallback when the plain snapshot exceeds the remaining per-write capacity", async () => {
+    const failure = new DOMException("Synthetic vault quota", "QuotaExceededError");
+    vi.stubGlobal("indexedDB", { open: () => { throw failure; } });
+    const persisted = JSON.stringify({ state: { profile: { userId: "fallback-owner" },
+      questions: [{ id: "q1", notes: "Preserve Greek αβ and Arabic شرح. ".repeat(10_000), attempts: [{ answerKey: "B" }] }] } });
+    values.set(STORAGE_KEYS.persistedState, persisted);
+    const writes = vi.spyOn(storage, "setItem").mockImplementation((key, value) => {
+      if (key.startsWith(STORAGE_KEYS.localBackupPrefix) && value.length > 32_768)
+        throw new DOMException("Synthetic browser quota", "QuotaExceededError");
+      values.set(key, value);
+    });
+
+    const key = (await createLocalBackup(34))!;
+    const raw = storage.getItem(key)!;
+    expect(JSON.parse(raw)).toMatchObject({ format: "axom-local-backup-packed", version: 1, key, oldSchemaVersion: 34 });
+    expect(raw.length).toBeLessThan(32_768);
+    expect(writes.mock.calls.filter(([name]) => name.startsWith(STORAGE_KEYS.localBackupPrefix))).toHaveLength(1);
+    expect((await readLocalBackup(key))?.localStorage[STORAGE_KEYS.persistedState]).toBe(persisted);
+    resetLocalBackupRuntimeForTests();
+    expect(listLocalBackups()).toEqual([expect.objectContaining({ key, oldSchemaVersion: 34, appVersion: expect.any(String) })]);
+    expect((await readLocalBackup(key))?.localStorage[STORAGE_KEYS.persistedState]).toBe(persisted);
+  });
+
+  it("opens a compressed fallback through ordinary workspace recovery after runtime reload", async () => {
+    vi.stubGlobal("indexedDB", undefined);
+    const state = makeSeed();
+    state.profile = { ...state.profile, userId: "fallback-owner", name: "Preserved learner" };
+    state.documents = [{ id: "source", title: "Synthetic source", fileName: "source.txt", fileType: "text",
+      uploadedAt: "2026-11-21T00:00:00.000Z", rawText: "Preserved source text. ".repeat(10_000), sizeBytes: 220_000,
+      tags: [], linkedQuestionSetIds: [], libraryOnly: true }];
+    values.set(STORAGE_KEYS.persistedState, JSON.stringify({ state, version: state.schemaVersion }));
+    const key = (await createLocalBackup(state.schemaVersion))!;
+    expect(JSON.parse(storage.getItem(key)!)).toMatchObject({ format: "axom-local-backup-packed" });
+    resetLocalBackupRuntimeForTests();
+    const inspection = await inspectLocalWorkspaceBackup(key);
+    expect(inspection?.state.profile).toMatchObject({ userId: "fallback-owner", name: "Preserved learner" });
+    expect(inspection?.state.documents[0].rawText).toBe(state.documents[0].rawText);
+  });
+
+  it.each(["missing", "truncated"])("refuses an unverified %s fallback write without pruning an older recovery copy", async mode => {
+    vi.stubGlobal("indexedDB", undefined);
+    values.set(STORAGE_KEYS.persistedState, JSON.stringify({ state: { questions: [{ id: "older" }] } }));
+    const older = (await createLocalBackup(33))!;
+    const original = storage.getItem(older);
+    values.set(STORAGE_KEYS.persistedState, JSON.stringify({ state: { questions: [{ id: "new", notes: "A note. ".repeat(10_000) }] } }));
+    vi.spyOn(storage, "setItem").mockImplementation((key, value) => {
+      if (key.startsWith(STORAGE_KEYS.localBackupPrefix)) {
+        if (mode === "truncated") values.set(key, value.slice(0, -1));
+      } else values.set(key, value);
+    });
+    await expect(createLocalBackup(34, 1)).rejects.toThrow("could not be verified after saving");
+    expect(storage.getItem(older)).toBe(original);
+    expect((await readLocalBackup(older))?.oldSchemaVersion).toBe(33);
+  });
+
+  it.each(["version", "identity", "length", "hash", "payload", "summary"])("rejects a compressed fallback with changed %s", async field => {
+    vi.stubGlobal("indexedDB", undefined);
+    values.set(STORAGE_KEYS.persistedState, JSON.stringify({ state: { questions: [{ id: "q1", notes: "Exact text. ".repeat(10_000) }] } }));
+    const key = (await createLocalBackup(34))!;
+    const packed = JSON.parse(storage.getItem(key)!);
+    if (field === "version") packed.version = 2;
+    if (field === "identity") packed.key = key + "-different";
+    if (field === "length") packed.expandedBytes += 1;
+    if (field === "hash") packed.sha256 = "0".repeat(64);
+    if (field === "payload") packed.payload = packed.payload.slice(0, -8);
+    if (field === "summary") packed.oldSchemaVersion += 1;
+    values.set(key, JSON.stringify(packed));
+    await expect(readLocalBackup(key)).resolves.toBeNull();
+  });
+
+  it.each(["CompressionStream", "DecompressionStream"])("retains the plain fallback when %s is unavailable", async api => {
+    vi.stubGlobal("indexedDB", undefined);
+    vi.stubGlobal(api, undefined);
+    const persisted = JSON.stringify({ state: { questions: [{ id: "legacy", notes: "Keep text. ".repeat(1_000) }] } });
+    values.set(STORAGE_KEYS.persistedState, persisted);
+    const key = (await createLocalBackup(34))!;
+    expect(JSON.parse(storage.getItem(key)!)).toHaveProperty("localStorage");
+    expect((await readLocalBackup(key))?.localStorage[STORAGE_KEYS.persistedState]).toBe(persisted);
+  });
+
+  it.each(["compression", "checksum"])("keeps a verified plain fallback available when %s cannot run", async api => {
+    vi.stubGlobal("indexedDB", undefined);
+    if (api === "compression") vi.stubGlobal("CompressionStream", class { constructor() { throw new Error("Unsupported compression"); } });
+    else vi.spyOn(crypto.subtle, "digest").mockRejectedValue(new Error("Checksum unavailable"));
+    const persisted = JSON.stringify({ state: { questions: [{ id: "legacy", notes: "Keep text. ".repeat(1_000) }] } });
+    values.set(STORAGE_KEYS.persistedState, persisted);
+    const key = (await createLocalBackup(34))!;
+    expect(JSON.parse(storage.getItem(key)!)).toHaveProperty("localStorage");
+    expect((await readLocalBackup(key))?.localStorage[STORAGE_KEYS.persistedState]).toBe(persisted);
+  });
+
+  it("migrates a compressed fallback only after its exact IndexedDB payload is readable", async () => {
+    vi.stubGlobal("indexedDB", undefined);
+    const persisted = JSON.stringify({ state: { questions: [{ id: "local", notes: "Source evidence. ".repeat(10_000) }] } });
+    values.set(STORAGE_KEYS.persistedState, persisted);
+    const key = (await createLocalBackup(33))!;
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    await createLocalBackup(34);
+    expect(JSON.parse(storage.getItem(key)!)).toMatchObject({ storage: "indexeddb" });
+    resetLocalBackupRuntimeForTests();
+    expect((await readLocalBackup(key))?.localStorage[STORAGE_KEYS.persistedState]).toBe(persisted);
+  });
+
+  it("preserves the self-contained fallback when a later migration cannot verify its vault readback", async () => {
+    vi.stubGlobal("indexedDB", undefined);
+    const persisted = JSON.stringify({ state: { questions: [{ id: "local", notes: "Source evidence. ".repeat(10_000) }] } });
+    values.set(STORAGE_KEYS.persistedState, persisted);
+    const key = (await createLocalBackup(33))!;
+    const original = storage.getItem(key);
+    vi.stubGlobal("indexedDB", fakeIndexedDb);
+    const get = IDBObjectStore.prototype.get;
+    const failReadback = vi.spyOn(IDBObjectStore.prototype, "get").mockImplementation(function (this: IDBObjectStore, name) {
+      const result = get.call(this, name);
+      if (this.name === BACKUP_STORE_NAME && name === key) this.transaction.abort();
+      return result;
+    });
+    await createLocalBackup(34);
+    failReadback.mockRestore();
+    expect(storage.getItem(key)).toBe(original);
+    resetLocalBackupRuntimeForTests();
+    expect((await readLocalBackup(key))?.localStorage[STORAGE_KEYS.persistedState]).toBe(persisted);
+  });
+
+  it("keeps the existing fallback retention limit for both plain and compressed snapshots", async () => {
+    vi.stubGlobal("indexedDB", undefined);
+    values.set(STORAGE_KEYS.persistedState, JSON.stringify({ state: { questions: [{ id: "plain" }] } }));
+    const plain = (await createLocalBackup(32, 2))!;
+    values.set(STORAGE_KEYS.persistedState, JSON.stringify({ state: { questions: [{ id: "packed", notes: "Preserved text. ".repeat(10_000) }] } }));
+    const first = (await createLocalBackup(33, 2))!;
+    const second = (await createLocalBackup(34, 2))!;
+    expect(storage.getItem(plain)).toBeNull();
+    expect((await readLocalBackup(first))?.oldSchemaVersion).toBe(33);
+    expect((await readLocalBackup(second))?.oldSchemaVersion).toBe(34);
+    expect(listLocalBackups().map(item => item.key)).toEqual([second, first]);
   });
 
   it("retains both storage failures when a safety backup cannot be saved", async () => {

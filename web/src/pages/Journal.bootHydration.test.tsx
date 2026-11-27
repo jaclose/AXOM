@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAccount, resumeLinkedWorkspaceAfterHydration } from "../lib/account/accountStore";
 import { DEFAULT_JOURNAL_NOTEBOOK } from "../lib/journalNotebook";
 import { flushLocalVaultWrites, localVaultStorage } from "../lib/localVault";
-import { dayKey } from "../lib/scoring";
 import { makeSeed } from "../lib/seed";
 import { useStore } from "../lib/store";
 import { read, write } from "../lib/sync/syncMetadata";
@@ -22,7 +21,9 @@ beforeEach(async () => {
   useStore.setState({
     ...seed, questions: [], documents: [], dayPlans: [], tasks: [], logs: [],
     profile: { ...seed.profile, journalNotebook: { ...DEFAULT_JOURNAL_NOTEBOOK, setupCompleted: true } },
-    journal: [{ id: "persisted-boot-page", date: `${dayKey()}T12:00:00`, today: "A saved day", tomorrow: "", blockers: "",
+    // Journal opens the workspace's active calendar day. The legacy shifted
+    // study-day helper instead points to yesterday before 04:00 on a CI runner.
+    journal: [{ id: "persisted-boot-page", date: `${seed.activeDayKey}T12:00:00`, today: "A saved day", tomorrow: "", blockers: "",
       energy: "Medium", rating: "Useful", freeWriting: "Private writing loaded from the persisted vault.", notebookStatus: "draft" }],
   });
   await flushLocalVaultWrites();

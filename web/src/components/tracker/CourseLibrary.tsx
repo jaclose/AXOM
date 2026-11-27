@@ -31,6 +31,12 @@ function courseCoverTitle(module: string): string {
 }
 const courseCount = (count: number): string => `${count} ${count === 1 ? "course" : "courses"}`;
 
+function academicCourseFacts(course: AcademicCourse): string {
+  if (!course.ready_questions && !course.review_questions) return "Course tracker";
+  return `Question collection · ${course.ready_questions} ready ${course.ready_questions === 1 ? "question" : "questions"}`
+    + (course.review_questions ? ` · ${course.review_questions} awaiting review` : "");
+}
+
 export function CourseLibrary({ onClose, onTemplate, onOpen, onCreate }: {
   onClose: () => void; onTemplate: (book?: CourseBook) => void;
   onOpen: (book: CourseBook) => void; onCreate: () => void;
@@ -126,9 +132,9 @@ export function CourseLibrary({ onClose, onTemplate, onOpen, onCreate }: {
           courses={connected} disabled={Boolean(downloadingTerm)}
           onBusyChange={busy => setDownloadingTerm(current => busy ? `${accountId}:${sectionTerm}` : current === `${accountId}:${sectionTerm}` ? undefined : current)} />}
         <div className="course-collection">
-        {connectedShown.filter(course => course.term === sectionTerm).sort(compareCourses).map(course => <button key={course.id} data-course-id={course.id} className="course-card" onClick={() => setSelected(`remote:${course.id}`)} aria-label={`Preview ${course.module}, ${course.academic_term || course.term}`}>
+        {connectedShown.filter(course => course.term === sectionTerm).sort(compareCourses).map(course => <button key={course.id} data-course-id={course.id} className="course-card" onClick={() => setSelected(`remote:${course.id}`)} aria-label={`Preview ${course.module}, ${course.academic_term || course.term}`} aria-describedby={`academic-course-facts-${course.id}`}>
           <div className="course-card-cover" aria-hidden="true"><span>{course.term}</span><strong>{courseCoverTitle(course.module)}</strong><BookOpen size={28} strokeWidth={1} /></div>
-          <div className="course-card-copy"><span className="course-card-context">{course.academic_term || course.term}{course.cohort ? ` · ${course.cohort}` : ""}</span><h3>{course.module}</h3><p>{course.title}</p><span className="course-card-facts">{course.ready_questions} ready questions{course.review_questions ? ` · ${course.review_questions} awaiting review` : ""}</span><span className="course-card-state">{course.owned ? "Your upload" : "Academic collection"} · {course.visibility === "private" ? "Private" : course.review_status === "approved" ? "Reviewed" : "Sharing review pending"}</span></div><ArrowUpRight size={ICON_SIZE.control} aria-hidden="true" />
+          <div className="course-card-copy"><span className="course-card-context">{course.academic_term || course.term}{course.cohort ? ` · ${course.cohort}` : ""}</span><h3>{course.module}</h3><p>{course.title}</p><span id={`academic-course-facts-${course.id}`} className="course-card-facts">{academicCourseFacts(course)}</span><span className="course-card-state">{course.owned ? "Your upload" : "Academic collection"} · {course.visibility === "private" ? "Private" : course.review_status === "approved" ? "Reviewed" : "Sharing review pending"}</span></div><ArrowUpRight size={ICON_SIZE.control} aria-hidden="true" />
         </button>)}
         {shownCanonical.filter(book => book.term === sectionTerm).map(renderBookCard)}</div></section>)}
       {otherLocal.length > 0 && <section className="course-term-section" aria-labelledby="course-other-local">

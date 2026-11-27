@@ -100,6 +100,25 @@ A role the table does not name is hidden everywhere. A reference image is hidden
 answering because an imported answer sheet could be filed as one; trusted lab values are
 a separate exam tool, not an asset.
 
+### Source identity and answer review
+
+Question detail, tutor, simulator, Examplify and completed-session review display the
+supplied bank/byline, source filename and available source question/page identifiers.
+The interface wraps the supplied text rather than inferring an author or shortening
+the source identity. Explanation figures and source slides retain their distinct
+labels and the visibility rules above. A completed session's Slides view keeps full
+source pages available without revealing them during a live question.
+
+Enlarged figures use the shared zoom/pan viewer and retain any authored crop. Its
+portal stays inside the original fullscreen container for that viewing session;
+keyboard events, including Escape, stay within the dialog instead of answering or
+closing the quiz behind it. The default modal behavior is unchanged elsewhere.
+
+Choice-by-choice teaching counts only nonblank entries in `choiceRationales`. A
+main explanation or authored option table is never inferred into that separate
+field's coverage. Missing separate entries are labelled neutrally and do not imply
+that an otherwise complete source explanation is pending review.
+
 ## The model
 
 - **Blocks:** `text`, `rich_text`, `image`, `table`, `equation`, `divider`, `callout`.

@@ -205,18 +205,31 @@ function assertScope(scope: QuestionAttachmentScope, accountId?: string): void {
 export async function readLegacyLocalBinaryOwner(): Promise<string | null> {
   const hint = legacyQuestionAttachmentOwnerHint();
   const db = await openAttachmentDb();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readwrite");
+  const readOwner = (createIfMissing: boolean): Promise<{ exists: boolean; owner: string | null }> => new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, createIfMissing ? "readwrite" : "readonly");
     const store = tx.objectStore(STORE_NAME);
     const request = store.get(LEGACY_OWNER_KEY);
+    let exists = false;
     let owner: string | null = null;
     request.onsuccess = () => {
-      if (request.result === undefined) store.add({ owner: hint }, LEGACY_OWNER_KEY);
-      owner = request.result === undefined ? hint : request.result?.owner ?? null;
+      exists = request.result !== undefined;
+      owner = request.result?.owner ?? null;
+      if (createIfMissing && !exists) {
+        store.add({ owner: hint }, LEGACY_OWNER_KEY);
+        owner = hint;
+      }
     };
-    tx.oncomplete = () => { db.close(); resolve(owner); };
-    tx.onerror = tx.onabort = () => { db.close(); reject(tx.error ?? new Error("Image ownership could not be verified.")); };
+    tx.oncomplete = () => resolve({ exists, owner });
+    tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("Image ownership could not be verified."));
   });
+  try {
+    // Reading a permanent receipt must not depend on storage accepting writes.
+    const existing = await readOwner(false);
+    if (existing.exists) return existing.owner;
+    // Another tab may have recorded an owner (including null) since that read.
+    // Recheck and create atomically; a failed write never grants the boot hint.
+    return (await readOwner(true)).owner;
+  } finally { db.close(); }
 }
 
 export async function putQuestionAttachmentBlob(blobKey: string, record: QuestionAttachmentBlobRecord, options: AttachmentReadOptions = {}): Promise<IDBValidKey> {

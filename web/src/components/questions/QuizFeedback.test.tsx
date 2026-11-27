@@ -2,6 +2,8 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { QuestionRecord } from "../../lib/questions";
+import { blocksToPlainText, type QuestionBlock } from "../../lib/question-content/blocks";
+import { QuestionContent } from "./QuestionContent";
 import { QuestionProvenance, QuizFeedback } from "./QuizFeedback";
 
 const stem = "A 36-year-old man with tuberculosis exposure has a positive PPD skin test.";
@@ -33,6 +35,29 @@ const question: QuestionRecord = {
 afterEach(cleanup);
 
 describe("QuizFeedback", () => {
+  it("preserves an authored choice table without a misleading duplicate rationale count", () => {
+    const explanations: QuestionBlock[] = [{ type: "table", headers: ["Choice", "Why it fits or fails"],
+      rows: [["A", "Alpha fails the first condition."], ["B", "Beta meets both stated conditions."],
+        ["C", "Gamma fails the second condition."], ["D", "Delta describes a different mechanism."], ["E", "Epsilon reverses the relationship."]] }];
+    const source: QuestionRecord = { ...question,
+      options: ["Alpha", "Beta", "Gamma", "Delta", "Epsilon"].map((text, index) => ({ key: String.fromCharCode(65 + index), text })),
+      explanation: blocksToPlainText(explanations), choiceRationales: undefined,
+      content: { id: "authored-table", source: { filename: "Original practice.pdf" },
+        stem: [{ type: "text", text: question.stem }], choices: [], explanation: explanations, assets: [],
+        correctAnswer: { labels: ["B"], evidence: "printed-key" }, provenance: { method: "authored" } } };
+    const before = JSON.stringify(source);
+    render(<QuizFeedback question={source} pickedKey="A" explanationContent={<QuestionContent
+      question={source} part="explanation" mode="answered" fallback={source.explanation} />} />);
+    expect(screen.getByRole("table")).toBeTruthy();
+    for (const row of explanations[0].type === "table" ? explanations[0].rows : []) {
+      expect(screen.getByRole("cell", { name: row[1] })).toBeTruthy();
+    }
+    expect(screen.queryByRole("heading", { name: "Why each option fits or fails" })).toBeNull();
+    expect(screen.queryByText("1 of 5 explained")).toBeNull();
+    expect(screen.queryByText("Pending review")).toBeNull();
+    expect(JSON.stringify(source)).toBe(before);
+  });
+
   it("shows preserved canonical provenance for earlier imports without rewriting the question", () => {
     const saved: QuestionRecord = { ...question, sourcePage: undefined, citation: undefined, extraction: undefined,
       content: { id: "synthetic-source", source: { filename: "Synthetic source.pdf", page: 1,

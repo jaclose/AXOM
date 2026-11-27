@@ -7,7 +7,7 @@ import {
   getVaultWriteCheckpoint,
   localVaultStorage,
   replaceLocalVaultItem,
-  resolveVaultSnapshotRecord,
+  resolveWorkspaceSnapshotRecord,
 } from "./localVault";
 import { SCHEMA_VERSION } from "./seed";
 import type { NoctyriumState } from "./types";
@@ -33,7 +33,7 @@ export async function inspectLocalWorkspaceBackup(
   if (!snapshot) return null;
 
   try {
-    const rawWorkspace = findWorkspaceRecord(snapshot.indexedDb?.records, snapshot.localStorage);
+    const rawWorkspace = await resolveWorkspaceSnapshotRecord(snapshot.indexedDb?.records, snapshot.localStorage, STORAGE_KEYS.persistedState);
     if (!rawWorkspace) return null;
     const decoded = JSON.parse(rawWorkspace) as unknown;
     const workspace = unwrapPersistedWorkspace(decoded);
@@ -71,25 +71,6 @@ export async function restoreLocalWorkspaceBackup(
     throw new Error("AXOM could not verify the restored workspace in the local vault.");
   }
   return inspection;
-}
-
-function findWorkspaceRecord(
-  indexedDb: Record<string, string> | undefined,
-  local: Record<string, string>,
-): string | null {
-  for (const records of [indexedDb, local]) {
-    if (!records) continue;
-    const primary = resolveVaultSnapshotRecord(records, STORAGE_KEYS.persistedState);
-    if (primary) return primary;
-    const scopedKey = Object.keys(records)
-      .sort()
-      .find((key) => key.startsWith(`${STORAGE_KEYS.persistedState}:user:`));
-    if (scopedKey) {
-      const scoped = resolveVaultSnapshotRecord(records, scopedKey);
-      if (scoped) return scoped;
-    }
-  }
-  return null;
 }
 
 function unwrapPersistedWorkspace(value: unknown): Record<string, unknown> | null {

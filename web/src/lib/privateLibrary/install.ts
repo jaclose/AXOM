@@ -3,7 +3,7 @@ import { prepareCourseTemplate } from "../course-engine/templateLibrary";
 import { canonicalModuleKey } from "../course-engine/vocabulary";
 import { saveBank } from "../question-content/bankImport";
 import { assessBank } from "../question-content/assessBank";
-import type { PackageImportOptions } from "../question-content/toReviewedImport";
+import { uniformSourceDeclaredWeek, type PackageImportOptions } from "../question-content/toReviewedImport";
 import { questionScope, type PackageIssue, type PackageQuestion } from "../question-content/package";
 import type { QuestionBlock, TableBlock } from "../question-content/blocks";
 import { readManifest, readQuestionsFile } from "../question-content/packageJson";
@@ -21,6 +21,22 @@ import { bankReviewDocumentId, preparedBankContains } from "./reviewIdentity";
 
 export type LibraryReader = (path: string) => Promise<Uint8Array>;
 const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+function installationFailureReason(cause: unknown, fallback: string): string {
+  try {
+    const message = cause instanceof Error ? cause.message : undefined;
+    if (typeof message === "string" && message.trim()) return message;
+    // Browser storage errors may have an empty message or come from another
+    // realm. Keep a bounded error name, never stringify arbitrary thrown data.
+    const name = cause && typeof cause === "object" && "name" in cause ? cause.name : undefined;
+    return typeof name === "string" && name.length <= 64 && name !== "Error"
+      && /^[A-Za-z][A-Za-z0-9]*(?:Error|Exception)$/.test(name)
+      ? `${fallback} Error type: ${name}.`
+      : fallback;
+  } catch {
+    // A thrown value can itself have throwing accessors or proxy traps.
+    return fallback;
+  }
+}
 export function safeLibraryPath(path: string): string {
   if (typeof path !== "string" || !path || path.startsWith("/") || path.includes("\\") || path.includes("\0") || path.split("/").some(part => part === ".." || part === "." || !part)) throw new Error("Unsafe library path.");
   return path;
@@ -120,14 +136,18 @@ export function readPreparedBank(value: unknown): PreparedBank {
  * filing changes where imported records live without rewriting source evidence. */
 export function preparedBankImportOptions(bank: PreparedBank): PackageImportOptions {
   const filing = bank.reviewedFiling;
+  const reviewedFiling = filing ? {
+    module: filing.module,
+    term: Number(filing.term.slice(-1)) as 1 | 2 | 3 | 4 | 5,
+  } : undefined;
   return {
     sourceText: bank.sourceText,
     sourceBytes: bank.sourceBytes,
     notes: bank.notes,
-    ...(filing ? { reviewedFiling: {
-      module: filing.module,
-      term: Number(filing.term.slice(-1)) as 1 | 2 | 3 | 4 | 5,
-    } } : {}),
+    ...(reviewedFiling ? { reviewedFiling } : {}),
+    ...(filing?.evidence === "source-metadata" && reviewedFiling
+      && uniformSourceDeclaredWeek(bank.pkg, reviewedFiling) !== undefined
+      ? { preserveSourceDeclaredWeek: true } : {}),
   };
 }
 /** This audited edition is the only prepared library authorized to refresh
@@ -253,7 +273,7 @@ export async function bankFiles(
   partition: BankFilePartition = {},
 ): Promise<File[]> {
   const files: File[] = [];
-  const pendingRecords: Array<{ key: string; record: QuestionAttachmentBlobRecord }> = [];
+  const pendingRecords: Array<{ key: string; filename: string; record: QuestionAttachmentBlobRecord }> = [];
   // Several question assets can refer to the *same* source-page file while
   // having distinct question-local asset IDs. The image matcher intentionally
   // refuses ambiguous duplicate filenames. Supply each verified file once,
@@ -279,7 +299,9 @@ export async function bankFiles(
     try {
       if (!asset.checksum) throw new Error(`Image integrity check failed: ${asset.filename}. The package does not provide a checksum for these bytes.`);
       const key = reviewBlobKey(asset.checksum);
-      const stored = await getQuestionAttachmentBlob(key);
+      // A selected prepared bundle supplies these bytes. Do not trigger an
+      // unrelated cloud-media recovery before verifying the supplied original.
+      const stored = read && bankFile ? undefined : await getQuestionAttachmentBlob(key, { localOnly: true });
       const bytes = read && bankFile
         ? await read(bankAssetPath(bankFile, asset.filename))
         : stored ? new Uint8Array(await stored.blob.arrayBuffer()) : undefined;
@@ -288,7 +310,7 @@ export async function bankFiles(
       try {
         image = await assertInstallableAcademicImageBytes(bytes, asset.mimeType);
       } catch (cause) {
-        const reason = cause instanceof Error ? cause.message : "The image could not be verified.";
+        const reason = installationFailureReason(cause, "The image could not be verified.");
         throw new Error(`Image integrity check failed: ${asset.filename}. ${reason}`, { cause });
       }
       if (await sha256(bytes) !== asset.checksum
@@ -303,10 +325,10 @@ export async function bankFiles(
         questionId: asset.questionId,
         updatedAt: new Date().toISOString(),
       };
-      if (read && bankFile) pendingRecords.push({ key, record });
+      if (read && bankFile) pendingRecords.push({ key, filename: asset.filename, record });
       files.push(new File([record.blob], asset.filename, { type: record.mimeType }));
     } catch (cause) {
-      const reason = cause instanceof Error ? cause.message : "The image could not be verified.";
+      const reason = installationFailureReason(cause, "The image could not be verified.");
       const failure = reason.includes(asset.filename)
         ? cause instanceof Error ? cause : new Error(reason)
         : new Error(`Image integrity check failed: ${asset.filename}. ${reason}`, { cause });
@@ -322,7 +344,14 @@ export async function bankFiles(
   // Validate every referenced file before the first IndexedDB write so a
   // corrupt later sibling cannot leave a partially persisted image set.
   assertCurrent();
-  for (const pending of pendingRecords) await putQuestionAttachmentBlob(pending.key, pending.record);
+  for (const [index, pending] of pendingRecords.entries()) {
+    try {
+      await putQuestionAttachmentBlob(pending.key, pending.record);
+    } catch (cause) {
+      const reason = installationFailureReason(cause, "Image storage failed without an error message.");
+      throw new Error(`Could not save figure ${index + 1} of ${pendingRecords.length}: ${pending.filename}. ${reason}`, { cause });
+    }
+  }
   return files;
 }
 
@@ -335,16 +364,35 @@ export interface LibraryInstallation {
   setIds: string[];
 }
 export interface LibraryInstallScope { key: string; assertCurrent: () => void }
-let installing: { read: LibraryReader; key?: string; promise: Promise<LibraryInstallation> } | undefined;
+/** Only the authenticated academic reader supplies this reconciliation. A
+ * local ZIP still uses the conservative, learner-owned review merge. */
+export interface LibrarySourceUpdate {
+  bank: PreparedBank;
+  apply(issues: readonly PackageIssue[]): Promise<void>;
+  assertReviewUnchanged(): void;
+}
+export interface LibraryInstallOptions {
+  /** Full private imports retain originals by default. Hosted question
+   * downloads leave original PDFs available through their verified links. */
+  cacheOriginals?: boolean;
+  /** `reviewId` is the review document this install will write: a bank-scoped
+   * id when sibling banks share one source, otherwise the legacy id. */
+  reconcileSource?: (bank: PreparedBank, catalog: PrivateLibraryCatalog,
+    source: PrivateLibraryCatalog["sources"][number], storedReview?: SourceDocument, reviewId?: string) => Promise<LibrarySourceUpdate | undefined>;
+}
+let installing: { read: LibraryReader; key?: string; options: LibraryInstallOptions; cacheOriginals: boolean; promise: Promise<LibraryInstallation> } | undefined;
 /** Same canonical import as file review. Each completed source is durable; retry repairs missing media. */
-export function installPrivateLibrary(read: LibraryReader, progress: (message: string) => void = () => {}, scope?: LibraryInstallScope): Promise<LibraryInstallation> {
-  if (installing) return installing.read === read && installing.key === scope?.key ? installing.promise
+export function installPrivateLibrary(read: LibraryReader, progress: (message: string) => void = () => {}, scope?: LibraryInstallScope, options: LibraryInstallOptions = {}): Promise<LibraryInstallation> {
+  const cacheOriginals = options.cacheOriginals !== false;
+  if (installing) return installing.read === read && installing.key === scope?.key && installing.cacheOriginals === cacheOriginals
+    && installing.options.reconcileSource === options.reconcileSource ? installing.promise
     : Promise.reject(new Error("Another library download is being saved. Wait for it to finish, then retry."));
-  const promise = install(read, progress, scope?.assertCurrent ?? (() => {})).finally(() => { installing = undefined; });
-  installing = { read, key: scope?.key, promise };
+  const promise = install(read, progress, scope?.assertCurrent ?? (() => {}), cacheOriginals, options.reconcileSource).finally(() => { installing = undefined; });
+  installing = { read, key: scope?.key, options, cacheOriginals, promise };
   return promise;
 }
-async function install(read: LibraryReader, progress: (message: string) => void, assertCurrent: () => void): Promise<LibraryInstallation> {
+async function install(read: LibraryReader, progress: (message: string) => void, assertCurrent: () => void, cacheOriginals: boolean,
+  reconcileSource?: LibraryInstallOptions["reconcileSource"]): Promise<LibraryInstallation> {
   const currentStore = () => {
     assertCurrent();
     // Keep the original action identities: the canonical importer uses them to
@@ -384,12 +432,16 @@ async function install(read: LibraryReader, progress: (message: string) => void,
   const warnings: string[] = [];
   const installed = catalog.sources.map(s => ({ ...s }));
   for (const [index, source] of installed.entries()) {
-    if (!source.bankFile && !source.originalFile) continue;
-    const report = (phase: string) => progress(`Preparing your library · ${index + 1} of ${installed.length} sources · ${phase}`);
-    report("checking original");
+    if (!source.bankFile && !(cacheOriginals && source.originalFile)) continue;
+    let phase = "opening source";
+    const report = (nextPhase: string) => {
+      phase = nextPhase;
+      progress(`Preparing your library · ${index + 1} of ${installed.length} sources · ${phase}`);
+    };
+    report(cacheOriginals ? "checking original" : "opening question source");
     let openedBank: PreparedBank | undefined;
     try {
-      if (source.originalFile) {
+      if (cacheOriginals && source.originalFile) {
         const s = currentStore();
         const existing = [...pendingDocuments.values(), ...s.documents].find(d => d.checksum?.replace(/^sha256:/, "") === source.checksum && d.fileType !== PRIVATE_REVIEW_DOCUMENT);
         const doc = existing ?? { id: `private-source-${source.checksum}`, title: source.name.replace(/\.[^.]+$/, ""), fileName: source.name,
@@ -397,8 +449,10 @@ async function install(read: LibraryReader, progress: (message: string) => void,
           checksum: `sha256:${source.checksum}`, tags: [source.module ?? "Unfiled"], linkedQuestionSetIds: [], libraryOnly: true };
         installedIds.documentIds.push(doc.id);
         if (!await readSourceOriginal(doc.id, doc.checksum)) {
+          report("reading original file");
           const bytes = await read(source.originalFile);
           assertCurrent();
+          report("saving original file");
           await saveSourceOriginal(doc, new Blob([bytes as BlobPart]));
           assertCurrent();
           if (!existing) pendingDocuments.set(doc.id, { ...doc, sizeBytes: bytes.length });
@@ -425,9 +479,11 @@ async function install(read: LibraryReader, progress: (message: string) => void,
       if (matchingLegacy && scoped) throw new Error("Two saved reviews claim this bank. Keep both copies and reconcile them before reinstalling.");
       const storedReview = scoped ?? matchingLegacy;
       const reviewId = storedReview?.id ?? (legacy ? scopedId : legacyId);
-      const bank = storedReview
+      report("checking saved source review");
+      const sourceUpdate = await reconcileSource?.(incomingBank, catalog, source, storedReview, reviewId);
+      const bank = sourceUpdate?.bank ?? (storedReview
         ? mergeStoredReview(incomingBank, JSON.parse(storedReview.rawText), `sha256:${source.checksum}`)
-        : incomingBank;
+        : incomingBank);
       const declaredAssetFiles = bank.pkg.questions.flatMap(question => question.assets.map(asset => ({ name: asset.filename })));
       const preliminary = assessBank(bank.pkg, bank.issues, declaredAssetFiles);
       if (preliminary.issues.some(issue => issue.severity === "error" && !issue.questionId)) throw new Error("Bank validation failed.");
@@ -435,7 +491,7 @@ async function install(read: LibraryReader, progress: (message: string) => void,
         verdict.readiness === "ready" ? [questionId] : []
       )));
       const heldMediaIssues: PackageIssue[] = [];
-      report("verifying figure assets");
+      report("preparing figure assets");
       const files = await bankFiles(bank, read, source.bankFile, assertCurrent, {
         requiredQuestionIds: readyQuestionIds,
         onHeldMediaIssue: issue => heldMediaIssues.push(issue),
@@ -450,15 +506,19 @@ async function install(read: LibraryReader, progress: (message: string) => void,
         await flushDocuments();
       }
       report("saving reviewed questions");
+      await sourceUpdate?.apply(assessed.issues);
       const result = await saveBank(bank.pkg, assessed.issues, files, {
         library: currentStore, store: currentStore,
-      }, { ...preparedBankImportOptions(bank), ...(refreshEquivalentSource ? { refreshEquivalentSource: true } : {}) });
+      }, { ...preparedBankImportOptions(bank), ...(sourceUpdate ? { preserveExistingFiling: true } : {}),
+        ...(refreshEquivalentSource ? { refreshEquivalentSource: true } : {}) });
       const durableSections = [
         ...result.sections,
         ...result.incompleteSections.filter(section => section.savedIds.length > 0),
       ];
       const localQuestions = currentStore().questions.filter(question => (
         preparedBankContains(question, bank, source.checksum)
+        && (!sourceUpdate || incomingBank.pkg.questions.some(sourceQuestion => sourceQuestion.id === question.content?.id
+          && sourceQuestion.bankId === question.content.bankId))
         && questionPracticeReadiness(question) === "ready"
       ));
       if (result.status === "failed" && localQuestions.length === 0) throw new Error(result.errors.join(" "));
@@ -493,6 +553,7 @@ async function install(read: LibraryReader, progress: (message: string) => void,
       const id = reviewId;
       const existingReview = pendingDocuments.get(id) ?? state.documents.find(d => d.id === id);
       {
+        sourceUpdate?.assertReviewUnchanged();
         installedIds.documentIds.push(id);
         const linkedQuestionSetIds = [...new Set([
           ...(existingReview?.linkedQuestionSetIds ?? []),
@@ -510,17 +571,21 @@ async function install(read: LibraryReader, progress: (message: string) => void,
     } catch (cause) {
       assertCurrent();
       source.status = "failed";
+      // Without the opened bank, a checksum identifies this bank's saved questions
+      // only when the catalog lists no sibling bank from the same source.
+      const siblingBank = installed.some(other => other !== source && other.bankFile && other.checksum === source.checksum);
+      const belongsHere = (bankId: string | undefined) => source.bankId && bankId !== undefined
+        ? bankId === source.bankId : !siblingBank;
       const retained = currentStore().questions.filter(question => (
         question.content?.provenance.sourceChecksum?.replace(/^sha256:/, "") === source.checksum
-        && (openedBank ? preparedBankContains(question, openedBank, source.checksum)
-          : Boolean(source.bankId && question.content.bankId === source.bankId))
+        && (openedBank ? preparedBankContains(question, openedBank, source.checksum) : belongsHere(question.content.bankId))
         && questionPracticeReadiness(question) === "ready"
       ));
       source.ready = retained.length;
       installedIds.questionIds.push(...retained.map(question => question.id));
       installedIds.setIds.push(...retained.flatMap(question => question.setId ? [question.setId] : []));
       installedIds.documentIds.push(...retained.flatMap(question => question.sourceDocumentId ? [question.sourceDocumentId] : []));
-      const failure = cause instanceof Error ? cause.message : "Installation failed.";
+      const failure = `Source ${index + 1} of ${installed.length}, ${phase}: ${installationFailureReason(cause, "Installation failed without an error message.")}`;
       source.reason = retained.length
         ? `${failure} ${retained.length} previously saved answer-ready question${retained.length === 1 ? " remains" : "s remain"} on this device.`
         : failure;

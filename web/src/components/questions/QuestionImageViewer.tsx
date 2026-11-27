@@ -1,21 +1,26 @@
 import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Maximize2, ZoomIn, ZoomOut } from "lucide-react";
 import { ICON_SIZE } from "../../lib/iconSize";
+import type { QuestionAsset } from "../../lib/question-content/package";
 import { Modal } from "../ui/Modal";
 import { GButton } from "../ui/primitives";
 import "./QuestionImageViewer.css";
 
 const ZOOM_LEVELS = [1, 1.5, 2, 3, 4, 6, 8] as const;
 
-export function QuestionImageViewer({ src, alt, width, height, onClose, shouldRestoreFocus }: {
+export function QuestionImageViewer({ src, alt, width, height, crop, onClose, shouldRestoreFocus }: {
   src: string;
   alt: string;
   width?: number;
   height?: number;
+  crop?: QuestionAsset["crop"];
   onClose: () => void;
   shouldRestoreFocus?: () => boolean;
 }) {
   const hintId = useId();
+  // Keep the same portal DOM throughout this viewing session, including when
+  // fullscreen ends. Moving it would detach the focus trap and resize observer.
+  const [portalContainer] = useState(() => document.fullscreenElement ?? undefined);
   const viewportRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const [natural, setNatural] = useState({ width: width || 1, height: height || 1 });
@@ -24,9 +29,13 @@ export function QuestionImageViewer({ src, alt, width, height, onClose, shouldRe
   const drag = useRef<{ pointerId: number; x: number; y: number; left: number; top: number } | null>(null);
   const lastImageWidth = useRef(0);
   const zoom = ZOOM_LEVELS[level];
-  const fit = viewport.width && viewport.height ? Math.min(1, viewport.width / natural.width, viewport.height / natural.height) : 1;
-  const imageWidth = Math.max(1, Math.round(natural.width * fit * zoom));
-  const imageHeight = Math.max(1, Math.round(natural.height * fit * zoom));
+  const cropWidth = Math.max(.01, 1 - (crop?.left ?? 0) - (crop?.right ?? 0));
+  const cropHeight = Math.max(.01, 1 - (crop?.top ?? 0) - (crop?.bottom ?? 0));
+  const visibleWidth = natural.width * cropWidth;
+  const visibleHeight = natural.height * cropHeight;
+  const fit = viewport.width && viewport.height ? Math.min(1, viewport.width / visibleWidth, viewport.height / visibleHeight) : 1;
+  const imageWidth = Math.max(1, Math.round(visibleWidth * fit * zoom));
+  const imageHeight = Math.max(1, Math.round(visibleHeight * fit * zoom));
 
   useLayoutEffect(() => {
     const element = viewportRef.current;
@@ -51,10 +60,11 @@ export function QuestionImageViewer({ src, alt, width, height, onClose, shouldRe
   }, [imageWidth, level]);
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    // Modal owns focus traversal and dismissal. Other keys must not answer or
-    // submit the quiz behind this focusable viewport; browser defaults remain available.
-    if (event.key === "Escape" || event.key === "Tab") return;
+    // Modal owns focus traversal. Capture dismissal and quiz shortcuts at the
+    // whole dialog, including its initially focused Close button.
+    if (event.key === "Tab") return;
     event.stopPropagation();
+    if (event.key === "Escape") { event.preventDefault(); onClose(); return; }
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     if (event.key === "+" || event.key === "=") setLevel(value => Math.min(ZOOM_LEVELS.length - 1, value + 1));
     else if (event.key === "-") setLevel(value => Math.max(0, value - 1));
@@ -68,8 +78,9 @@ export function QuestionImageViewer({ src, alt, width, height, onClose, shouldRe
   }
 
   return <Modal title={alt} onClose={onClose} shouldRestoreFocus={shouldRestoreFocus}
+    portalContainer={portalContainer} onKeyDown={onKeyDown}
     className="question-image-viewer" bodyClassName="question-image-viewer__body">
-    <div className="question-image-viewer__content" onKeyDown={onKeyDown}>
+    <div className="question-image-viewer__content">
       <div className="question-image-viewer__toolbar" role="group" aria-label="Image zoom controls">
         <GButton type="button" iconOnly aria-label="Zoom out" disabled={level === 0} onClick={() => setLevel(value => Math.max(0, value - 1))}><ZoomOut size={ICON_SIZE.control} aria-hidden="true" /></GButton>
         <output className="question-image-viewer__scale" aria-label="Image zoom" aria-live="polite">{Math.round(zoom * 100)}%</output>
@@ -102,12 +113,15 @@ export function QuestionImageViewer({ src, alt, width, height, onClose, shouldRe
         onPointerCancel={() => { drag.current = null; setPanning(false); }}
         onLostPointerCapture={() => { drag.current = null; setPanning(false); }}>
         <div className="question-image-viewer__canvas" style={{ width: Math.max(imageWidth, viewport.width), minHeight: Math.max(imageHeight, viewport.height) }}>
+          <div className="question-image-viewer__crop" style={{ width: imageWidth, height: imageHeight }}>
           <img src={src} alt={alt} className="question-image-viewer__image" draggable={false}
-            style={{ width: imageWidth, height: imageHeight }}
+            style={crop ? { width: imageWidth / cropWidth, height: imageHeight / cropHeight, position: "absolute",
+              left: -imageWidth * crop.left / cropWidth, top: -imageHeight * crop.top / cropHeight } : { width: imageWidth, height: imageHeight }}
             onLoad={event => {
               const image = event.currentTarget;
               if (image.naturalWidth && image.naturalHeight) setNatural({ width: image.naturalWidth, height: image.naturalHeight });
             }} />
+          </div>
         </div>
       </div>
       <p id={hintId} className="question-image-viewer__hint">Zoom in to inspect. Drag or scroll to move. Keyboard: + / − to zoom, 0 to fit, arrows to move.</p>
