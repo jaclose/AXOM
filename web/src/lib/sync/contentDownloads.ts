@@ -5,7 +5,7 @@ import { useStore } from "../store";
 import { assertVaultWritesSince, flushLocalVaultWrites, getVaultWriteCheckpoint } from "../localVault";
 import type { NoctyriumState } from "../types";
 import { hydrateCloudContent, splitCloudContent, mergeSourceFields } from "./cloudContent";
-import { readDeferredContent } from "./deferredContent";
+import { admitContentIdentities } from "./deferredContent";
 import { downloadAcademicAsset, storedAcademicBindings } from "../academicLibrary/contentReferences";
 import { readSourceOriginal, saveSourceOriginal } from "../decode/sources";
 import { downloadCloudOriginal } from "./cloudOriginals";
@@ -15,7 +15,7 @@ export interface ContentSelection { questionIds?: string[]; documentIds?: string
 /** Explicit downloads are additive. Account switches or edits during I/O never
  * replace the current workspace, and failure leaves every reference retryable. */
 export async function materializeState(state: NoctyriumState, selection?: ContentSelection): Promise<NoctyriumState> {
-  const deferred = readDeferredContent(state.deferredContent);
+  const deferred = admitContentIdentities(state);
   if (!deferred) return state;
   const { client, userId, assertCurrent } = await accountOperationClient();
   if (userId !== deferred.accountId) throw new Error("Sign in to the account that saved this content before downloading it.");
@@ -85,11 +85,13 @@ export async function downloadAccountContent(selection?: ContentSelection): Prom
 /** Keep already downloaded bytes on this device while adopting remote learner
  * metadata. Only exact immutable digest matches can supply the source fields. */
 export async function retainDownloadedContent(remote: NoctyriumState, local: NoctyriumState): Promise<NoctyriumState> {
-  if (!remote.deferredContent) return remote;
+  const admitted = admitContentIdentities(remote);
+  if (!admitted) return remote;
+  admitContentIdentities(local);
   const split = await splitCloudContent({ ...local, deferredContent: undefined });
   const known = new Map(split.objects.map(object => [`${object.reference.collection}:${object.reference.id}`, object]));
-  const matches = remote.deferredContent.sources.filter(ref => (ref.academic ? known.get(`${ref.collection}:${ref.id}`)?.canonicalHash : known.get(`${ref.collection}:${ref.id}`)?.reference.hash) === ref.hash);
-  const deferred = { ...remote.deferredContent };
+  const matches = admitted.sources.filter(ref => (ref.academic ? known.get(`${ref.collection}:${ref.id}`)?.canonicalHash : known.get(`${ref.collection}:${ref.id}`)?.reference.hash) === ref.hash);
+  const deferred = { ...admitted };
   const result = { ...remote };
   for (const collection of ["questions", "documents"] as const) {
     const ids = new Set(matches.filter(ref => ref.collection === collection).map(ref => ref.id));
