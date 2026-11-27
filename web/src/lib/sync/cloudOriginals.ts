@@ -28,11 +28,14 @@ export async function uploadCloudOriginals(client: SupabaseClient, userId: strin
   const bucket = client.storage.from(ORIGINALS_BUCKET);
   const verified = verifiedOriginalUploads.get(userId) ?? new Set<string>();
   verifiedOriginalUploads.set(userId, verified);
-  const ensureCurrent = async () => {
+  const assertScope = () => {
     if (scope.accountId !== userId || !isQuestionAttachmentScopeCurrent(scope)) throw new Error("The account changed while protecting original files. Retry from the current account.");
     if (signal?.aborted) throw new DOMException("The original upload was cancelled. The local file is unchanged.", "AbortError");
+  };
+  const ensureCurrent = async () => {
+    assertScope();
     await assertCurrent();
-    if (signal?.aborted) throw new DOMException("The original upload was cancelled. The local file is unchanged.", "AbortError");
+    assertScope();
   };
   const pending = new Map<string, { document: SourceDocument; identity: NonNullable<ReturnType<typeof readOriginalFile>> }>();
   for (const document of contentMetadata(state).documents) {
@@ -63,7 +66,9 @@ export async function uploadCloudOriginals(client: SupabaseClient, userId: strin
   }
   async function uploadOne(document: SourceDocument, identity: NonNullable<ReturnType<typeof readOriginalFile>>): Promise<void> {
     await ensureCurrent();
+    assertScope();
     const original = await readSourceOriginal(document.id, identity.sha256, { scope, accountId: userId });
+    assertScope();
     if (!original || original.size !== identity.byteSize) throw new SyncPushError(
       { kind: "rejected", rejection: "missing-original", status: 0 },
       "An original source file is missing on this device. Attach the exact file or restore a complete backup before protecting this version.",
@@ -86,6 +91,7 @@ export async function uploadCloudOriginals(client: SupabaseClient, userId: strin
     // the complete immutable object, and also recover from lost acknowledgements
     // or 409 duplicate responses only when its SHA-256 matches.
     await ensureCurrent();
+    assertScope();
     const existing = await bucket.download(path);
     if (existing.error || !existing.data || existing.data.size !== identity.byteSize
       || await sha256Hex(await existing.data.arrayBuffer()) !== identity.sha256) {
@@ -96,11 +102,13 @@ export async function uploadCloudOriginals(client: SupabaseClient, userId: strin
       throw new Error("The original-file upload could not be verified on the server. Your local copy is safe; reconnect and retry.");
     }
     await ensureCurrent();
+    assertScope();
     verified.add(originalIdentityKey(identity));
   }
   await Promise.all(Array.from({ length: Math.min(ORIGINAL_UPLOAD_CONCURRENCY, entries.length) }, worker));
   if (failed) throw failure;
   await ensureCurrent();
+  assertScope();
 }
 
 /** Repair a vanished previously acknowledged original without downloading all
@@ -113,6 +121,18 @@ export async function repairMissingCloudOriginals(
   assertCurrent: () => Promise<void>, resumable?: ResumableOriginalUpload,
 ): Promise<number> {
   const scope = getQuestionAttachmentScope();
+  const assertScope = () => {
+    if (scope.accountId !== userId || !isQuestionAttachmentScopeCurrent(scope)
+      || (state.deferredContent && state.deferredContent.accountId !== userId)) {
+      throw new Error("The account changed while repairing original files. Retry from the current account.");
+    }
+  };
+  const ensureCurrent = async () => {
+    assertScope();
+    await assertCurrent();
+    assertScope();
+  };
+  assertScope();
   const grouped = new Map<string, SourceDocument[]>();
   for (const document of contentMetadata(state).documents) {
     const identity = readOriginalFile(document);
@@ -126,9 +146,11 @@ export async function repairMissingCloudOriginals(
   for (const [hash, documents] of grouped) {
     const identity = readOriginalFile(documents[0])!;
     const path = `${userId}/${hash}`;
-    await assertCurrent();
+    await ensureCurrent();
+    assertScope();
     const info = await bucket.info(path);
-    await assertCurrent();
+    await ensureCurrent();
+    assertScope();
     if (!info.error && info.data?.size === identity.byteSize) continue;
     if (!info.error) {
       throw new Error("An immutable original source has inconsistent server metadata. Do not overwrite it; preserve the local file and investigate.");
@@ -140,8 +162,10 @@ export async function repairMissingCloudOriginals(
     // blob, while another identical source still has the verified bytes.
     let local: SourceDocument | undefined;
     for (const document of documents) {
-      await assertCurrent();
+      await ensureCurrent();
+      assertScope();
       const copy = await readSourceOriginal(document.id, hash, { scope, accountId: userId });
+      assertScope();
       if (copy && copy.size === identity.byteSize) { local = document; break; }
     }
     if (!local) {
@@ -150,10 +174,16 @@ export async function repairMissingCloudOriginals(
         "A previously protected original is missing from cloud Storage and this device. Restore the exact source from a verified backup before retrying cloud protection.",
       );
     }
+    // The complete workspace was admitted above. Repair only the selected
+    // immutable original, not the deferred lane from which it was projected.
+    // The original workspace and its references remain unchanged.
+    assertScope();
     verifiedOriginalUploads.get(userId)?.delete(originalIdentityKey(identity));
-    await uploadCloudOriginals(client, userId, { ...state, documents: [local] }, undefined, assertCurrent, resumable);
+    await uploadCloudOriginals(client, userId, { ...state, questions: [], documents: [local], deferredContent: undefined }, undefined, ensureCurrent, resumable);
+    assertScope();
     repaired += 1;
   }
+  assertScope();
   return repaired;
 }
 
