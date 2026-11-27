@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { exportStateWithAttachments } from "./backup";
+import { exportStateWithAttachments, parseImport } from "./backup";
 import { createMediaBackupArchive } from "./backupArchive";
 import { collectQuestionAttachmentPayloads, type QuestionImageAttachment } from "./questionAttachments";
 import { getQuestionAttachmentScope, resetQuestionAttachmentScopeForTests, setQuestionAttachmentAccount } from "./questionAttachmentScope";
@@ -37,6 +37,7 @@ const archive = vi.mocked(createMediaBackupArchive);
 const materializer = vi.mocked(materializeState);
 const createUrl = vi.fn(() => "blob:synthetic-backup");
 const click = vi.fn();
+const downloadNames: string[] = [];
 function switchAccount(returnToA: boolean) {
   setQuestionAttachmentAccount("b");
   if (returnToA) setQuestionAttachmentAccount("a");
@@ -51,7 +52,11 @@ beforeEach(() => {
     static createObjectURL = createUrl;
     static revokeObjectURL = vi.fn();
   });
-  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(click);
+  downloadNames.length = 0;
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+    downloadNames.push(this.download);
+    click();
+  });
   collector.mockReset();
   archive.mockReset();
   materializer.mockReset();
@@ -119,6 +124,48 @@ describe("portable export account generation", () => {
         collector.mockReset();
         archive.mockReset();
       }
+    }
+  });
+
+  it.each(["json", "zip"] as const)("uses the actual restore reader before marking a %s backup complete", async format => {
+    const validContent = {
+      id: "a-question", source: { filename: "synthetic.pdf" },
+      provenance: { method: "authored" },
+      stem: [{ type: "text", text: "Synthetic stem" }], choices: [], assets: [],
+    };
+    const malformed = [
+      null, "bad", [], {}, { id: 7 },
+      { ...validContent, source: undefined },
+      { ...validContent, source: { filename: "" } },
+      { ...validContent, source: { filename: 7 } },
+      { ...validContent, provenance: undefined },
+      { ...validContent, provenance: { method: "unknown" } },
+      { ...validContent, stem: [] },
+    ];
+    for (const [content, rejected] of [
+      ...malformed.map(value => [value, true] as const),
+      [undefined, false] as const, [validContent, false] as const,
+    ]) {
+      const state = workspace();
+      Object.assign(state.questions[0], { content });
+      if (format === "zip") state.documents = [{ id: "doc", checksum: "a".repeat(64), fileType: "application/pdf" } as SourceDocument];
+      const original = JSON.stringify(state);
+      if (rejected) expect(() => parseImport(original)).toThrow("Question content could not be restored");
+      else expect(parseImport(original).questions[0].id).toBe("a-question");
+      localStorage.removeItem(STORAGE_KEYS.lastBackupAt);
+      collector.mockReset();
+      archive.mockReset();
+      collector.mockResolvedValueOnce({ payloads: [], missingBlobKeys: [] });
+      archive.mockResolvedValueOnce({ blob: new Blob(["synthetic archive"]), attachmentCount: 0, missingBlobKeys: [], originalCount: 1, missingOriginalIds: [] });
+      downloadNames.length = 0;
+      const receipt = await exportStateWithAttachments(state);
+      expect(receipt.workspaceAdmissionFailed).toBe(rejected ? true : undefined);
+      expect(downloadNames).toHaveLength(1);
+      expect(downloadNames[0]).toContain(rejected ? "-recovery-copy-" : "-backup-");
+      expect(downloadNames[0]).toMatch(format === "zip" ? /\.zip$/ : /\.json$/);
+      expect(localStorage.getItem(STORAGE_KEYS.lastBackupAt) === null).toBe(rejected);
+      expect(JSON.stringify(state)).toBe(original);
+      if (format === "zip") expect(archive.mock.calls[0]?.[0].questions).toEqual(state.questions);
     }
   });
 

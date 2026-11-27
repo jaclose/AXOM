@@ -435,7 +435,7 @@ function preferDailyWordPuzzle(left: DailyWordPuzzleState, right: DailyWordPuzzl
 }
 
 /** Shared structural admission, before normalization or media staging. */
-function assertPortableWorkspaceAdmission(data: unknown): void {
+function assertPortableWorkspaceAdmission(data: unknown): number {
   if (!isRecord(data) || !Array.isArray(data.terms)) {
     throw new Error("This file doesn't look like an AXOM backup.");
   }
@@ -497,11 +497,16 @@ function assertPortableWorkspaceAdmission(data: unknown): void {
       throw new Error("This backup has an invalid Course Tracker path. Keep the original file.");
     }
   }
+  return version === undefined ? 0 : version;
 }
 
 function workspaceAdmissionReceipt(payload: Record<string, unknown>): { workspaceAdmissionFailed?: true } {
   try {
-    assertPortableWorkspaceAdmission(payload);
+    // Exercise the same reader as restoration, including ordered-question
+    // content and migrations. Work on serialized workspace metadata so the
+    // dry run cannot change the raw recovery copy. Embedded binary payloads
+    // are validated separately and are not consumed by parseImport.
+    parseImport(JSON.stringify({ ...payload, [ATTACHMENT_EXPORT_KEY]: undefined }));
     return {};
   } catch {
     // Preserve the raw recovery copy, not a normalized substitute.
@@ -511,7 +516,7 @@ function workspaceAdmissionReceipt(payload: Record<string, unknown>): { workspac
 
 export function parseImport(text: string): NoctyriumState {
   const data = JSON.parse(text);
-  assertPortableWorkspaceAdmission(data);
+  const importedSchemaVersion = assertPortableWorkspaceAdmission(data);
   const profile = data.profile && typeof data.profile === "object"
     ? data.profile as Record<string, unknown>
     : {};
@@ -523,7 +528,6 @@ export function parseImport(text: string): NoctyriumState {
   const activeFocus = focusOption(activeFocusId);
   const educationTrack = resolveTrack(typeof profile.educationTrack === "string" ? profile.educationTrack : undefined).id;
 
-  const importedSchemaVersion = version ?? 0;
   return {
     schemaVersion: SCHEMA_VERSION,
     profile: {
