@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useRef, useState, type KeyboardEvent } from "react";
 import {
   Brain, CheckCircle2, ExternalLink, LineChart, Loader, ShieldCheck, Sparkles, CircleDashed,
 } from "lucide-react";
@@ -21,7 +21,6 @@ const READY: Feature[] = [
   { name: "Dashboard", detail: "A focused daily surface with a one-line Up next suggestion, customizable widgets with their own icons, and a subtle pointer luster." },
   { name: "Productivity & Reports", detail: "Fast activity logging, optional targets (habits can count too), focus timer, and weekly/monthly trends that follow real calendar days, with plain-language explanations on demand." },
   { name: "Course Tracker", detail: "Course/module structure with a breadcrumb and subsection picker, collapsible sections, imports, pass and yield tracking, and next-move suggestions." },
-  { name: "Leaderboards", detail: "Race your past self: this week vs your typical and best weeks, with what it takes to set a new record. No invented competitors." },
   { name: "Journal", detail: "Private pages for free writing, optional prompts, and a local-first record of the day." },
   { name: "Local data & recovery", detail: "Device-local workspace, exact last-saved time, automatic snapshots, portable backups, and a restore history of every restore, merge, and reset." },
   { name: "Integrations that work today", detail: "Anki card export, calendar (.ics) export of tasks/exams/intentions, and portable JSON backups. No accounts required." },
@@ -29,7 +28,8 @@ const READY: Feature[] = [
 ];
 
 const IN_PROGRESS: Feature[] = [
-  { name: "Accounts & cloud protection", detail: "Sign-in (password or one-time email code), background protection on every page, versioned restore, conflict resolution, device list, and cloud deletion are built. Activation needs the deployment’s account service configured and a live two-account security test." },
+  { name: "Leaderboards", detail: "Not available in the released navigation yet. Personal-best and weekly comparisons remain in development and require verified end-to-end acceptance." },
+  { name: "Accounts & cloud protection", detail: "Hosted sign-in and owner-side publication to authenticated accounts are active. Account isolation, cloud save/reload/restore, conflict resolution, device management, and cloud deletion still need independent two-account acceptance before reliability can be claimed." },
   { name: "Application Checker", detail: "292 US medical schools with sourced, dated requirement captures you can review and save. Residency programs and undergraduate/pre-med datasets are not gathered yet." },
   { name: "USMLE / MCAT / Pre-Med blueprints", detail: "Being deepened: macro vs. detailed depth, better-anchored content categories, and a dedicated tracker container per exam lane." },
   { name: "Anki integration", detail: "AnkiConnect bridge with card-count sync. Works on the local build; a hosted HTTPS page can't reach local Anki. That's a browser limit, not a bug." },
@@ -42,26 +42,72 @@ const PLANNED: Feature[] = [
   { name: "Residency program research", detail: "A separate, sourced residency dataset for the Application Checker once reliable program data is collected." },
   { name: "Casper & DAT lanes", detail: "Separate pre-health lanes alongside MCAT and Pre-Med, each with their own outline." },
   { name: "Connected calendars & drives", detail: "Read-only Google Calendar overlays and Drive folder links, opt-in and revocable." },
-  { name: "Attachment sync", detail: "Question images are device-only today; syncing them needs its own storage and quota design." },
+  { name: "Attachment sync", detail: "Approved shared-course figures use a separate authenticated download path. Personal cross-device image recovery still needs independent live account acceptance." },
   { name: "Performance intelligence", detail: "Sharper, day-aware recommendations as enough real days accumulate." },
 ];
 
 const STATUS_META: Record<FeatureStatus, { label: string; sub: string; icon: typeof CheckCircle2; tone: "green" | "cyan" | "neutral" }> = {
   ready: { label: "Ready to use", sub: "Works as intended today", icon: CheckCircle2, tone: "green" },
-  progress: { label: "Being worked on", sub: "Usable, actively improving", icon: Loader, tone: "cyan" },
+  progress: { label: "Being worked on", sub: "In development; availability varies", icon: Loader, tone: "cyan" },
   planned: { label: "Planned", sub: "Designed, not built yet", icon: CircleDashed, tone: "neutral" },
 };
 
 export function AboutPage() {
   const [tab, setTab] = useState<"axom" | "developer">("axom");
+  const [developerVisited, setDeveloperVisited] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const axomTabRef = useRef<HTMLButtonElement>(null);
+  const developerTabRef = useRef<HTMLButtonElement>(null);
+
+  function selectTab(next: "axom" | "developer") {
+    if (next === "developer" && !developerVisited) {
+      setDeveloperVisited(true);
+    }
+    setTab(next);
+    (next === "axom" ? axomTabRef : developerTabRef).current?.focus();
+  }
+
+  function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, current: "axom" | "developer") {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    let next: "axom" | "developer";
+    switch (event.key) {
+      case "ArrowLeft":
+      case "ArrowRight":
+        next = current === "axom" ? "developer" : "axom";
+        break;
+      case "Home":
+        next = "axom";
+        break;
+      case "End":
+        next = "developer";
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    selectTab(next);
+  }
+
   return (
     <>
       <div className="about-tabs" role="tablist" aria-label="About">
-        <button role="tab" id="about-tab-axom" aria-controls="about-panel" aria-selected={tab === "axom"} onClick={() => setTab("axom")}>About AXOM</button>
-        <button role="tab" id="about-tab-developer" aria-controls="about-panel" aria-selected={tab === "developer"} onClick={() => setTab("developer")}>The developer</button>
+        <button ref={axomTabRef} type="button" role="tab" id="about-tab-axom" aria-controls="about-panel" aria-selected={tab === "axom"} tabIndex={tab === "axom" ? 0 : -1} onClick={() => selectTab("axom")} onKeyDown={(event) => handleTabKeyDown(event, "axom")}>About AXOM</button>
+        <button ref={developerTabRef} type="button" role="tab" id="about-tab-developer" aria-controls="about-panel" aria-selected={tab === "developer"} tabIndex={tab === "developer" ? 0 : -1} onClick={() => selectTab("developer")} onKeyDown={(event) => handleTabKeyDown(event, "developer")}>The developer</button>
       </div>
-      <div id="about-panel" role="tabpanel" aria-labelledby={`about-tab-${tab}`} className="about-panel">
-        {tab === "axom" ? <AboutAxom /> : <WebsitePreview />}
+      <div id="about-panel" role="tabpanel" tabIndex={0} aria-labelledby={`about-tab-${tab}`} className="about-panel">
+        {tab === "axom" && <AboutAxom />}
+        {developerVisited && (
+          // Keep explicitly opened remote content alive on tab round-trips.
+          // Hidden + inert excludes it from keyboard, pointer and AT navigation.
+          <div
+            hidden={tab !== "developer"}
+            ref={(node) => {
+              if (node) node.toggleAttribute("inert", tab !== "developer");
+            }}
+          >
+            <WebsitePreview previewOpen={previewOpen} onToggle={() => setPreviewOpen((open) => !open)} />
+          </div>
+        )}
       </div>
     </>
   );
@@ -81,7 +127,7 @@ function AboutAxom() {
               backup file you can export when you choose.
             </p>
             <p className="sub">
-              Pre-beta honesty: account protection is built but stays off until this deployment configures and verifies its account service. Supported PDFs use local text
+              Pre-beta honesty: hosted sign-in and owner-side academic publication are enabled, but ordinary-account access and cross-device save/restore have not passed independent live acceptance. Supported PDFs use local text
               extraction; image-only OCR is not promised. Optional provider tools require explicit setup, and
               local AnkiConnect access still depends on your browser and desktop Anki configuration.
             </p>
@@ -137,22 +183,29 @@ function StatusColumn({ status, features }: { status: FeatureStatus; features: F
   );
 }
 
-function WebsitePreview() {
-  const [refreshKey, setRefreshKey] = useState(0);
-  useEffect(() => {
-    const timer = window.setInterval(() => setRefreshKey((key) => key + 1), 30 * 60 * 1000);
-    return () => window.clearInterval(timer);
-  }, []);
+function WebsitePreview({ previewOpen, onToggle }: { previewOpen: boolean; onToggle: () => void }) {
   return (
     <GlassCard pad className="website-preview-card">
       <PanelHeader title="Jafar Dabbagh" sub="The person building AXOM. More here soon; for now, the site."
-        action={<a className="gbtn sm" href={WEBSITE_URL} target="_blank" rel="noreferrer noopener">
-          Open site <ExternalLink size={ICON_SIZE.body} />
-        </a>} />
-      <div className="website-frame-shell">
-        <iframe key={refreshKey} title="Live site preview" src={WEBSITE_URL} loading="lazy" referrerPolicy="no-referrer-when-downgrade" />
+        action={<div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          <button className="gbtn sm" type="button" onClick={onToggle}>
+            {previewOpen ? "Close preview" : "Open preview"}
+          </button>
+          <a className="gbtn sm" href={WEBSITE_URL} target="_blank" rel="noreferrer noopener">
+            Open site <ExternalLink size={ICON_SIZE.body} />
+          </a>
+        </div>} />
+      {previewOpen && (
+        <div className="website-frame-shell">
+          <iframe title="Live site preview" src={WEBSITE_URL} loading="lazy"
+            referrerPolicy="no-referrer" sandbox="allow-scripts allow-forms" />
+        </div>
+      )}
+      <div className="sub" style={{ marginTop: 8 }}>
+        {previewOpen
+          ? "Closing the preview discards unsent form input. If it stays blank, use Open site."
+          : "Preview is off. Choose Open preview to load the external developer website."}
       </div>
-      <div className="sub" style={{ marginTop: 8 }}>If the preview stays blank, use Open site.</div>
     </GlassCard>
   );
 }
