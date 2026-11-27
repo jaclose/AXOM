@@ -38,15 +38,33 @@ export function deferContent(state: NoctyriumState, accountId: string, sources: 
   return { ...state, questions: [], documents: inline, deferredContent: deferredContent?.sources.length ? deferredContent : undefined };
 }
 
+/** Validate identity lanes before any operation can erase evidence of an overlap.
+ * Never normalize IDs, select a winner, or change the source records. */
+export function admitContentIdentities(state: NoctyriumState): DeferredContent | undefined {
+  const deferred = readDeferredContent(state.deferredContent);
+  for (const collection of ["questions", "documents"] as const) {
+    const ids = new Set<string>();
+    for (const record of state[collection]) {
+      const id = record?.id;
+      if (typeof id !== "string" || !id || ids.has(id)) {
+        throw new Error("Downloaded content identities are invalid or duplicated. Your saved work is unchanged.");
+      }
+      ids.add(id);
+    }
+    if (deferred?.[collection].some(record => ids.has(record.id))) {
+      throw new Error("Downloaded and deferred content overlap. Your saved work is unchanged.");
+    }
+  }
+  return deferred;
+}
+
 /** Include deferred metadata for transfer/media checks only, never for study. */
 export function contentMetadata(state: NoctyriumState): NoctyriumState {
-  const deferred = readDeferredContent(state.deferredContent);
+  const deferred = admitContentIdentities(state);
   if (!deferred) return state;
   const result = { ...state };
   delete result.deferredContent;
   for (const collection of ["questions", "documents"] as const) {
-    const ids = new Set(state[collection].map(record => record.id));
-    if (deferred[collection].some(record => ids.has(record.id))) throw new Error("Downloaded and deferred content overlap. Your saved work is unchanged.");
     Object.assign(result, { [collection]: [...state[collection], ...deferred[collection]] });
   }
   return result;

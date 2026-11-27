@@ -100,6 +100,7 @@ describe("private cloud content and media", () => {
     operation.current = { client, userId: "account-a", assertCurrent: guard };
     await materializeState(deferred);
     operation.current = { client, userId: "account-b", assertCurrent: guard };
+    setQuestionAttachmentAccount("account-b");
     const other = deferContent(split.workspace, "account-b", split.references, []);
     await expect(materializeState(other)).rejects.toThrow(/downloaded or verified/);
     expect(deferred.deferredContent?.sources).toEqual(split.references);

@@ -277,6 +277,106 @@ describe("immutable private original-file cloud storage", () => {
     expect(await (await mock.blobs.get(`${ORIGINALS_BUCKET}/owner/${doc.checksum}`))?.text()).toBe("duplicated-source");
   });
 
+  function deferOriginals(state: Awaited<ReturnType<typeof source>>["state"], documents: SourceDocument[], accountId = "owner") {
+    state.deferredContent = {
+      accountId, questions: [], documents, media: [],
+      sources: documents.map(doc => ({ collection: "documents" as const, id: doc.id, hash: "a".repeat(64), byteSize: 2, expandedBytes: 2 })),
+    };
+  }
+
+  it("repairs an original cached only in the deferred lane without admitting duplicate metadata", async () => {
+    const { doc, state } = await source(new Blob(["deferred original"]));
+    state.documents = [];
+    deferOriginals(state, [doc]);
+    const before = JSON.stringify(state);
+    expect(await repairMissingCloudOriginals(client, "owner", state, guard)).toBe(1);
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(await mock.blobs.get(`${ORIGINALS_BUCKET}/owner/${doc.checksum}`)?.text()).toBe("deferred original");
+    expect(JSON.stringify(state)).toBe(before);
+  });
+
+  it("repairs from a deferred mirror when the downloaded original has no local bytes", async () => {
+    const { doc, state } = await source(new Blob(["surviving mirror"]));
+    const mirror = { ...doc, id: crypto.randomUUID() };
+    await saveSourceOriginal(mirror, await readSourceOriginal(doc.id, doc.checksum) as Blob);
+    await deleteSourceOriginal(doc.id);
+    deferOriginals(state, [mirror]);
+    const before = JSON.stringify(state);
+    expect(await repairMissingCloudOriginals(client, "owner", state, guard)).toBe(1);
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(await mock.blobs.get(`${ORIGINALS_BUCKET}/owner/${doc.checksum}`)?.text()).toBe("surviving mirror");
+    expect(JSON.stringify(state)).toBe(before);
+  });
+
+  it("does not require local bytes for an unrelated deferred original already in cloud storage", async () => {
+    const { doc, state } = await source(new Blob(["missing target"]));
+    const other = (await source(new Blob(["unrelated present original"]))).doc;
+    mock.blobs.set(`${ORIGINALS_BUCKET}/owner/${other.checksum}`, await readSourceOriginal(other.id, other.checksum) as Blob);
+    await deleteSourceOriginal(other.id);
+    deferOriginals(state, [other]);
+    const before = JSON.stringify(state);
+    expect(await repairMissingCloudOriginals(client, "owner", state, guard)).toBe(1);
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(upload.mock.calls[0][1]).toBe(`owner/${doc.checksum}`);
+    expect(JSON.stringify(state)).toBe(before);
+  });
+
+  it("repairs two distinct absent originals independently and reports both repairs", async () => {
+    const { doc, state } = await source(new Blob(["first missing"]));
+    const other = (await source(new Blob(["second missing"]))).doc;
+    deferOriginals(state, [other]);
+    const before = JSON.stringify(state);
+    expect(await repairMissingCloudOriginals(client, "owner", state, guard)).toBe(2);
+    expect(upload.mock.calls.map(call => call[1]).sort()).toEqual([`owner/${doc.checksum}`, `owner/${other.checksum}`].sort());
+    expect(await mock.blobs.get(`${ORIGINALS_BUCKET}/owner/${doc.checksum}`)?.text()).toBe("first missing");
+    expect(await mock.blobs.get(`${ORIGINALS_BUCKET}/owner/${other.checksum}`)?.text()).toBe("second missing");
+    expect(JSON.stringify(state)).toBe(before);
+  });
+
+  it("still rejects overlap in the complete workspace before any repair I/O", async () => {
+    const { doc, state } = await source(new Blob(["overlapping original"]));
+    deferOriginals(state, [doc]);
+    const before = JSON.stringify(state);
+    await expect(repairMissingCloudOriginals(client, "owner", state, guard)).rejects.toThrow(/overlap/);
+    expect(info).not.toHaveBeenCalled();
+    expect(upload).not.toHaveBeenCalled();
+    expect(JSON.stringify(state)).toBe(before);
+  });
+
+  it("rejects deferred metadata belonging to another account before probing storage", async () => {
+    const { doc, state } = await source(new Blob(["foreign deferred original"]));
+    state.documents = [];
+    deferOriginals(state, [doc], "other-owner");
+    await expect(repairMissingCloudOriginals(client, "owner", state, guard)).rejects.toThrow(/account changed/);
+    expect(info).not.toHaveBeenCalled();
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("does not report successful repair after an account transition during a present-object probe (ABA=%s)", async aba => {
+    const { doc, state } = await source(new Blob(["already protected"]));
+    info.mockImplementationOnce(async () => {
+      setQuestionAttachmentAccount("other-owner");
+      if (aba) setQuestionAttachmentAccount("owner");
+      return { data: { size: doc.sizeBytes }, error: null };
+    });
+    await expect(repairMissingCloudOriginals(client, "owner", state, guard)).rejects.toThrow(/account changed/);
+    expect(upload).not.toHaveBeenCalled();
+    expect(download).not.toHaveBeenCalled();
+    setQuestionAttachmentAccount("owner");
+    expect(await (await readSourceOriginal(doc.id, doc.checksum))?.text()).toBe("already protected");
+  });
+
+  it("rejects a scope change inside the final guard even when there are no originals to upload", async () => {
+    const state = makeSeed();
+    state.documents = [];
+    state.questions = [];
+    guard.mockImplementationOnce(async () => { setQuestionAttachmentAccount("other-owner"); return undefined; });
+    await expect(uploadCloudOriginals(client, "owner", state, undefined, guard)).rejects.toThrow(/account changed/);
+    expect(upload).not.toHaveBeenCalled();
+    setQuestionAttachmentAccount("owner");
+    guard.mockImplementation(async () => undefined);
+  });
+
   it("refuses corrupted immutable metadata and non-404 Storage errors without overwriting anything", async () => {
     const { doc, state } = await source(new Blob(["verified-bytes"], { type: "application/pdf" }));
     mock.blobs.set(`${ORIGINALS_BUCKET}/owner/${doc.checksum}`, new Blob(["wrong size"]));
