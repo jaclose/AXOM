@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { webcrypto } from "node:crypto";
 import { getQuestionAttachmentScope, setQuestionAttachmentAccount } from "../questionAttachmentScope";
 import type { NoctyriumState } from "../types";
 import type { ContentReference } from "./cloudContent";
@@ -29,6 +30,11 @@ vi.mock("../../pages/QuestionWorkspacePage", () => ({ default: () => null }));
 vi.mock("./cloudOriginals", () => ({ downloadCloudOriginal: mocks.original }));
 
 const HASH = "a".repeat(64);
+const FIGURE_HASH = "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881";
+function localFigure(text: string): Blob {
+  // jsdom Blob does not implement arrayBuffer in all supported test versions.
+  return Object.assign(new Blob([text]), { arrayBuffer: async () => new TextEncoder().encode(text).buffer });
+}
 const collections = ["questions", "documents"] as const;
 type Collection = typeof collections[number];
 function ref(collection: Collection, id: string): ContentReference {
@@ -51,6 +57,7 @@ function noIO() {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.stubGlobal("crypto", webcrypto);
   setQuestionAttachmentAccount("owner");
   mocks.account.mockResolvedValue({ client: {}, userId: "owner", assertCurrent: async () => {} });
   mocks.hydrate.mockImplementation(async (_client, _userId, partial) => partial);
@@ -61,7 +68,7 @@ beforeEach(() => {
   mocks.putBlob.mockResolvedValue(undefined);
   mocks.download.mockResolvedValue(new Blob(["x"], { type: "image/png" }));
 });
-afterEach(() => setQuestionAttachmentAccount(undefined));
+afterEach(() => { setQuestionAttachmentAccount(undefined); vi.unstubAllGlobals(); });
 
 describe.each(collections)("content identity admission: %s", collection => {
   it.each([{ selection: undefined }, { selection: ["x"] }, { selection: ["unselected"] }])("rejects overlap before any I/O (selection %j)", async ({ selection }) => {
@@ -153,7 +160,7 @@ function figures(count = 1) {
       },
     }] as const;
   });
-  remote.deferredContent!.media = entries.map(([blobKey]) => ({ blobKey, hash: HASH, byteSize: 1, updatedAt }));
+  remote.deferredContent!.media = entries.map(([blobKey]) => ({ blobKey, hash: FIGURE_HASH, byteSize: 1, updatedAt }));
   mocks.media.mockReturnValue(new Map(entries));
   return remote;
 }
@@ -227,7 +234,7 @@ describe("deferred binary account isolation", () => {
 
   it("retains a same-size local copy discovered during the download", async () => {
     const remote = figures();
-    mocks.getBlob.mockResolvedValueOnce(undefined).mockResolvedValueOnce({ blob: new Blob(["x"]) });
+    mocks.getBlob.mockResolvedValueOnce(undefined).mockResolvedValueOnce({ blob: localFigure("x") });
     await materializeState(remote);
     expect(mocks.download).toHaveBeenCalledTimes(1);
     expect(mocks.putBlob).not.toHaveBeenCalled();
@@ -242,5 +249,70 @@ describe("deferred binary account isolation", () => {
     });
     await expect(downloadAccountContent()).rejects.toThrow(/workspace changed/);
     expect(mocks.setState).not.toHaveBeenCalled();
+  });
+});
+
+describe("selected deferred figure proof", () => {
+  it.each([0, 1])("rejects mismatched selected manifest size before binary I/O at index %s", async index => {
+    const remote = figures(2);
+    remote.deferredContent!.media[index].byteSize = 2;
+    // Distinct hashes exercise selected correspondence, not manifest dedup validation.
+    remote.deferredContent!.media[index].hash = HASH;
+    const before = JSON.stringify(remote);
+    await expect(materializeState(remote)).rejects.toThrow(/image index/);
+    for (const mock of [mocks.original, mocks.getBlob, mocks.download, mocks.putBlob]) expect(mock).not.toHaveBeenCalled();
+    expect(JSON.stringify(remote)).toBe(before);
+  });
+
+  it("rejects a missing selected reference even if local bytes exist", async () => {
+    const remote = figures();
+    remote.deferredContent!.media = [];
+    mocks.getBlob.mockResolvedValue({ blob: localFigure("x") });
+    await expect(materializeState(remote)).rejects.toThrow(/no protected image reference/);
+    expect(mocks.getBlob).not.toHaveBeenCalled();
+    expect(mocks.putBlob).not.toHaveBeenCalled();
+  });
+
+  it("refuses a mismatched timestamp on a mutable key", async () => {
+    const remote = figures();
+    remote.deferredContent!.media[0].updatedAt = "2026-10-01T00:00:00.000Z";
+    await expect(materializeState(remote)).rejects.toThrow(/image index/);
+    expect(mocks.download).not.toHaveBeenCalled();
+  });
+
+  it("accepts an older global manifest timestamp for a selected immutable shared figure", async () => {
+    const remote = figures();
+    const [entry] = remote.deferredContent!.media;
+    const key = `private-library:sha256:${FIGURE_HASH}`;
+    const selectedAt = entry.updatedAt;
+    remote.deferredContent!.media = [{ ...entry, blobKey: key, updatedAt: "2026-10-01T00:00:00.000Z" }];
+    mocks.media.mockReturnValue(new Map([[key, { questionId: "y", checksum: FIGURE_HASH, attachment: { blobKey: key, byteSize: 1, updatedAt: selectedAt } }]]));
+    await expect(materializeState(remote)).resolves.toMatchObject({ deferredContent: undefined });
+    expect(mocks.putBlob).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([false, true])("refuses same-size wrong bytes without replacement (concurrent=%s)", async concurrent => {
+    const remote = figures();
+    const before = JSON.stringify(remote);
+    if (concurrent) mocks.getBlob.mockResolvedValueOnce(undefined).mockResolvedValueOnce({ blob: localFigure("z") });
+    else mocks.getBlob.mockResolvedValue({ blob: localFigure("z") });
+    await expect(materializeState(remote)).rejects.toThrow(/failed its checksum/);
+    expect(mocks.download).toHaveBeenCalledTimes(concurrent ? 1 : 0);
+    expect(mocks.putBlob).not.toHaveBeenCalled();
+    expect(JSON.stringify(remote)).toBe(before);
+  });
+
+  it("reuses verified local bytes without downloading", async () => {
+    const remote = figures();
+    mocks.getBlob.mockResolvedValue({ blob: localFigure("x") });
+    await materializeState(remote);
+    expect(mocks.download).not.toHaveBeenCalled();
+    expect(mocks.putBlob).not.toHaveBeenCalled();
+  });
+
+  it("ignores unselected manifest entries rather than requiring subset equality", async () => {
+    const remote = figures();
+    remote.deferredContent!.media.push({ ...remote.deferredContent!.media[0], blobKey: "unselected" });
+    await expect(materializeState(remote, { questionIds: ["y"] })).resolves.toMatchObject({ deferredContent: undefined });
   });
 });

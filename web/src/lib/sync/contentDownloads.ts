@@ -10,6 +10,7 @@ import { admitContentIdentities } from "./deferredContent";
 import { downloadAcademicAsset, storedAcademicBindings } from "../academicLibrary/contentReferences";
 import { readSourceOriginal, saveSourceOriginal } from "../decode/sources";
 import { downloadCloudOriginal } from "./cloudOriginals";
+import { sha256Hex } from "../checksum";
 
 export interface ContentSelection { questionIds?: string[]; documentIds?: string[] }
 
@@ -42,6 +43,23 @@ export async function materializeState(state: NoctyriumState, selection?: Conten
   const partial = { ...state, questions, documents, deferredContent: undefined } as NoctyriumState;
   const restored = await hydrateCloudContent(client, userId, partial, sources, ensureCurrent);
   await ensureCurrent();
+  // Validate the selected subset before any original or figure storage writes.
+  // A digest-addressed image shared with an unselected record can legitimately
+  // have an earlier manifest timestamp; mutable keys require exact equality.
+  const media = new Map(deferred.media.map(entry => [entry.blobKey, entry]));
+  const figures = [...workspaceMedia(restored).entries()];
+  for (const [blobKey, { attachment, checksum }] of figures) {
+    const reference = media.get(blobKey);
+    if (!reference) throw new Error("This source has no protected image reference. Keep its original file and retry from a complete backup.");
+    const immutable = /^private-library:sha256:[a-f0-9]{64}$/.test(blobKey);
+    const timestampMatches = immutable
+      ? Number.isFinite(Date.parse(attachment.updatedAt)) && Date.parse(reference.updatedAt) <= Date.parse(attachment.updatedAt)
+      : reference.updatedAt === attachment.updatedAt;
+    if (reference.byteSize !== attachment.byteSize || !timestampMatches) {
+      throw new Error("The protected image index does not match this source. Your saved work is unchanged.");
+    }
+    if (checksum && reference.hash !== checksum) throw new Error("This image does not match its immutable question source.");
+  }
   // Original PDF/DOCX files belong to the same protected course revision.
   // Keep only verified copies in Decode's existing original-file cache.
   const originals = storedAcademicBindings(state).originals ?? [];
@@ -65,28 +83,27 @@ export async function materializeState(state: NoctyriumState, selection?: Conten
   }
   // Explicit downloads include their original figures so the resulting bank
   // is actually usable offline. Source metadata alone is never called downloaded.
-  const media = new Map(deferred.media.map(entry => [entry.blobKey, entry]));
-  const figures = [...workspaceMedia(restored).entries()];
   let cursor = 0;
   let failed = false;
   let failure: unknown;
   const localAccess = { ...access, localOnly: true };
   async function worker(): Promise<void> {
     while (cursor < figures.length && !failed) {
-      const [blobKey, { questionId, attachment, checksum }] = figures[cursor++];
+      const [blobKey, { questionId, attachment }] = figures[cursor++];
       try {
         await ensureCurrent();
         if (failed) return;
-        const reference = media.get(blobKey);
-        if (checksum && reference?.hash !== checksum) throw new Error("This image does not match its immutable question source.");
+        const reference = media.get(blobKey)!; // All selected references passed preflight.
         const local = await getQuestionAttachmentBlob(blobKey, localAccess);
         await ensureCurrent();
         if (failed) return;
         if (local) {
           if (local.blob.size !== attachment.byteSize) throw new Error("An existing image has a different size. AXOM did not replace it.");
+          if (await sha256Hex(await local.blob.arrayBuffer()) !== reference.hash) throw new Error("An existing image failed its checksum. AXOM did not replace it.");
+          await ensureCurrent();
+          if (failed) return;
           continue;
         }
-        if (!reference) throw new Error("This source has no protected image reference. Keep its original file and retry from a complete backup.");
         const blob = await downloadCloudMediaAsset(client, userId, reference);
         await ensureCurrent();
         if (failed) return;
@@ -97,6 +114,9 @@ export async function materializeState(state: NoctyriumState, selection?: Conten
         if (failed) return;
         if (concurrent) {
           if (concurrent.blob.size !== attachment.byteSize) throw new Error("An existing image has a different size. AXOM did not replace it.");
+          if (await sha256Hex(await concurrent.blob.arrayBuffer()) !== reference.hash) throw new Error("An existing image failed its checksum. AXOM did not replace it.");
+          await ensureCurrent();
+          if (failed) return;
           continue;
         }
         await putQuestionAttachmentBlob(blobKey, { ...attachment, questionId, blob }, access);
