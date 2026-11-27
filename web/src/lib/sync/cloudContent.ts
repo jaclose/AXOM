@@ -22,6 +22,8 @@ const contentCache = new Map<string, { packed: string; byteSize: number }>();
 const confirmedContentUploads = new Map<string, Set<string>>();
 const MAX_CONCURRENT_CONTENT_UPLOADS = 8;
 let cachedBytes = 0;
+// A reset invalidates outstanding reads even if the same account returns (ABA).
+let contentCacheGeneration = Symbol();
 function cacheContent(hash: string, content: string, byteSize: number) {
   if (contentCache.has(hash)) return;
   contentCache.set(hash, { packed: content, byteSize });
@@ -188,59 +190,78 @@ export async function hydrateCloudContent(client: SupabaseClient, userId: string
   if (references.length !== state.questions.length + state.documents.length) throw new Error("This account version is missing source records.");
   // Bounded concurrency keeps a large library from opening thousands of requests.
   const academicFiles = new Map<string, Promise<PreparedBank>>();
+  const generation = contentCacheGeneration;
   let cursor = 0;
+  let failed = false;
+  let firstError: unknown;
+  function assertGeneration() {
+    if (generation !== contentCacheGeneration) throw new Error("The account content cache changed during recovery. Retry from the current account.");
+  }
   async function worker() {
-    while (cursor < references.length) {
-      const reference = references[cursor++];
-      const index = byId[reference.collection].get(reference.id);
-      if (index === undefined) throw new Error("A source reference does not belong to this workspace.");
-      await assertCurrent();
-      // Matching reconstructed text is not proof of access to an academic asset.
-      // Only reuse verified academic files within this guarded hydration call.
-      const cached = reference.academic ? undefined : contentCache.get(`${userId}/${reference.hash}`);
-      if (cached && cached.byteSize !== reference.byteSize) throw new Error("A source file could not be downloaded or verified. Your current workspace is unchanged.");
-      let packed = cached?.packed;
-      let verifiedBytes: number | undefined;
-      if (packed === undefined) {
-        let data: Blob | null;
-        let error: unknown;
-        if (reference.academic) {
-          const key = JSON.stringify([academicFileLocator(reference.academic), reference.academic.sha256]);
-          let request = academicFiles.get(key);
-          if (!request) {
-            request = downloadAcademicAsset(client, reference.academic).then(async blob => {
-              // Verified raw bytes must decode losslessly before reconstructing academic records.
-              const text = new TextDecoder("utf-8", { fatal: true }).decode(await blob.arrayBuffer());
-              return readPreparedBank(JSON.parse(text));
-            });
-            academicFiles.set(key, request);
-          }
-          const source = academicRecord(await request, reference.academic);
-          const projected = await projectCloudRecord({ ...source, id: reference.id }, reference.collection);
-          data = new Blob([projected.canonicalText]);
-        } else ({ data, error } = await client.storage.from(CONTENT_BUCKET).download(`${userId}/${reference.hash}`));
-        if (error || !data || data.size !== reference.byteSize) throw new Error("A source file could not be downloaded or verified. Your current workspace is unchanged.");
-        const bytes = new Uint8Array(await data.arrayBuffer());
-        if (await sha256(bytes) !== reference.hash) throw new Error("A source file could not be downloaded or verified. Your current workspace is unchanged.");
-        // Match historical Blob.text BOM handling, but never replace invalid UTF-8.
-        packed = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-        if (!reference.academic) verifiedBytes = bytes.byteLength;
+    while (!failed && cursor < references.length) {
+      try {
+        const reference = references[cursor++];
+        const index = byId[reference.collection].get(reference.id);
+        if (index === undefined) throw new Error("A source reference does not belong to this workspace.");
+        await assertCurrent();
+        assertGeneration();
+        if (failed) return;
+        // Matching reconstructed text is not proof of access to an academic asset.
+        // Only reuse verified academic files within this guarded hydration call.
+        const cached = reference.academic ? undefined : contentCache.get(`${userId}/${reference.hash}`);
+        if (cached && cached.byteSize !== reference.byteSize) throw new Error("A source file could not be downloaded or verified. Your current workspace is unchanged.");
+        let packed = cached?.packed;
+        let verifiedBytes: number | undefined;
+        if (packed === undefined) {
+          let data: Blob | null;
+          let error: unknown;
+          if (reference.academic) {
+            const key = JSON.stringify([academicFileLocator(reference.academic), reference.academic.sha256]);
+            let request = academicFiles.get(key);
+            if (!request) {
+              request = downloadAcademicAsset(client, reference.academic).then(async blob => {
+                // Verified raw bytes must decode losslessly before reconstructing academic records.
+                const text = new TextDecoder("utf-8", { fatal: true }).decode(await blob.arrayBuffer());
+                return readPreparedBank(JSON.parse(text));
+              });
+              academicFiles.set(key, request);
+            }
+            const source = academicRecord(await request, reference.academic);
+            const projected = await projectCloudRecord({ ...source, id: reference.id }, reference.collection);
+            data = new Blob([projected.canonicalText]);
+          } else ({ data, error } = await client.storage.from(CONTENT_BUCKET).download(`${userId}/${reference.hash}`));
+          if (error || !data || data.size !== reference.byteSize) throw new Error("A source file could not be downloaded or verified. Your current workspace is unchanged.");
+          const bytes = new Uint8Array(await data.arrayBuffer());
+          if (await sha256(bytes) !== reference.hash) throw new Error("A source file could not be downloaded or verified. Your current workspace is unchanged.");
+          // Match historical Blob.text BOM handling, but never replace invalid UTF-8.
+          packed = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+          if (!reference.academic) verifiedBytes = bytes.byteLength;
+        }
+        const text = await decompressText(packed, reference.expandedBytes);
+        if (new TextEncoder().encode(text).length !== reference.expandedBytes) throw new Error("A source file has an invalid expanded size.");
+        const source = JSON.parse(text) as Record<string, unknown>;
+        const allowed: readonly string[] = reference.collection === "documents" ? DOCUMENT_FIELDS : QUESTION_FIELDS;
+        if (!source || typeof source !== "object" || Array.isArray(source) || Object.keys(source).some((key) => !allowed.includes(key))) throw new Error("A source file contains unexpected fields.");
+        // Recheck synchronously after the account guard, immediately before insertion.
+        await assertCurrent();
+        assertGeneration();
+        if (failed) return;
+        if (verifiedBytes !== undefined) cacheContent(`${userId}/${reference.hash}`, packed, verifiedBytes);
+        Object.assign(workspace[reference.collection][index] = { ...workspace[reference.collection][index] }, source);
+      } catch (error) {
+        if (!failed) { failed = true; firstError = error; }
       }
-      const text = await decompressText(packed, reference.expandedBytes);
-      if (new TextEncoder().encode(text).length !== reference.expandedBytes) throw new Error("A source file has an invalid expanded size.");
-      const source = JSON.parse(text) as Record<string, unknown>;
-      const allowed: readonly string[] = reference.collection === "documents" ? DOCUMENT_FIELDS : QUESTION_FIELDS;
-      if (!source || typeof source !== "object" || Array.isArray(source) || Object.keys(source).some((key) => !allowed.includes(key))) throw new Error("A source file contains unexpected fields.");
-      if (verifiedBytes !== undefined) cacheContent(`${userId}/${reference.hash}`, packed, verifiedBytes);
-      Object.assign(workspace[reference.collection][index] = { ...workspace[reference.collection][index] }, source);
     }
   }
+  // Drain started workers before releasing the sync coordinator on failure.
   await Promise.all(Array.from({ length: Math.min(4, references.length) }, worker));
+  if (failed) throw firstError;
   await assertCurrent();
+  assertGeneration();
   return workspace;
 }
 
-export function clearCloudContentCache(): void { contentCache.clear(); confirmedContentUploads.clear(); cachedBytes = 0; }
+export function clearCloudContentCache(): void { contentCacheGeneration = Symbol(); contentCache.clear(); confirmedContentUploads.clear(); cachedBytes = 0; }
 
 export function mergeSourceFields(metadata: object, source: object, collection: ContentReference["collection"]): object {
   const record = source as Record<string, unknown>;

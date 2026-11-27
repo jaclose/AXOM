@@ -25,7 +25,7 @@ const PACKED = JSON.stringify({ stem: "Synthetic source" });
 const BANK = "{}";
 const guard = async () => {};
 
-async function fixture(bank = new Blob([BANK])) {
+async function fixture(bank = new Blob([BANK]), waitForPrivate?: () => Promise<void>) {
   const assetHash = await sha256(new Uint8Array(await bank.arrayBuffer()));
   const hash = await sha256(new TextEncoder().encode(PACKED));
   const denied = new Set<string>();
@@ -62,7 +62,10 @@ async function fixture(bank = new Blob([BANK])) {
           async download(path: string) {
             downloads.push(bucket + "/" + path);
             if (bucket === "academic-content") return { data: bank, error: null };
-            if (bucket === "workspace-content") return { data: new Blob([PACKED]), error: null };
+            if (bucket === "workspace-content") {
+              await waitForPrivate?.();
+              return { data: new Blob([PACKED]), error: null };
+            }
             throw new Error("Unexpected bucket");
           },
         };
@@ -211,5 +214,83 @@ describe("academic source hydration binds immutable asset identity", () => {
       if (++checks > 1) throw new Error("Account changed");
     })).rejects.toThrow(/Account changed/);
     expect(JSON.stringify(state)).toBe(before);
+  });
+});
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+describe("cloud hydration failure settlement and cache lifetime", () => {
+  it.each([false, true])("drains a delayed private read after malformed academic bytes (reverse=%s)", async reverse => {
+    const started = deferred();
+    const release = deferred();
+    const decoding = deferred();
+    const bank = new Blob([Uint8Array.from([0xff])]);
+    const { client, downloads, ref, stateFor } = await fixture(bank, async () => {
+      started.resolve();
+      await release.promise;
+    });
+    // First read verifies the manifest digest, second feeds the fatal decoder.
+    const original = bank.arrayBuffer.bind(bank);
+    let reads = 0;
+    const spy = vi.spyOn(bank, "arrayBuffer").mockImplementation(async () => {
+      const bytes = await original();
+      if (++reads === 2) decoding.resolve();
+      return bytes;
+    });
+    const privateRef = { ...ref("private"), academic: undefined };
+    const refs = [privateRef, ref("academic")];
+    if (reverse) refs.reverse();
+    const state = stateFor(refs);
+    const before = JSON.stringify(state);
+    let settled = false;
+    const outcome = hydrateCloudContent(client, OWNER, state, refs, guard)
+      .then(() => null, error => error)
+      .finally(() => { settled = true; });
+    try {
+      await Promise.all([started.promise, decoding.promise]);
+      await new Promise<void>(done => setImmediate(done));
+      expect(settled).toBe(false);
+    } finally {
+      release.resolve();
+      await outcome;
+      spy.mockRestore();
+    }
+    expect(await outcome).toBeInstanceOf(Error);
+    expect(readPreparedBank).not.toHaveBeenCalled();
+    expect(JSON.stringify(state)).toBe(before);
+    // A failed sibling must not leave a newly confirmed private cache entry.
+    await hydrateCloudContent(client, OWNER, stateFor([privateRef]), [privateRef], guard);
+    expect(downloads.filter(path => path.startsWith("workspace-content/"))).toHaveLength(2);
+  });
+
+  it.each([false, true])("rejects an obsolete private read even if the account ID returns (reset=%s)", async reset => {
+    const started = deferred();
+    const release = deferred();
+    const { client, downloads, ref, stateFor } = await fixture(new Blob([BANK]), async () => {
+      started.resolve();
+      await release.promise;
+    });
+    const privateRef = { ...ref("private"), academic: undefined };
+    const state = stateFor([privateRef]);
+    const before = JSON.stringify(state);
+    const outcome = hydrateCloudContent(client, OWNER, state, [privateRef], guard)
+      .then(value => ({ value }), error => ({ error }));
+    await started.promise;
+    if (reset) {
+      clearCloudContentCache();
+      clearCloudContentCache();
+    }
+    release.resolve();
+    const result = await outcome;
+    if (reset) expect(result).toHaveProperty("error");
+    else expect(result).toHaveProperty("value");
+    expect(JSON.stringify(state)).toBe(before);
+    const retry = await hydrateCloudContent(client, OWNER, state, [privateRef], guard);
+    expect(retry.questions[0].stem).toBe("Synthetic source");
+    expect(downloads).toHaveLength(reset ? 2 : 1);
   });
 });
