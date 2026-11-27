@@ -1,0 +1,370 @@
+// @vitest-environment node
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { compressText, sha256 } from "../compressedText";
+import { makeSeed } from "../seed";
+import type { NoctyriumState } from "../types";
+import { clearCloudContentCache, hydrateCloudContent, readContentReferences, uploadCloudContent, type ContentReference, type ContentUpload } from "./cloudContent";
+
+const A = "synthetic-a";
+const B = "synthetic-b";
+const guard = async () => {};
+const size = (text: string) => new TextEncoder().encode(text).length;
+
+async function fixture(stem = "Synthetic é 字") {
+  const text = JSON.stringify({ stem });
+  const packed = await compressText(text);
+  const hash = await sha256(new TextEncoder().encode(packed));
+  const reference: ContentReference = { collection: "questions", id: "q", hash, byteSize: size(packed), expandedBytes: size(text) };
+  const object: ContentUpload = { reference, content: packed, canonicalText: text, canonicalHash: await sha256(new TextEncoder().encode(text)) };
+  const state = makeSeed();
+  state.documents = [];
+  state.questions = [{ id: "q", notes: "Keep learner overlay" } as NoctyriumState["questions"][number]];
+  const blobs = new Map<string, Blob>();
+  const download = vi.fn(async (path: string) => {
+    const data = blobs.get(path);
+    return data ? { data, error: null } : { data: null, error: new Error("Synthetic missing") };
+  });
+  const upload = vi.fn(async (path: string, data: Blob): Promise<{ error: unknown }> => {
+    blobs.set(path, data);
+    return { error: null };
+  });
+  const client = { storage: { from(bucket: string) {
+    expect(bucket).toBe("workspace-content");
+    return { download, upload };
+  } } } as unknown as SupabaseClient;
+  const hydrate = (owner: string, ref = reference, assertCurrent = guard) =>
+    hydrateCloudContent(client, owner, state, [ref], assertCurrent);
+  const push = (owner: string, previous: ContentReference[] = [], assertCurrent = guard) =>
+    uploadCloudContent(client, owner, [object], previous, assertCurrent);
+  return { stem, packed, reference, state, blobs, download, upload, hydrate, push };
+}
+
+beforeEach(() => clearCloudContentCache());
+
+describe("private source object proof", () => {
+  it.each([false, true])("requires verified packed byte size on every cache hit (compressed=%s)", async compressed => {
+    const f = await fixture(compressed ? "é字".repeat(5000) : "Synthetic é 字");
+    if (compressed) expect(f.packed).toMatch(/^AXOM_GZIP_V1:/);
+    else expect(f.reference.byteSize).toBeGreaterThan(f.packed.length);
+    const before = JSON.stringify(f.state);
+    for (const owner of [A, B]) f.blobs.set(owner + "/" + f.reference.hash, new Blob([f.packed]));
+    expect((await f.hydrate(A)).questions[0]).toMatchObject({ stem: f.stem, notes: "Keep learner overlay" });
+    await f.hydrate(A);
+    expect(f.download).toHaveBeenCalledTimes(1);
+    for (const delta of [-1, 1]) {
+      await expect(f.hydrate(A, { ...f.reference, byteSize: f.reference.byteSize + delta })).rejects.toThrow(/could not be downloaded or verified/);
+    }
+    expect(f.download).toHaveBeenCalledTimes(1);
+    await expect(f.hydrate(B, { ...f.reference, byteSize: f.reference.byteSize - 1 })).rejects.toThrow(/could not be downloaded or verified/);
+    await f.hydrate(B);
+    await f.hydrate(A);
+    expect(f.download).toHaveBeenCalledTimes(3);
+    clearCloudContentCache();
+    await expect(f.hydrate(A, { ...f.reference, byteSize: f.reference.byteSize + 1 })).rejects.toThrow(/could not be downloaded or verified/);
+    expect(f.download).toHaveBeenCalledTimes(4);
+    expect(JSON.stringify(f.state)).toBe(before);
+  });
+
+  it("does not treat a prior academic digest as a private object receipt", async () => {
+    const f = await fixture();
+    const academic: ContentReference = { ...f.reference, academic: {
+      revisionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", path: "banks/source.json", sha256: "f".repeat(64),
+      adapterVersion: 1, kind: "question", questionId: "q", reviewedAt: "2026-11-01T00:00:00Z",
+    } };
+    await f.push(A, [academic]);
+    expect(f.upload).toHaveBeenCalledTimes(1);
+    await f.push(A);
+    expect(f.upload).toHaveBeenCalledTimes(1);
+    clearCloudContentCache();
+    expect((await f.hydrate(A)).questions[0].stem).toBe(f.stem);
+    await f.push(A, [f.reference]);
+    expect(f.upload).toHaveBeenCalledTimes(1);
+    await f.push(B, [academic]);
+    expect(f.upload).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not confirm a failed upload or an unverifiable conflict", async () => {
+    const f = await fixture();
+    f.upload.mockResolvedValueOnce({ error: new Error("Synthetic write denied") });
+    await expect(f.push(A)).rejects.toThrow("Synthetic write denied");
+    f.upload.mockResolvedValueOnce({ error: { statusCode: "409" } });
+    f.blobs.set(A + "/" + f.reference.hash, new Blob(["wrong bytes"]));
+    await expect(f.push(A)).rejects.toThrow(/could not be verified/);
+    await f.push(A);
+    expect(f.upload).toHaveBeenCalledTimes(3);
+    await f.push(A);
+    expect(f.upload).toHaveBeenCalledTimes(3);
+    clearCloudContentCache();
+    f.upload.mockResolvedValueOnce({ error: { statusCode: "409" } });
+    await f.push(A);
+    expect(f.download).toHaveBeenCalledTimes(3);
+    await f.push(A);
+    expect(f.upload).toHaveBeenCalledTimes(4);
+  });
+
+  it("refuses a changed account before upload and before hydration adoption", async () => {
+    const f = await fixture();
+    const before = JSON.stringify(f.state);
+    const changed = async () => { throw new Error("Account changed"); };
+    await expect(f.push(A, [], changed)).rejects.toThrow("Account changed");
+    expect(f.upload).not.toHaveBeenCalled();
+    await f.push(A);
+    let checks = 0;
+    await expect(f.hydrate(A, f.reference, async () => {
+      if (++checks > 1) throw new Error("Account changed");
+    })).rejects.toThrow("Account changed");
+    expect(JSON.stringify(f.state)).toBe(before);
+  });
+});
+
+describe("lossless private source decoding", () => {
+  it.each([
+    [0x80], [0xc0, 0xaf], [0xed, 0xa0, 0x80],
+    [0xf4, 0x90, 0x80, 0x80], [0xe2, 0x82], [0xff],
+  ].map(bytes => ({ bytes })))("rejects hash-matching malformed UTF-8 without caching: $bytes", async ({ bytes }) => {
+    const f = await fixture();
+    const blob = new Blob(['{"stem":"', Uint8Array.from(bytes), '"}']);
+    const ref = { ...f.reference, hash: await sha256(new Uint8Array(await blob.arrayBuffer())),
+      byteSize: blob.size, expandedBytes: size(await blob.text()) };
+    for (const owner of [A, B]) f.blobs.set(owner + "/" + ref.hash, blob);
+    const before = JSON.stringify(f.state);
+    for (const owner of [A, A, B, A]) {
+      await expect(f.hydrate(owner, ref)).rejects.toThrow();
+      expect(JSON.stringify(f.state)).toBe(before);
+    }
+    expect(f.download).toHaveBeenCalledTimes(4);
+  });
+
+  it.each([false, true])("preserves valid replacement characters and legacy leading BOM (BOM=%s)", async bom => {
+    const f = await fixture();
+    const stem = "Synthetic � é 字";
+    const text = JSON.stringify({ stem });
+    const blob = new Blob([(bom ? "\uFEFF" : "") + text]);
+    const ref = { ...f.reference, hash: await sha256(new Uint8Array(await blob.arrayBuffer())),
+      byteSize: blob.size, expandedBytes: size(text) };
+    for (const owner of [A, B]) f.blobs.set(owner + "/" + ref.hash, blob);
+    const before = JSON.stringify(f.state);
+    for (const owner of [A, A, B, A]) {
+      expect((await f.hydrate(owner, ref)).questions[0]).toMatchObject({ stem, notes: "Keep learner overlay" });
+    }
+    expect(f.download).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(f.state)).toBe(before);
+  });
+
+  it.each([
+    { text: '{"stem":"ok"}', delta: 1 },
+    { text: '{"forbidden":1}', delta: 0 },
+    { text: '{', delta: 0 },
+  ])("does not cache a rejected source: $text", async ({ text, delta }) => {
+    const f = await fixture();
+    const blob = new Blob([text]);
+    const ref = { ...f.reference, hash: await sha256(new Uint8Array(await blob.arrayBuffer())),
+      byteSize: blob.size, expandedBytes: size(text) + delta };
+    f.blobs.set(A + "/" + ref.hash, blob);
+    const before = JSON.stringify(f.state);
+    await expect(f.hydrate(A, ref)).rejects.toThrow();
+    await expect(f.hydrate(A, ref)).rejects.toThrow();
+    expect(f.download).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(f.state)).toBe(before);
+  });
+});
+
+describe("private digest size agreement", () => {
+  it.each(["byteSize", "expandedBytes"] as const)("refuses conflicting %s before download or upload in either order", async field => {
+    const f = await fixture();
+    const second: ContentReference = { ...f.reference, id: "q2", [field]: f.reference[field] + 1 };
+    const state = { ...f.state, questions: [...f.state.questions, { ...f.state.questions[0], id: "q2" }] };
+    const before = JSON.stringify(state);
+    const client = { storage: { from: () => ({ download: f.download, upload: f.upload }) } } as unknown as SupabaseClient;
+    for (const refs of [[f.reference, second], [second, f.reference]]) {
+      const snapshot = JSON.stringify(refs);
+      expect(() => readContentReferences(refs)).toThrow(/conflicting private file sizes/);
+      await expect(hydrateCloudContent(client, A, state, refs, guard)).rejects.toThrow(/conflicting private file sizes/);
+      await expect(uploadCloudContent(client, A, refs.map(reference => ({ reference, content: f.packed, canonicalText: "", canonicalHash: reference.hash })), [], guard)).rejects.toThrow(/conflicting private file sizes/);
+      expect(JSON.stringify(refs)).toBe(snapshot);
+    }
+    expect(f.download).not.toHaveBeenCalled();
+    expect(f.upload).not.toHaveBeenCalled();
+    expect(JSON.stringify(state)).toBe(before);
+  });
+
+  it("admits identical reuse across collections and separate academic claims", async () => {
+    const f = await fixture();
+    const twin: ContentReference = { ...f.reference, collection: "documents" };
+    const academic: ContentReference = { ...f.reference, id: "shared", byteSize: f.reference.byteSize + 1, academic: {
+      revisionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", path: "banks/source.json", sha256: "f".repeat(64),
+      adapterVersion: 1, kind: "question", questionId: "shared", reviewedAt: "2026-11-01T00:00:00Z",
+    } };
+    expect(readContentReferences([f.reference, twin, academic])).toEqual([f.reference, twin, academic]);
+  });
+
+  it("does not reuse a prior receipt with different size claims", async () => {
+    const f = await fixture();
+    await f.push(A, [{ ...f.reference, expandedBytes: f.reference.expandedBytes + 1 }]);
+    expect(f.upload).toHaveBeenCalledTimes(1);
+    await f.push(A);
+    expect(f.upload).toHaveBeenCalledTimes(1);
+  });
+
+  it("checks packed byte size before starting a new upload despite a same-hash receipt", async () => {
+    const f = await fixture();
+    await f.push(A);
+    const client = { storage: { from: () => ({ download: f.download, upload: f.upload }) } } as unknown as SupabaseClient;
+    const object: ContentUpload = { reference: { ...f.reference, byteSize: f.reference.byteSize + 1 }, content: f.packed, canonicalText: "", canonicalHash: f.reference.hash };
+    await expect(uploadCloudContent(client, A, [object], [], guard)).rejects.toThrow(/could not be verified/);
+    expect(f.upload).toHaveBeenCalledTimes(1);
+    expect(f.download).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("fresh private upload byte proof", () => {
+  it.each([false, true])("rejects a same-size wrong object before any storage request (reverse=%s)", async reverse => {
+    const f = await fixture("Synthetic A");
+    const other = await fixture("Synthetic B");
+    const good: ContentUpload = { reference: f.reference, content: f.packed, canonicalText: "", canonicalHash: f.reference.hash };
+    const bad: ContentUpload = { reference: { ...other.reference, id: "q2" }, content: f.packed, canonicalText: "", canonicalHash: other.reference.hash };
+    expect(bad.reference.byteSize).toBe(size(bad.content));
+    const batch = reverse ? [bad, good] : [good, bad];
+    const before = JSON.stringify(batch);
+    const client = { storage: { from: () => ({ download: f.download, upload: f.upload }) } } as unknown as SupabaseClient;
+    await expect(uploadCloudContent(client, A, batch, [], guard)).rejects.toThrow(/could not be verified/);
+    expect(f.upload).not.toHaveBeenCalled();
+    expect(f.download).not.toHaveBeenCalled();
+    expect(JSON.stringify(batch)).toBe(before);
+    await uploadCloudContent(client, A, [good, { ...bad, content: other.packed }], [], guard);
+    expect(f.upload).toHaveBeenCalledTimes(2);
+    await uploadCloudContent(client, A, [good, { ...bad, content: other.packed }], [], guard);
+    expect(f.upload).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([false, true])("refuses conflicting fresh duplicate payloads (reverse=%s)", async reverse => {
+    const f = await fixture("Synthetic A");
+    const other = await fixture("Synthetic B");
+    const good: ContentUpload = { reference: f.reference, content: f.packed, canonicalText: "", canonicalHash: f.reference.hash };
+    const bad = { ...good, reference: { ...good.reference, id: "q2" }, content: other.packed };
+    const client = { storage: { from: () => ({ download: f.download, upload: f.upload }) } } as unknown as SupabaseClient;
+    await expect(uploadCloudContent(client, A, reverse ? [bad, good] : [good, bad], [], guard)).rejects.toThrow(/could not be verified/);
+    expect(f.upload).not.toHaveBeenCalled();
+    await uploadCloudContent(client, A, [good, { ...bad, content: good.content }], [], guard);
+    expect(f.upload).toHaveBeenCalledTimes(1);
+  });
+
+  it("snapshots the verified path and content before asynchronous hashing", async () => {
+    const f = await fixture("Synthetic A");
+    const other = await fixture("Synthetic B");
+    const object: ContentUpload = { reference: { ...f.reference }, content: f.packed, canonicalText: "", canonicalHash: f.reference.hash };
+    const client = { storage: { from: () => ({ download: f.download, upload: f.upload }) } } as unknown as SupabaseClient;
+    const pending = uploadCloudContent(client, A, [object], [], guard);
+    object.content = other.packed;
+    object.reference.hash = other.reference.hash;
+    await pending;
+    expect(f.upload).toHaveBeenCalledTimes(1);
+    expect(f.upload.mock.calls[0][0]).toBe(A + "/" + f.reference.hash);
+    expect(await f.upload.mock.calls[0][1].text()).toBe(f.packed);
+  });
+
+  it.each(["success", "conflict"] as const)("rejects reset during upload before receipt or conflict read (%s)", async outcome => {
+    const f = await fixture();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    f.upload.mockImplementationOnce(async () => {
+      await gate;
+      return { error: outcome === "conflict" ? { statusCode: "409" } : null };
+    });
+    const pending = f.push(A);
+    const result = expect(pending).rejects.toThrow(/cache changed/);
+    await vi.waitFor(() => expect(f.upload).toHaveBeenCalledTimes(1));
+    clearCloudContentCache();
+    clearCloudContentCache();
+    release();
+    await result;
+    expect(f.download).not.toHaveBeenCalled();
+    await f.push(A);
+    expect(f.upload).toHaveBeenCalledTimes(2);
+    await f.push(A);
+    expect(f.upload).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects reset during verification of an existing conflict", async () => {
+    const f = await fixture();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    f.upload.mockResolvedValueOnce({ error: { statusCode: "409" } });
+    f.download.mockImplementationOnce(async () => {
+      await gate;
+      return { data: new Blob([f.packed]), error: null };
+    });
+    const pending = f.push(A);
+    const result = expect(pending).rejects.toThrow(/cache changed/);
+    await vi.waitFor(() => expect(f.download).toHaveBeenCalledTimes(1));
+    clearCloudContentCache();
+    release();
+    await result;
+    await f.push(A);
+    expect(f.upload).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("fresh private upload readback", () => {
+  it.each(["missing", "same-size wrong bytes", "read denied"] as const)("refuses 2xx with %s and retries without a receipt", async failure => {
+    const f = await fixture();
+    const path = A + "/" + f.reference.hash;
+    const before = JSON.stringify(f.state);
+    if (failure === "missing") {
+      f.upload.mockResolvedValueOnce({ error: null });
+    } else if (failure === "same-size wrong bytes") {
+      const wrong = new Blob([new Uint8Array(f.reference.byteSize)]);
+      expect(wrong.size).toBe(f.reference.byteSize);
+      f.upload.mockImplementationOnce(async () => {
+        f.blobs.set(path, wrong);
+        return { error: null };
+      });
+    } else {
+      f.download.mockResolvedValueOnce({ data: null, error: new Error("Synthetic transient read denial") });
+    }
+    await expect(f.push(A)).rejects.toThrow(/could not be verified/);
+    expect(f.upload).toHaveBeenCalledTimes(1);
+    expect(f.download).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(f.state)).toBe(before);
+    // Model a subsequent successful immutable transfer, or an existing intact object.
+    if (failure === "same-size wrong bytes") {
+      // Conflict with a corrupted object must also refuse, not overwrite it.
+      f.upload.mockResolvedValueOnce({ error: { statusCode: "409" } });
+      await expect(f.push(A)).rejects.toThrow(/could not be verified/);
+      expect(f.blobs.get(path)?.size).toBe(f.reference.byteSize);
+      expect(f.upload).toHaveBeenCalledTimes(2);
+      return;
+    }
+    if (failure === "read denied") f.upload.mockResolvedValueOnce({ error: { statusCode: "409" } });
+    await f.push(A);
+    expect(f.upload).toHaveBeenCalledTimes(2);
+    expect(f.download).toHaveBeenCalledTimes(2);
+    await f.push(A);
+    expect(f.upload).toHaveBeenCalledTimes(2);
+    expect(f.download).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects an A-B-A reset during successful upload readback and never caches it", async () => {
+    const f = await fixture();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    f.download.mockImplementationOnce(async () => {
+      await gate;
+      return { data: new Blob([f.packed]), error: null };
+    });
+    const pending = f.push(A);
+    const result = expect(pending).rejects.toThrow(/cache changed/);
+    await vi.waitFor(() => expect(f.download).toHaveBeenCalledTimes(1));
+    clearCloudContentCache();
+    clearCloudContentCache();
+    release();
+    await result;
+    f.upload.mockResolvedValueOnce({ error: { statusCode: "409" } });
+    await f.push(A);
+    expect(f.upload).toHaveBeenCalledTimes(2);
+    expect(f.download).toHaveBeenCalledTimes(2);
+    await f.push(A);
+    expect(f.download).toHaveBeenCalledTimes(2);
+  });
+});
