@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { hasUniformUnfiledSourceScope, preparedBankImportOptions, readCatalog, readPreparedBank, safeLibraryPath, type LibraryReader } from "../privateLibrary/install";
+import { decodeLibraryText, hasUniformUnfiledSourceScope, preparedBankImportOptions, readCatalog, readPreparedBank, safeLibraryPath, type LibraryReader } from "../privateLibrary/install";
 import { readImageInfo, sha256 } from "../question-content/assets";
 import {
   assertInstallableAcademicImageBytes,
@@ -16,7 +16,7 @@ import { MAX_QUESTION_ATTACHMENTS, MAX_QUESTION_ATTACHMENT_BYTES, MAX_QUESTION_A
   type QuestionAttachmentMimeType } from "../questionAttachments";
 
 const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
-const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+const decode = decodeLibraryText;
 const basename = (name: string) => name.split(/[\\/]/).at(-1) || "source";
 const compareAcademicPath = (left: { path: string }, right: { path: string }) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0;
 // Import boundaries can return bytes from another JavaScript realm;

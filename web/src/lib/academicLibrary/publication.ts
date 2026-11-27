@@ -10,7 +10,7 @@ import { parseCourseTemplate } from "../course-engine/templateParse";
 import { SGU_CURRICULUM } from "../curricula";
 import { questionScope } from "../question-content/package";
 import { sha256 } from "../question-content/assets";
-import { hasUniformUnfiledSourceScope, readCatalog, readPreparedBank, safeLibraryPath, type LibraryReader } from "../privateLibrary/install";
+import { decodeLibraryText, hasUniformUnfiledSourceScope, readCatalog, readPreparedBank, safeLibraryPath, type LibraryReader } from "../privateLibrary/install";
 import type { LibraryInputLimits } from "../privateLibrary/inputRoot";
 import type { PrivateLibraryCatalog, ReviewedFiling } from "../privateLibrary/types";
 import { academicCoursePlan, moduleIdentity, reviewedTermNumber, type AcademicPlanTerm } from "./coursePlan";
@@ -22,7 +22,8 @@ type Term = ReviewedFiling["term"];
 type CatalogSource = PrivateLibraryCatalog["sources"][number];
 const TERMS: readonly Term[] = ["Term 1", "Term 2", "Term 3", "Term 4", "Term 5"];
 const UPLOADABLE_ORIGINALS = new Set(["pdf", "docx", "txt"]);
-const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+// Validate raw bytes before selecting or re-encoding any part of the source catalog.
+const decode = decodeLibraryText;
 /** Publishing reads a library one course at a time, so a whole term's folder
  * may exceed the limits that bound installing everything on this device. */
 export const PUBLICATION_INPUT_LIMITS: LibraryInputLimits = { maxFileBytes: 512 * 1024 * 1024, maxTotalBytes: 32 * 1024 * 1024 * 1024 };
@@ -42,6 +43,16 @@ export interface PublicationSection {
   problem?: string;
 }
 
+// A duplicate-linked row is an excluded alias, not a second canonical source.
+function isLinkedAlias(source: Pick<CatalogSource, "status" | "duplicateOf">): boolean {
+  return source.status === "duplicate-linked" || Boolean(source.duplicateOf);
+}
+
+function linkedAliasIdentity(source: CatalogSource): string {
+  return JSON.stringify([source.id, source.name, source.sourcePath, source.checksum, source.module,
+    source.status, source.reason, source.bankFile, source.originalFile, source.ready, source.review, source.duplicateOf]);
+}
+
 export interface PublicationSource {
   id: string;
   name: string;
@@ -53,6 +64,8 @@ export interface PublicationSource {
   /** The catalog's own module label, when it has one. */
   moduleKey?: string;
   hasBank: boolean;
+  /** Exact prepared package reviewed by this inventory, not the original source checksum. */
+  bankIdentity?: { path: string; digest: string };
   /** Question rows in its package, unreadable rows included, when the package could be read. */
   rows?: number;
   original?: { extension: string };
@@ -60,6 +73,8 @@ export interface PublicationSource {
   bank?: { term: Term; module: string; moduleKey: string; reviewedFiling: boolean; reviewedUnfiled?: boolean;
     reviewedOverride?: boolean; humanReviewed?: boolean } | { problem: string };
   duplicateOf?: string;
+  /** Exact catalog metadata for an excluded linked alias, never uploaded. */
+  linkedAliasIdentity?: string;
 }
 
 /** Everything the plan needs, read once from the prepared library. */
@@ -143,15 +158,19 @@ export async function readPublicationInventory(
   for (const [index, source] of catalog.sources.entries()) {
     if (signal?.aborted) throw new DOMException("Reading the library was cancelled.", "AbortError");
     if (index % 10 === 0) progress(`Reading sources · ${index + 1} of ${catalog.sources.length}`);
-    const extension = source.originalFile?.split(".").at(-1)?.toLowerCase();
+    const extension = source.originalFile?.split(".").at(-1)?.toLowerCase() ?? "";
     const entry: PublicationSource = { id: source.id, name: source.name, checksum: source.checksum, status: source.status,
       reason: source.reason, ready: source.ready, review: source.review, hasBank: Boolean(source.bankFile),
       ...(source.module !== undefined && moduleIdentity(source.module) ? { moduleKey: moduleIdentity(source.module) } : {}),
-      ...(source.originalFile && extension ? { original: { extension } } : {}),
-      ...(source.duplicateOf ? { duplicateOf: source.duplicateOf } : {}) };
+      ...(source.originalFile ? { original: { extension } } : {}),
+      ...(source.duplicateOf ? { duplicateOf: source.duplicateOf } : {}),
+      ...(isLinkedAlias(source) ? { linkedAliasIdentity: linkedAliasIdentity(source) } : {}) };
     if (source.bankFile) {
       try {
-        const bank = readPreparedBank(JSON.parse(decode(await read(safeLibraryPath(source.bankFile)))));
+        const path = safeLibraryPath(source.bankFile);
+        const bytes = Uint8Array.from(await read(path));
+        const bank = readPreparedBank(JSON.parse(decode(bytes)));
+        entry.bankIdentity = { path, digest: await sha256(bytes) };
         entry.rows = bank.pkg.questions.length + (bank.unreadableQuestions ?? 0);
         const manifest = bank.pkg.manifest;
         const filing = bank.reviewedFiling;
@@ -342,39 +361,95 @@ export interface CourseReaderOptions {
 export function courseLibraryReader(read: LibraryReader, inventory: PublicationInventory, course: PlannedCourse,
   options: CourseReaderOptions = {}): LibraryReader {
   const include = options.include ?? (() => true);
-  const includedIds = course.sourceIds.filter(include);
-  const ids = new Set(includedIds);
-  if (ids.size !== includedIds.length) throw new Error("The planned course contains duplicate source identities.");
+  // The reviewed plan is the admission boundary, even when a size retry
+  // intentionally omits original-only rows from the projected catalog.
+  const ids = new Set(course.sourceIds);
+  if (ids.size !== course.sourceIds.length) throw new Error("The planned course contains duplicate source identities.");
+  const includedIds = new Set(course.sourceIds.filter(include));
   const sources = inventory.sources.filter(source => ids.has(source.id)
     && source.status !== "duplicate-linked" && !source.duplicateOf)
     .sort((left, right) => left.checksum.localeCompare(right.checksum));
-  if (sources.length !== includedIds.length
+  if (sources.length !== ids.size
     || new Set(sources.map(source => source.id)).size !== sources.length
     || new Set(sources.map(source => source.checksum)).size !== sources.length)
     throw new Error("The planned course has missing or duplicate source identities. Review its source filing.");
+  const selectedChecksums = new Set(sources.map(source => source.checksum));
+  const relevant = (source: Pick<CatalogSource, "id" | "checksum" | "duplicateOf">) =>
+    ids.has(source.id) || selectedChecksums.has(source.checksum) || (source.duplicateOf !== undefined && ids.has(source.duplicateOf));
+  // Match a multiset: legacy aliases can share IDs and checksums with the
+  // canonical row, and their ordering has no bearing on publication.
+  const reviewedAliases = new Map<string, number>();
+  const reviewedAliasIds = new Set<string>();
+  for (const source of inventory.sources) {
+    if (!isLinkedAlias(source) || !relevant(source)) continue;
+    const identity = source.linkedAliasIdentity;
+    if (identity === undefined)
+      throw new Error("The reviewed linked source aliases are incomplete. Choose the library again and review the plan.");
+    reviewedAliases.set(identity, (reviewedAliases.get(identity) ?? 0) + 1);
+    reviewedAliasIds.add(source.id);
+  }
+  const reviewedBanks = new Map<string, string>();
+  for (const source of sources) {
+    if (!includedIds.has(source.id) || !source.hasBank) continue;
+    const identity = source.bankIdentity;
+    if (!identity || !/^sha256:[a-f0-9]{64}$/.test(identity.digest)
+      || (reviewedBanks.has(identity.path) && reviewedBanks.get(identity.path) !== identity.digest))
+      throw new Error("The planned course has missing or conflicting reviewed bank identities. Review the plan again.");
+    reviewedBanks.set(safeLibraryPath(identity.path), identity.digest);
+  }
   let catalog: Uint8Array | undefined;
   return async path => {
-    if (safeLibraryPath(path) !== "catalog.json") return read(path);
+    if (safeLibraryPath(path) !== "catalog.json") {
+      const digest = reviewedBanks.get(path);
+      if (digest === undefined) return read(path);
+      // Verify the exact bytes returned to the uploader, not a prior read.
+      // A retry must verify again, even when the original files are omitted.
+      const bytes = Uint8Array.from(await read(path));
+      if (await sha256(bytes) !== digest)
+        throw new Error("The reviewed question package changed while publishing. Choose the library again and review the plan.");
+      return bytes;
+    }
     if (!catalog) {
       const original = readCatalog(JSON.parse(decode(await read("catalog.json"))));
       const rows = new Map<string, CatalogSource>();
       const checksums = new Set<string>();
+      const remainingAliases = new Map(reviewedAliases);
       for (const source of original.sources) {
-        if (!ids.has(source.id) || source.status === "duplicate-linked" || source.duplicateOf) continue;
+        if (isLinkedAlias(source)) {
+          if (!relevant(source) && !reviewedAliasIds.has(source.id)) continue;
+          const identity = linkedAliasIdentity(source);
+          const count = remainingAliases.get(identity) ?? 0;
+          if (!count)
+            throw new Error("The library changed while publishing: reviewed linked source aliases differ. Choose it again and review the plan.");
+          if (count === 1) remainingAliases.delete(identity);
+          else remainingAliases.set(identity, count - 1);
+          continue;
+        }
+        if (!ids.has(source.id)) {
+          if (reviewedAliasIds.has(source.id) || selectedChecksums.has(source.checksum))
+            throw new Error("The library contains duplicate source identities. Review its source filing.");
+          continue;
+        }
         if (rows.has(source.id) || checksums.has(source.checksum))
           throw new Error("The library contains duplicate source identities. Review its source filing.");
         rows.set(source.id, source);
         checksums.add(source.checksum);
       }
+      if (remainingAliases.size)
+        throw new Error("The library changed while publishing: reviewed linked source aliases differ. Choose it again and review the plan.");
       const selected = sources.map(source => {
         const row = rows.get(source.id);
         if (!row || row.checksum !== source.checksum || row.name !== source.name || row.status !== source.status
-          || Boolean(row.bankFile) !== source.hasBank)
+          || Boolean(row.bankFile) !== source.hasBank
+          || (source.hasBank && row.bankFile !== source.bankIdentity?.path))
           throw new Error("The library changed while publishing. Choose it again and review the plan.");
         const extension = row.originalFile?.split(".").at(-1)?.toLowerCase() ?? "";
+        // Size fallback is an explicit choice, not permission to accept a changed inventory.
+        if (Boolean(row.originalFile) !== Boolean(source.original) || (row.originalFile && extension !== source.original?.extension))
+          throw new Error("The reviewed original file coverage changed while publishing. Choose the library again and review the plan.");
         return options.originals === false || (row.originalFile && !UPLOADABLE_ORIGINALS.has(extension))
           ? { ...row, originalFile: undefined } : row;
-      });
+      }).filter(row => includedIds.has(row.id));
       catalog = encode({ ...inventory.library, id: course.catalogId,
         templates: course.sections.map(section => ({ file: section.file, name: section.name, checksum: section.checksum })),
         sources: selected });
@@ -387,7 +462,7 @@ export function courseLibraryReader(read: LibraryReader, inventory: PublicationI
 const TOO_LARGE = /exceeds the supported upload size|1–1500 verified files/;
 
 export interface PublicationJobNotes {
-  /** Original files kept on this device so the course fits its size limit. */
+  /** Reviewed catalog originals omitted by type/size policy; their local bytes are not verified by omission. */
   keptLocal: Map<string, number>;
   /** Why a course could not be prepared, in the validator's own words. */
   failures: Map<string, string>;
@@ -404,6 +479,9 @@ export function publicationJobs(read: LibraryReader, inventory: PublicationInven
   const jobs = courses.map((course): AcademicBatchJob => ({
     key: course.catalogId,
     async prepare(signal) {
+      // A retry of this job must not expose an earlier preparation's receipt.
+      notes.keptLocal.delete(course.catalogId);
+      notes.failures.delete(course.catalogId);
       try {
         if (course.termBasis === "proposed") throw new Error("Confirm this course's term before publishing it.");
         const planTerm: AcademicPlanTerm | undefined = course.sections.length && course.termBasis !== "plan"

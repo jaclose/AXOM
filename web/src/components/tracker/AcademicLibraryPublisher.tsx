@@ -20,7 +20,7 @@ import { GButton, GhostButton, Tag } from "../ui/primitives";
 
 type Term = ReviewedFiling["term"];
 const TERMS: Term[] = ["Term 1", "Term 2", "Term 3", "Term 4", "Term 5"];
-/** Source files a course leaves on this device because of type or size limits. */
+/** Originals omitted from upload because of type or size limits. */
 interface KeptFiles { keptLocal?: number; overLimit?: number }
 type CourseState =
   | { state: "checked"; ready: number; review: number; missingExplanations: number; files: number; bytes: number } & KeptFiles
@@ -403,7 +403,7 @@ export function AcademicLibraryPublisher({ onPublished }: { onPublished: () => v
           <span>I have the right to share this course material with every AXOM account.</span></label>}
         <p>{share ? "Other accounts cannot find these courses until an academic reviewer checks and approves the stored revision. " : ""}Answers, notes and progress are never shared.</p>
       </fieldset>
-      <p className="academic-publisher-hint">Checking reads and verifies every selected course on this device, exactly as publishing will. Nothing is uploaded until you publish.</p>
+      <p className="academic-publisher-hint">Checking verifies the files included for each selected course, exactly as publishing will. Omitted originals are reported separately. Nothing is uploaded until you publish.</p>
       <div className="academic-publisher-actions">
         <GButton disabled={Boolean(busy) || !chosen.length} onClick={() => void check()}>
           <ListChecks size={ICON_SIZE.emphasis} /> {busy === "checking" ? "Checking…" : `Check ${plural(chosen.length, "course")}`}
@@ -460,9 +460,9 @@ function kept(keptLocal: number | undefined, overLimit: number): KeptFiles {
 }
 
 function keptNote({ keptLocal, overLimit }: KeptFiles, future: boolean) {
-  const stay = (count: number) => future ? "will stay" : count === 1 ? "stays" : "stay";
-  return `${keptLocal ? ` ${plural(keptLocal, "source file")} ${stay(keptLocal)} on this device because the file type or course size limit prevents upload.` : ""}${
-    overLimit ? ` ${plural(overLimit, "source file")} over 50 MB ${stay(overLimit)} on this device.` : ""}`;
+  const omitted = (count: number) => future ? "will not be uploaded" : count === 1 ? "was not uploaded" : "were not uploaded";
+  return `${keptLocal ? ` ${plural(keptLocal, "source file")} ${omitted(keptLocal)} because the file type or course size limit prevents upload. Availability of these omitted files has not been verified.` : ""}${
+    overLimit ? ` ${plural(overLimit, "source file")} over 50 MB ${omitted(overLimit)}.` : ""}`;
 }
 
 function CourseResult({ result }: { result: CourseState }) {
