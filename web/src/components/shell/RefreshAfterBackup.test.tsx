@@ -41,6 +41,15 @@ describe("RefreshAfterBackup", () => {
     expect(vi.mocked(exportStateWithAttachments).mock.calls[0]?.[1]).toBe("complete");
   });
 
+  it("keeps refresh disabled for a downloaded but structurally incompatible recovery copy", async () => {
+    vi.mocked(exportStateWithAttachments).mockResolvedValueOnce({ ...complete, workspaceAdmissionFailed: true });
+    render(<RefreshAfterBackup />);
+    fireEvent.click(screen.getByRole("button", { name: "Download backup" }));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Do not refresh"));
+    expect(screen.getByRole("button", { name: "Refresh now" }).hasAttribute("disabled")).toBe(true);
+    expect(backupCoversOpenWorkspace()).toBe(false);
+  });
+
   it("revokes a previous receipt on a rejected retry and grants coverage on a new complete export", async () => {
     vi.mocked(exportStateWithAttachments)
       .mockResolvedValueOnce(complete)

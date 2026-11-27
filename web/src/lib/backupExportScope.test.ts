@@ -97,6 +97,31 @@ describe("portable export account generation", () => {
     expect(localStorage.getItem(STORAGE_KEYS.lastBackupAt)).toBeNull();
   });
 
+  it.each(["json", "zip"] as const)("requests a recovery copy of an incompatible %s workspace without marking a complete backup", async format => {
+    for (const [collection, identity] of [["tasks", "id"], ["logs", "id"], ["dayPlans", "dayKey"], ["dailyArchives", "date"]] as const) {
+      for (const value of [42, " padded "]) {
+        const state = workspace();
+        if (format === "zip") state.documents = [{ id: "doc", checksum: "a".repeat(64), fileType: "application/pdf" } as SourceDocument];
+        const records = [{ [identity]: value }];
+        Object.assign(state, { [collection]: records });
+        const original = JSON.stringify(state);
+        collector.mockResolvedValueOnce({ payloads: [], missingBlobKeys: [] });
+        archive.mockResolvedValueOnce({ blob: new Blob(["synthetic archive"]), attachmentCount: 0, missingBlobKeys: [], originalCount: 1, missingOriginalIds: [] });
+        click.mockClear();
+        await expect(exportStateWithAttachments(state)).resolves.toMatchObject({ workspaceAdmissionFailed: true });
+        expect(click).toHaveBeenCalledOnce();
+        expect(localStorage.getItem(STORAGE_KEYS.lastBackupAt)).toBeNull();
+        expect(JSON.stringify(state)).toBe(original);
+        if (format === "zip") {
+          expect(archive.mock.calls[0]?.[0][collection]).toEqual(records);
+        }
+        // Clear unused one-shot responses from the unselected export branch.
+        collector.mockReset();
+        archive.mockReset();
+      }
+    }
+  });
+
   it("still downloads a complete JSON export and records its time", async () => {
     collector.mockResolvedValueOnce({ payloads: [{ ...attachment, questionId: "a-question", base64: "QVhPTQ==" }], missingBlobKeys: [] });
     await expect(exportStateWithAttachments(workspace())).resolves.toMatchObject({ attachmentCount: 1, missingBlobKeys: [] });

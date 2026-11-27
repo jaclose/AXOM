@@ -37,7 +37,9 @@ function ScopedRefreshAfterBackup({ intro, accountScope }: { intro: boolean; acc
       if (!isQuestionAttachmentScopeCurrent(accountScope)) return;
       const covered = finish(result);
       const incomplete = result.missingBlobKeys.length || result.missingOriginalIds.length || result.deferredSourceCount !== 0;
-      setMessage(incomplete
+      setMessage(result.workspaceAdmissionFailed
+        ? "Recovery copy requested, but AXOM cannot restore its workspace records as they are. Keep the copy and this tab open. Do not refresh."
+        : incomplete
         ? "Backup downloaded, but it is incomplete. Some referenced files or account content could not be included. Keep this tab open and retry before refreshing."
         : covered
           ? "Backup downloaded. Keep the file until AXOM saves normally again."

@@ -31,6 +31,7 @@ describe("refresh after a portable backup", () => {
     { missingBlobKeys: ["unavailable-image"] },
     { missingOriginalIds: ["unavailable-original"] },
     { deferredSourceCount: 1 },
+    { workspaceAdmissionFailed: true as const },
     { missingBlobKeys: ["image"], missingOriginalIds: ["original"], deferredSourceCount: 1 },
   ])("does not grant coverage for an incomplete export: %j", async (gap) => {
     recordPortableBackup(useStore.getState());

@@ -84,7 +84,7 @@ export type BackupScope = "complete" | "saved-work";
 export async function exportStateWithAttachments(
   state: NoctyriumState,
   scope: BackupScope = "complete",
-): Promise<{ attachmentCount: number; missingBlobKeys: string[]; originalCount: number; missingOriginalIds: string[]; deferredSourceCount: number }> {
+): Promise<{ attachmentCount: number; missingBlobKeys: string[]; originalCount: number; missingOriginalIds: string[]; deferredSourceCount: number; workspaceAdmissionFailed?: true }> {
   const accountScope = getQuestionAttachmentScope();
   const assertCurrent = () => {
     if (!isQuestionAttachmentScopeCurrent(accountScope)) {
@@ -110,8 +110,9 @@ export async function exportStateWithAttachments(
   if (backupOriginalDocuments(metadata.documents).length || mediaBackupBytes(references) > LARGE_MEDIA_BACKUP_BYTES) {
     const result = await createMediaBackupArchive(payload, references, metadata.documents, options);
     assertCurrent();
-    downloadBackupBlob(result.blob, "zip", scope);
-    return { attachmentCount: result.attachmentCount, missingBlobKeys: result.missingBlobKeys, originalCount: result.originalCount, missingOriginalIds: result.missingOriginalIds, deferredSourceCount };
+    const admission = workspaceAdmissionReceipt(payload);
+    downloadBackupBlob(result.blob, "zip", scope, admission.workspaceAdmissionFailed);
+    return { attachmentCount: result.attachmentCount, missingBlobKeys: result.missingBlobKeys, originalCount: result.originalCount, missingOriginalIds: result.missingOriginalIds, deferredSourceCount, ...admission };
   }
   let attachmentCount = 0;
   let missingBlobKeys: string[];
@@ -128,25 +129,26 @@ export async function exportStateWithAttachments(
       (question.attachments ?? []).map((attachment) => attachment.blobKey));
   }
   assertCurrent();
-  downloadBackupPayload(payload, scope);
-  return { attachmentCount, missingBlobKeys, originalCount: 0, missingOriginalIds: [], deferredSourceCount };
+  const admission = workspaceAdmissionReceipt(payload);
+  downloadBackupPayload(payload, scope, admission.workspaceAdmissionFailed);
+  return { attachmentCount, missingBlobKeys, originalCount: 0, missingOriginalIds: [], deferredSourceCount, ...admission };
 }
 
-function downloadBackupPayload(payload: Record<string, unknown>, scope: BackupScope = "complete") {
+function downloadBackupPayload(payload: Record<string, unknown>, scope: BackupScope = "complete", workspaceAdmissionFailed = false) {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-  downloadBackupBlob(blob, "json", scope);
+  downloadBackupBlob(blob, "json", scope, workspaceAdmissionFailed);
 }
 
-function downloadBackupBlob(blob: Blob, extension: "json" | "zip", scope: BackupScope = "complete") {
+function downloadBackupBlob(blob: Blob, extension: "json" | "zip", scope: BackupScope = "complete", workspaceAdmissionFailed = false) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   const stamp = new Date().toISOString().slice(0, 10);
   a.href = url;
-  a.download = `${BRAND.productName.toLowerCase()}-${scope === "saved-work" ? "saved-work" : "backup"}-${stamp}.${extension}`;
+  a.download = `${BRAND.productName.toLowerCase()}-${workspaceAdmissionFailed ? "recovery-copy" : scope === "saved-work" ? "saved-work" : "backup"}-${stamp}.${extension}`;
   a.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
   // A references-only recovery copy must not imply the whole library is backed up.
-  if (scope === "complete") markBackupDone();
+  if (scope === "complete" && !workspaceAdmissionFailed) markBackupDone();
 }
 
 /** Record when the user last exported, for the data-health panel. */
@@ -432,9 +434,9 @@ function preferDailyWordPuzzle(left: DailyWordPuzzleState, right: DailyWordPuzzl
   return left;
 }
 
-export function parseImport(text: string): NoctyriumState {
-  const data = JSON.parse(text);
-  if (!data || typeof data !== "object" || !Array.isArray(data.terms)) {
+/** Shared structural admission, before normalization or media staging. */
+function assertPortableWorkspaceAdmission(data: unknown): void {
+  if (!isRecord(data) || !Array.isArray(data.terms)) {
     throw new Error("This file doesn't look like an AXOM backup.");
   }
   // Missing version is the supported legacy format. Do not project a future
@@ -470,7 +472,7 @@ export function parseImport(text: string): NoctyriumState {
   for (const [collection, identity] of [
     ["tasks", "id"], ["logs", "id"], ["dayPlans", "dayKey"], ["dailyArchives", "date"],
   ] as const) {
-    for (const record of data[collection] ?? []) {
+    for (const record of (data[collection] as Record<string, unknown>[] | undefined) ?? []) {
       if (!isPortableRecordIdentity(record[identity])) {
         throw new Error(`This backup has an invalid or noncanonical record identity (${collection}). Keep the original file.`);
       }
@@ -479,7 +481,7 @@ export function parseImport(text: string): NoctyriumState {
   // Course Tracker consumes each present course's module array directly.
   // Missing modules are not a documented legacy migration; do not silently
   // replace a malformed or incomplete course with an empty course.
-  for (const course of data.courses ?? []) {
+  for (const course of (data.courses as Record<string, unknown>[] | undefined) ?? []) {
     const modules: unknown = course.modules;
     if (!Array.isArray(modules) || !modules.every(module =>
       isRecord(module) && typeof module.id === "string" && module.id.trim() !== "" &&
@@ -489,12 +491,27 @@ export function parseImport(text: string): NoctyriumState {
   }
   // Tracker paths are consumed as strings by the scope tree. Preserve legacy
   // grouping strings verbatim, but refuse records without any usable segment.
-  for (const item of data.tracker ?? []) {
+  for (const item of (data.tracker as Record<string, unknown>[] | undefined) ?? []) {
     const path: unknown = item.path;
     if (typeof path !== "string" || !path.split("/").some(part => part.trim() !== "")) {
       throw new Error("This backup has an invalid Course Tracker path. Keep the original file.");
     }
   }
+}
+
+function workspaceAdmissionReceipt(payload: Record<string, unknown>): { workspaceAdmissionFailed?: true } {
+  try {
+    assertPortableWorkspaceAdmission(payload);
+    return {};
+  } catch {
+    // Preserve the raw recovery copy, not a normalized substitute.
+    return { workspaceAdmissionFailed: true };
+  }
+}
+
+export function parseImport(text: string): NoctyriumState {
+  const data = JSON.parse(text);
+  assertPortableWorkspaceAdmission(data);
   const profile = data.profile && typeof data.profile === "object"
     ? data.profile as Record<string, unknown>
     : {};

@@ -56,7 +56,7 @@ export function beginPortableBackupAttempt(state: NoctyriumState): (result: Back
     if (finished) return false;
     finished = true;
     if (attempt !== backupAttempt || !isQuestionAttachmentScopeCurrent(scope) || snapshot === null) return false;
-    if (result.missingBlobKeys.length || result.missingOriginalIds.length || result.deferredSourceCount !== 0) return false;
+    if (result.workspaceAdmissionFailed || result.missingBlobKeys.length || result.missingOriginalIds.length || result.deferredSourceCount !== 0) return false;
     try {
       if (snapshot !== persistedForm(useStore.getState())) return false;
       // Keep exact serialized identity in this tab's memory only. A short hash
