@@ -96,3 +96,79 @@ export function scheduleSourceReplayStatus(
   return a.date === b.date && observedTitle(a.title) === observedTitle(b.title)
     ? "possible-replay" : "different";
 }
+
+/** Only records from the active account may be passed to this selector. */
+export interface ScheduleSourceReviewRow {
+  recordId: string;
+  path: string;
+  sourceClaim: unknown;
+  /** Existing editable-field duplicate signal; never trusted source evidence. */
+  legacyIdentityMatches?: boolean;
+}
+
+export interface ScheduleSourceReviewMatch {
+  recordId: string;
+  currentPathKey: string;
+  status: "possible-replay" | "moved-away" | "moved-in";
+}
+
+export interface ScheduleSourceUnresolvedRow {
+  recordId: string;
+  status: "legacy-unknown" | "invalid-claim";
+  legacyIdentityMatches: boolean;
+}
+
+export type ScheduleSourceReviewEvidence =
+  | { state: "invalid-candidate" }
+  | { state: "valid"; matches: ScheduleSourceReviewMatch[]; unresolvedAtDestination: ScheduleSourceUnresolvedRow[] };
+
+/**
+ * Collect review evidence, not a decision to import, skip, merge or delete.
+ * A moved-away observation remains visible when its original destination is
+ * reimported. A moved-in observation must match the source, not just the path.
+ * Unkeyed equal observations and repeated row IDs are not deduplicated.
+ * Missing or invalid claims at the destination remain explicitly unresolved;
+ * editable identity can prioritize review but cannot establish provenance.
+ */
+export function collectScheduleSourceReviewEvidence(
+  candidateValue: unknown,
+  rows: readonly ScheduleSourceReviewRow[],
+): ScheduleSourceReviewEvidence {
+  const candidate = readScheduleSourceClaim(candidateValue);
+  if (candidate.state !== "valid") return { state: "invalid-candidate" };
+  const destination = candidate.claim.destinationKey;
+  const matches: ScheduleSourceReviewMatch[] = [];
+  const unresolvedAtDestination: ScheduleSourceUnresolvedRow[] = [];
+  for (const row of rows) {
+    const currentPathKey = trackerPathKey(row.path);
+    const existing = readScheduleSourceClaim(row.sourceClaim);
+    if (existing.state !== "valid") {
+      if (currentPathKey === destination) {
+        unresolvedAtDestination.push({
+          recordId: row.recordId,
+          status: existing.state === "legacy-unknown" ? "legacy-unknown" : "invalid-claim",
+          legacyIdentityMatches: row.legacyIdentityMatches === true,
+        });
+      }
+      continue;
+    }
+    const originalPathKey = existing.claim.destinationKey;
+    if (currentPathKey !== destination && originalPathKey !== destination) continue;
+    const a = candidate.claim.source;
+    const b = existing.claim.source;
+    if (a.date !== b.date || observedTitle(a.title) !== observedTitle(b.title)) continue;
+    matches.push({
+      recordId: row.recordId,
+      currentPathKey,
+      status: currentPathKey !== destination ? "moved-away" :
+        originalPathKey !== destination ? "moved-in" : "possible-replay",
+    });
+  }
+  // A stable presentation order preserves multiplicity and never selects a winner.
+  const compare = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
+  matches.sort((a, b) => compare(a.recordId, b.recordId) ||
+    compare(a.currentPathKey, b.currentPathKey) || compare(a.status, b.status));
+  unresolvedAtDestination.sort((a, b) => compare(a.recordId, b.recordId) ||
+    compare(a.status, b.status) || Number(b.legacyIdentityMatches) - Number(a.legacyIdentityMatches));
+  return { state: "valid", matches, unresolvedAtDestination };
+}
