@@ -1,4 +1,5 @@
 import type { StateStorage } from "zustand/middleware";
+import { sha256 } from "./compressedText";
 import { userIdFromName } from "./userIdentity";
 import { STORAGE_KEYS } from "./brand";
 import { markVaultWrite, markVaultWriteFailure } from "./vaultActivity";
@@ -31,6 +32,8 @@ const activeUserKey = (name: string) => `${name}:active-user`;
 const scopedStateKey = (name: string, userId: string) => `${name}:user:${userId}`;
 /** Present only while the localStorage copy is ahead of IndexedDB. */
 const fallbackMarkerKey = (name: string) => `${name}:fallback-newer`;
+/** Persisted before cross-store workspace deletion; cleared only after every tier confirms cleanup. */
+const removalIntentKey = (name: string) => `${name}:removal-pending`;
 let vaultWriteSequence = 0;
 const vaultWriteFailures = new Map<number, Error>();
 const observedVaultSnapshots = new Map<string, string | null>();
@@ -93,7 +96,7 @@ export function assertVaultWritesSince(checkpoint: number): void {
   if (failed) throw failed[1];
 }
 
-function localFallback(): Storage | null {
+function localFallback(name?: string): Storage | null {
   try {
     // Node 25 exposes an unusable experimental global `localStorage` unless a
     // file flag is supplied. In browsers/jsdom, the Window-owned storage is the
@@ -101,6 +104,12 @@ function localFallback(): Storage | null {
     if (typeof window !== "undefined") return window.localStorage;
     return typeof localStorage === "undefined" ? null : localStorage;
   } catch {
+    // A denied Window.localStorage getter is not evidence that this browser
+    // lacks an acknowledged recovery copy. Never fall through to older IDB.
+    if (name && observesWorkspace(name)) {
+      conflictedWorkspaceKeys.add(name);
+      throw new VaultConflictError();
+    }
     return null;
   }
 }
@@ -126,6 +135,7 @@ export function writeLocalFallback(
   userId: string,
   indexedDbError?: unknown,
 ): void {
+  assertNoPendingVaultRemoval(fallbackStore, name);
   if (!fallbackStore) {
     throw new Error("AXOM could not write to IndexedDB and no local storage fallback is available.", {
       cause: indexedDbError,
@@ -270,6 +280,19 @@ function observesWorkspace(name: string): boolean {
   return name === STORAGE_KEYS.persistedState;
 }
 
+/** A partial or interrupted removal must not silently hydrate stale IDB data
+ * or allow a new save. Presence is sufficient: malformed receipts fail closed. */
+function assertNoPendingVaultRemoval(storage: Pick<Storage, "getItem"> | null, name: string): void {
+  if (!observesWorkspace(name) || !storage) return;
+  try {
+    if (storage.getItem(removalIntentKey(name)) === null) return;
+  } catch {
+    // An unreadable deletion receipt is not proof that deletion completed.
+  }
+  conflictedWorkspaceKeys.add(name);
+  throw new VaultConflictError();
+}
+
 function rememberVaultSnapshot(name: string, value: string | null): void {
   if (!observesWorkspace(name) || !conflictedWorkspaceKeys.has(name)) {
     observedVaultSnapshots.set(name, workspaceFingerprint(value));
@@ -346,7 +369,16 @@ function newerFallbackCopy(fallbackStore: Pick<Storage, "getItem"> | null, name:
     return snapshotFingerprint(value) === valueFingerprint
       ? { value, marker, fingerprint: valueFingerprint, baseFingerprint }
       : null;
-  } catch {
+  } catch (error) {
+    // A marked recovery copy may still exist when the marker or payload read
+    // raises SecurityError. Treating that ambiguity as no fallback can hydrate
+    // an older IndexedDB workspace or acknowledge a blind competing save.
+    if (observesWorkspace(name)) {
+      // Do not let a later apparently healthy read authorize this unhydrated
+      // tab to save blindly. A fresh verified hydration must reconcile it.
+      conflictedWorkspaceKeys.add(name);
+      throw isVaultConflictError(error) ? error : new VaultConflictError();
+    }
     return null;
   }
 }
@@ -360,14 +392,50 @@ export function resolveMarkedVaultSnapshotRecord(
   local: Readonly<Record<string, string>>,
   name: string,
 ): string | undefined {
+  if (local[removalIntentKey(name)] !== undefined) throw new VaultConflictError();
   if (local[fallbackMarkerKey(name)] === undefined) return undefined;
-  const newer = newerFallbackCopy({ getItem: key => local[key] ?? null }, name);
-  if (!newer) throw new Error("The safety snapshot has an invalid newer-fallback marker.");
-
+  const capturedStore = { getItem: (key: string) => local[key] ?? null };
+  const newer = newerFallbackCopy(capturedStore, name);
   let current = indexedDb ? resolveVaultSnapshotRecord(indexedDb, name) : undefined;
   if (!current && indexedDb) {
     const activeUser = indexedDb[activeUserKey(name)];
     if (activeUser) current = resolveVaultSnapshotRecord(indexedDb, scopedStateKey(name, activeUser));
+  }
+  if (!newer) {
+    // A user-authorized restore may follow an interrupted delete that already
+    // removed the plain primary but left the marker and an account-scoped copy.
+    // A matching retirement receipt distinguishes it from an invalid orphan.
+    // The original bytes remain present and are never deleted by inspection.
+    let receipt: { fallbackUserId?: unknown } | null = null;
+    try { receipt = JSON.parse(local[`${name}:fallback-retired`] ?? "null") as { fallbackUserId?: unknown } | null; }
+    catch { /* An invalid receipt is not an authorized recovery. */ }
+    if (local[name] === undefined && typeof receipt?.fallbackUserId === "string") {
+      const scoped = local[scopedStateKey(name, receipt.fallbackUserId)];
+      if (typeof scoped === "string") {
+        const scopedCopy = newerFallbackCopy({
+          getItem: key => key === name ? scoped : capturedStore.getItem(key),
+        }, name);
+        const retired = scopedCopy && retiredFallbackReceipt(capturedStore, name, scopedCopy);
+        if (retired && current && persistedUserId(current) === retired.committedUserId) {
+          return current;
+        }
+      }
+    }
+    throw new Error("The safety snapshot has an invalid newer-fallback marker.");
+  }
+  // Successful saves and explicit restores retain the previous recovery bytes
+  // rather than risk a cross-tab multi-key delete. The retirement receipt must
+  // govern snapshot exports and update checkpoints as well as live hydration.
+  // An unreadable, competing, or differently owned vault cannot prove that
+  // these retained bytes were superseded; keep both copies and fail closed.
+  const retired = retiredFallbackReceipt(capturedStore, name, newer);
+  if (retired) {
+    if (
+      current !== undefined
+      && snapshotFingerprint(current) === retired.committedFingerprint
+      && persistedUserId(current) === retired.committedUserId
+    ) return current;
+    throw new VaultConflictError();
   }
   if (!current || current === newer.value || workspaceFingerprint(current) === newer.baseFingerprint) return newer.value;
   if (newer.baseFingerprint === undefined) {
@@ -392,9 +460,18 @@ function sameLegacyBinding(left: LegacyFallbackBinding, right: LegacyFallbackBin
 
 async function readPackedFallback(storage: Pick<Storage, "getItem"> | null, name: string): Promise<PackedFallbackCopy | null> {
   if (!storage || !observesWorkspace(name)) return null;
-  const raw = storage.getItem(packedFallbackKey(name));
+  let raw: string | null;
+  try { raw = storage.getItem(packedFallbackKey(name)); }
+  catch { throw new VaultConflictError(); }
   if (raw === null) return null;
   const copy = await unpackVaultFallback(raw, name);
+  // Decoding and SHA-256 are asynchronous. A peer can atomically replace the
+  // packed record while this tab verifies the captured bytes. Never hydrate Y
+  // once a distinct, acknowledged packed Z has arrived.
+  let rawAfterDecode: string | null;
+  try { rawAfterDecode = storage.getItem(packedFallbackKey(name)); }
+  catch { throw new VaultConflictError(); }
+  if (rawAfterDecode !== raw) throw new VaultConflictError();
   if (persistedUserId(copy.value) !== copy.userId || snapshotFingerprint(copy.value) !== copy.valueFingerprint
     || (copy.legacy.activeUser !== null && copy.legacy.activeUser !== copy.userId)) throw new PackedFallbackError();
   return copy;
@@ -410,14 +487,81 @@ function packedExpectation(copy: PackedFallbackCopy): VaultExpectation {
   return { fingerprints: [copy.baseFingerprint, copy.valueFingerprint] };
 }
 
-/** Only the new current fallback is retired, after its logical bytes reached IDB.
- * Historical backups and legacy records are never deleted to make this save fit. */
-function retirePackedFallback(storage: Storage | null, name: string, previousRaw: string | null): void {
+// Deleting a packed record after a separate comparison is unsafe across tabs.
+// Retain original bytes; logically retire only the exact record whose SHA-256
+// identity and committed vault revision are verified. v1 full-raw receipts
+// already written by older clients stay readable; v2 never duplicates the
+// potentially multi-megabyte packed envelope in localStorage.
+interface RetiredPackedReceipt {
+  version: 1 | 2;
+  raw?: string;
+  rawSha256?: string;
+  committedFingerprint: string;
+  committedUserId: string;
+}
+const packedRetiredKey = (name: string) => `${name}:packed-retired`;
+
+async function retiredPackedReceipt(
+  storage: Pick<Storage, "getItem"> | null, name: string, copy: PackedFallbackCopy,
+): Promise<RetiredPackedReceipt | null> {
+  if (!storage) return null;
+  // Only a confirmed missing key is an absent retirement receipt. Security
+  // errors, malformed JSON or a damaged receipt cannot authorize repromotion
+  // of potentially older packed bytes over a separately restored workspace.
+  let raw: string | null;
+  try { raw = storage.getItem(packedRetiredKey(name)); }
+  catch { throw new VaultConflictError(); }
+  if (raw === null) return null;
+
+  let parsed: Partial<RetiredPackedReceipt>;
+  try { parsed = JSON.parse(raw) as Partial<RetiredPackedReceipt>; }
+  catch { throw new VaultConflictError(); }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)
+    || typeof parsed.committedFingerprint !== "string"
+    || typeof parsed.committedUserId !== "string") throw new VaultConflictError();
+
+  if (parsed.version === 1) {
+    if (typeof parsed.raw !== "string") throw new VaultConflictError();
+    if (parsed.raw !== copy.raw) return null;
+  } else if (parsed.version === 2) {
+    if (typeof parsed.rawSha256 !== "string" || !/^[a-f0-9]{64}$/.test(parsed.rawSha256)) {
+      throw new VaultConflictError();
+    }
+    let actualDigest: string;
+    try { actualDigest = await sha256(new TextEncoder().encode(copy.raw)); }
+    catch { throw new VaultConflictError(); }
+    // A structurally valid receipt for another newly acknowledged packed
+    // record is not a retirement of this one. Let normal CAS/identity gates
+    // decide whether the new record can be promoted.
+    if (actualDigest !== parsed.rawSha256) return null;
+  } else throw new VaultConflictError();
+  return parsed as RetiredPackedReceipt;
+}
+
+function verifiedRetiredPackedValue(receipt: RetiredPackedReceipt, value: string | null | undefined): value is string {
+  return typeof value === "string"
+    && snapshotFingerprint(value) === receipt.committedFingerprint
+    && persistedUserId(value) === receipt.committedUserId;
+}
+
+async function retirePackedFallback(
+  storage: Storage | null, name: string, previousRaw: string | null,
+  committedUserId: string, committedValue: string,
+): Promise<void> {
   if (!storage || !observesWorkspace(name)) return;
-  const raw = storage.getItem(packedFallbackKey(name));
-  if (raw !== previousRaw) throw new VaultConflictError();
-  if (raw === null) return;
-  storage.removeItem(packedFallbackKey(name));
+  if (storage.getItem(packedFallbackKey(name)) !== previousRaw) throw new VaultConflictError();
+  if (previousRaw === null) return;
+  // Hash before the single receipt write and recheck the packed key afterward:
+  // a peer's acknowledged packed record must never inherit this receipt.
+  const rawSha256 = await sha256(new TextEncoder().encode(previousRaw));
+  if (storage.getItem(packedFallbackKey(name)) !== previousRaw) throw new VaultConflictError();
+  storage.setItem(packedRetiredKey(name), JSON.stringify({
+    version: 2,
+    rawSha256,
+    committedFingerprint: snapshotFingerprint(committedValue),
+    committedUserId,
+  } satisfies RetiredPackedReceipt));
+  if (storage.getItem(packedFallbackKey(name)) !== previousRaw) throw new VaultConflictError();
 }
 
 /** All asynchronous work precedes a fresh comparison of both fallback records.
@@ -425,9 +569,11 @@ function retirePackedFallback(storage: Storage | null, name: string, previousRaw
 async function writePackedFallback(
   storage: Storage | null, name: string, value: string, userId: string,
   baseFingerprint: string | null | undefined, previous: PackedFallbackCopy | null,
+  previousRetiredRaw: string | null = null,
 ): Promise<void> {
   if (!storage || !observesWorkspace(name)) throw new PackedFallbackError("A compressed workspace fallback is unavailable.");
-  const previousRaw = previous?.raw ?? null;
+  assertNoPendingVaultRemoval(storage, name);
+  const previousRaw = previous?.raw ?? previousRetiredRaw;
   if (storage.getItem(packedFallbackKey(name)) !== previousRaw) throw new VaultConflictError();
   if (previous) assertPackedLegacyCurrent(storage, previous);
   const expected = workspaceExpectation(name);
@@ -482,6 +628,7 @@ export async function resolveWorkspaceSnapshotRecord(
   local: Readonly<Record<string, string>>,
   name: string,
 ): Promise<string | undefined> {
+  if (local[removalIntentKey(name)] !== undefined) throw new VaultConflictError();
   const storage = { getItem: (key: string) => local[key] ?? null };
   const packed = await readPackedFallback(storage, name);
   if (packed) {
@@ -489,6 +636,11 @@ export async function resolveWorkspaceSnapshotRecord(
     let vault = indexedDb ? resolveVaultSnapshotRecord(indexedDb, name) : undefined;
     if (!vault && indexedDb?.[activeUserKey(name)]) {
       vault = resolveVaultSnapshotRecord(indexedDb, scopedStateKey(name, indexedDb[activeUserKey(name)]));
+    }
+    const retired = await retiredPackedReceipt(storage, name, packed);
+    if (retired) {
+      if (!verifiedRetiredPackedValue(retired, vault)) throw new VaultConflictError();
+      return vault;
     }
     if (vault !== undefined && !packedExpectation(packed).fingerprints.includes(workspaceFingerprint(vault))) throw new VaultConflictError();
     return packed.value;
@@ -865,23 +1017,81 @@ async function removeVaultRecords(name: string, active?: string): Promise<void> 
   });
 }
 
-function clearFallbackCopyIfUnchanged(
+// A localStorage fallback has three independently written keys (payload,
+// marker, account-scoped mirror). No amount of read-before-remove can make
+// deleting them atomic with another tab's acknowledgment. Retire the *known*
+// marker without deleting any bytes. A newer marker never matches this receipt.
+interface RetiredFallbackReceipt {
+  version: 1;
+  marker: string;
+  valueFingerprint: string;
+  fallbackUserId: string;
+  committedFingerprint: string;
+  committedUserId: string;
+}
+function retiredFallbackReceipt(
+  fallbackStore: Pick<Storage, "getItem"> | null, name: string, copy: NewerFallbackCopy,
+): RetiredFallbackReceipt | null {
+  // Only a genuinely absent receipt permits unretired fallback promotion.
+  // A storage read failure or malformed receipt is ambiguous: choosing the
+  // older marked copy could undo an explicit restore in another tab.
+  let raw: string | null | undefined;
+  try { raw = fallbackStore?.getItem(`${name}:fallback-retired`); }
+  catch { throw new VaultConflictError(); }
+  if (raw == null) return null;
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); }
+  catch { throw new VaultConflictError(); }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new VaultConflictError();
+  }
+  const receipt = parsed as Partial<RetiredFallbackReceipt>;
+  if (
+    receipt.version !== 1
+    || typeof receipt.marker !== "string"
+    || typeof receipt.valueFingerprint !== "string"
+    || typeof receipt.fallbackUserId !== "string"
+    || typeof receipt.committedFingerprint !== "string"
+    || typeof receipt.committedUserId !== "string"
+  ) throw new VaultConflictError();
+  // A fully valid receipt for an earlier marker does not retire a new,
+  // separately acknowledged fallback. A malformed same-marker binding must
+  // never be treated as proof that no retirement occurred.
+  if (receipt.marker !== copy.marker) return null;
+  if (
+    receipt.valueFingerprint !== copy.fingerprint
+    || receipt.fallbackUserId !== persistedUserId(copy.value)
+  ) throw new VaultConflictError();
+  return receipt as RetiredFallbackReceipt;
+}
+
+function retireFallbackCopyIfUnchanged(
   fallbackStore: Storage | null,
   name: string,
   copy: NewerFallbackCopy,
   currentUserId: string,
+  committedValue: string,
 ): void {
-  try {
-    if (
-      fallbackStore?.getItem(fallbackMarkerKey(name)) !== copy.marker
-      || fallbackStore.getItem(name) !== copy.value
-    ) return;
-    const fallbackUserId = persistedUserId(copy.value);
-    fallbackStore.removeItem(name);
-    fallbackStore.removeItem(fallbackMarkerKey(name));
-    if (fallbackUserId) fallbackStore.removeItem(scopedStateKey(name, fallbackUserId));
-    if (currentUserId) fallbackStore.setItem(activeUserKey(name), currentUserId);
-  } catch { /* The durable IndexedDB snapshot remains authoritative. */ }
+  if (
+    !fallbackStore
+    || fallbackStore.getItem(fallbackMarkerKey(name)) !== copy.marker
+    || fallbackStore.getItem(name) !== copy.value
+  ) throw new VaultConflictError();
+  // The one-key receipt is an optimization for selecting the known committed
+  // vault on reload. A failed receipt write is a visible save failure, not
+  // permission to delete backup material or silently choose one copy.
+  fallbackStore.setItem(`${name}:fallback-retired`, JSON.stringify({
+    version: 1,
+    marker: copy.marker,
+    valueFingerprint: copy.fingerprint,
+    fallbackUserId: persistedUserId(copy.value),
+    committedFingerprint: snapshotFingerprint(committedValue),
+    committedUserId: currentUserId,
+  } satisfies RetiredFallbackReceipt));
+  if (
+    fallbackStore.getItem(fallbackMarkerKey(name)) !== copy.marker
+    || fallbackStore.getItem(name) !== copy.value
+  ) throw new VaultConflictError();
 }
 
 const vaultStorage: StateStorage = {
@@ -889,21 +1099,71 @@ const vaultStorage: StateStorage = {
     // A save that could not reach IndexedDB leaves its snapshot here, ahead of
     // the vault. Reading the vault first used to hand back the older copy, and
     // the next successful save then deleted the newer one.
-    const fallbackStore = localFallback();
-    const packed = await readPackedFallback(fallbackStore, name);
+    const fallbackStore = localFallback(name);
+    let packed: PackedFallbackCopy | null;
+    try {
+      packed = await readPackedFallback(fallbackStore, name);
+    } catch (error) {
+      if (isVaultConflictError(error) && observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
+      throw error;
+    }
     if (packed) {
       assertPackedLegacyCurrent(fallbackStore, packed);
+      let retired: RetiredPackedReceipt | null;
+      try { retired = await retiredPackedReceipt(fallbackStore, name, packed); }
+      catch (error) {
+        if (isVaultConflictError(error) && observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
+        throw error;
+      }
+      if (retired) {
+        let current: string | null = null;
+        try { current = await readVaultSnapshot(name); } catch { /* preserve both copies */ }
+        if (!verifiedRetiredPackedValue(retired, current)
+          || fallbackStore?.getItem(packedFallbackKey(name)) !== packed.raw) {
+          if (observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
+          throw new VaultConflictError();
+        }
+        assertPackedLegacyCurrent(fallbackStore, packed);
+        rememberVaultSnapshot(name, current);
+        return current;
+      }
+      // The pre-promotion plain marker is part of the captured packed chain.
+      // A separately acknowledged marker arriving later must not be retired
+      // as if it were the old, already-committed recovery copy.
+      const plainBeforePromotion = newerFallbackCopy(fallbackStore, name);
       try {
         await writeVault(name, packed.value, packed.userId, packedExpectation(packed));
         assertPackedLegacyCurrent(fallbackStore, packed);
-        retirePackedFallback(fallbackStore, name, packed.raw);
-        clearFallbackCopy(fallbackStore, name, packed.userId);
+        await retirePackedFallback(fallbackStore, name, packed.raw, packed.userId, packed.value);
+        // Packed retirement is a single localStorage receipt write, but a peer may
+        // acknowledge a *plain* fallback during that call. Recheck the full
+        // plain/scoped binding and never delete any of its independent keys.
+        assertPackedLegacyCurrent(fallbackStore, packed);
+        if (plainBeforePromotion) {
+          // An existing, unchanged plain fallback may be retired by one
+          // revision-bound receipt. A new peer marker cannot match this
+          // receipt and is never erased or silently accepted.
+          retireFallbackCopyIfUnchanged(fallbackStore, name, plainBeforePromotion, packed.userId, packed.value);
+        }
       } catch (error) {
         // Keep both competing records. Choosing either would conceal work from
         // a newer/older tab that cannot understand the other's storage format.
         if (isVaultConflictError(error)) {
           conflictedWorkspaceKeys.add(name);
           throw error;
+        }
+        // A failed promotion can await IndexedDB after successful decoding.
+        // Recheck the raw atomic packed key and plain binding before allowing
+        // the captured bytes to hydrate the UI. A peer's newer copy survives.
+        if (fallbackStore?.getItem(packedFallbackKey(name)) !== packed.raw) {
+          if (observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
+          throw new VaultConflictError();
+        }
+        try {
+          assertPackedLegacyCurrent(fallbackStore, packed);
+        } catch (bindingError) {
+          if (isVaultConflictError(bindingError) && observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
+          throw bindingError;
         }
         // A verified packed copy remains durable while IDB is unavailable/full.
       }
@@ -912,25 +1172,100 @@ const vaultStorage: StateStorage = {
     }
     const newer = newerFallbackCopy(fallbackStore, name);
     if (newer !== null) {
+      let retired: RetiredFallbackReceipt | null;
+      try { retired = retiredFallbackReceipt(fallbackStore, name, newer); }
+      catch (error) {
+        if (isVaultConflictError(error) && observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
+        throw error;
+      }
+      if (retired) {
+        // A previous successful write committed newer bytes to IndexedDB and
+        // retired this exact earlier marker. Never remove the old recovery
+        // bytes, and never ignore a different marker from a competing tab.
+        let current: string | null = null;
+        try { current = await readVaultSnapshot(name); } catch { /* fail closed */ }
+        if (
+          current !== null
+          && snapshotFingerprint(current) === retired.committedFingerprint
+          && persistedUserId(current) === retired.committedUserId
+          && fallbackStore?.getItem(fallbackMarkerKey(name)) === newer.marker
+          && fallbackStore.getItem(name) === newer.value
+        ) {
+          rememberVaultSnapshot(name, current);
+          return current;
+        }
+        if (observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
+        throw new VaultConflictError();
+      }
       const userId = persistedUserId(newer.value);
+      let promoted = false;
       try {
         // The marker records the IndexedDB snapshot on which this fallback was
         // based. Comparing that base and the fallback itself in one transaction
         // prevents a late promotion from replacing a newer tab's commit.
         await writeVault(name, newer.value, userId, fallbackExpectation(newer, false));
-        clearFallbackCopy(fallbackStore, name, userId);
+        promoted = true;
+        if (observesWorkspace(name)) {
+          // A second tab may have acknowledged a newer fallback while this
+          // IndexedDB transaction was pending. There is no atomic compare-
+          // and-delete across localStorage keys, so a read must NEVER retire
+          // an acknowledged workspace copy. The next verified save may do so.
+          if (
+            fallbackStore?.getItem(fallbackMarkerKey(name)) !== newer.marker
+            || fallbackStore?.getItem(name) !== newer.value
+          ) throw new VaultConflictError();
+        } else {
+          retireFallbackCopyIfUnchanged(fallbackStore, name, newer, userId, newer.value);
+        }
       } catch (promotionError) {
-        if (isVaultConflictError(promotionError) && newer.baseFingerprint !== undefined) {
+        if (promoted && observesWorkspace(name)) {
+          // The vault now holds the captured bytes, but a later fallback or an
+          // unreadable marker may contain independent edits. Keep both copies.
+          conflictedWorkspaceKeys.add(name);
+          throw isVaultConflictError(promotionError) ? promotionError : new VaultConflictError();
+        }
+        if (isVaultConflictError(promotionError)) {
           try {
             const current = await readVaultSnapshot(name);
             if (current !== null) {
-              clearFallbackCopyIfUnchanged(fallbackStore, name, newer, persistedUserId(current));
+              // Both copies may contain edits that the other never received.
+              // Never erase the marked fallback or silently select the vault
+              // when a different tab committed a byte-distinct workspace.
+              if (current !== newer.value) {
+                // A peer that explicitly retired the marker already resolved
+                // this fallback; its unmarked mirror cannot supersede IDB.
+                if (fallbackStore?.getItem(fallbackMarkerKey(name)) === null) {
+                  rememberVaultSnapshot(name, current);
+                  return current;
+                }
+                if (observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
+                throw promotionError;
+              }
+              // An equal vault record is not proof that a second tab has not
+              // acknowledged a different fallback during the winner readback.
+              if (observesWorkspace(name) && (
+                fallbackStore?.getItem(fallbackMarkerKey(name)) !== newer.marker
+                || fallbackStore?.getItem(name) !== newer.value
+              )) {
+                conflictedWorkspaceKeys.add(name);
+                throw promotionError;
+              }
+              // Idempotent promotion is safe: the vault already holds these
+              // exact bytes. Legacy bare markers also use this equality path.
+              if (newer.baseFingerprint !== undefined && !observesWorkspace(name)) {
+                retireFallbackCopyIfUnchanged(fallbackStore, name, newer, persistedUserId(current), current);
+              }
               rememberVaultSnapshot(name, current);
               return current;
             }
-          } catch {
-            // Keep the fallback below when the winning vault cannot be reread.
+          } catch (readError) {
+            if (isVaultConflictError(readError)) throw readError;
+            // Once IndexedDB rejected the promotion for a competing revision,
+            // a failed winner readback cannot prove that the fallback is safe.
+            // Preserve both copies and require explicit reconciliation.
           }
+          if (observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
+          throw promotionError;
         }
         // Still not writable: the copy stays in localStorage for the next start.
       }
@@ -938,6 +1273,9 @@ const vaultStorage: StateStorage = {
       return newer.value;
     }
 
+    // An unmarked legacy localStorage mirror is not proof that IndexedDB is
+    // empty. A transient read failure must never become a write authorization.
+    let verifiedVaultEmpty = false;
     try {
       const value = await readVaultRecord(name, openExistingVault);
       if (value) {
@@ -953,18 +1291,56 @@ const vaultStorage: StateStorage = {
           return scoped;
         }
       }
+      // Both the primary and the active-profile snapshot were read successfully
+      // and neither exists. Only this state may migrate an unmarked legacy copy.
+      verifiedVaultEmpty = true;
     } catch {
-      // Fall back below.
+      // An inaccessible vault may still hold newer bytes. Keep any old mirror
+      // readable below, but do not promote it until an empty vault is verified.
     }
 
     const fallback = fallbackStore?.getItem(name) ??
       fallbackStore?.getItem(scopedStateKey(name, fallbackStore?.getItem(activeUserKey(name)) ?? "")) ??
       null;
-    if (fallback) {
+    if (fallback && !verifiedVaultEmpty) {
+      // A transient read error may clear immediately. Prefer the authoritative
+      // live vault over an unmarked, potentially stale mirror if it recovers.
+      // If it stays unavailable, return the mirror without writing it to IDB.
       try {
-        await writeVault(name, fallback, persistedUserId(fallback));
-      } catch {
-        // localStorage still has the data; no need to interrupt app load.
+        const recovered = await readVaultSnapshot(name);
+        if (recovered !== null) {
+          rememberVaultSnapshot(name, recovered);
+          return recovered;
+        }
+      } catch { /* Keep the legacy copy for a future verified recovery. */ }
+    }
+    if (fallback && verifiedVaultEmpty) {
+      try {
+        // The validation above happens before this transaction. A concurrent
+        // tab may save in between, so compare against an EMPTY vault atomically.
+        await writeVault(name, fallback, persistedUserId(fallback), {
+          fingerprints: [null],
+          latchConflict: false,
+        });
+      } catch (promotionError) {
+        if (isVaultConflictError(promotionError)) {
+          try {
+            const current = await readVaultSnapshot(name);
+            if (current !== null) {
+              rememberVaultSnapshot(name, current);
+              return current;
+            }
+          } catch {
+            // A rejected CAS proves another transaction won. If that winner
+            // cannot be read back, returning the old unmarked mirror would
+            // falsely hydrate it as authoritative. Keep both copies and stop
+            // subsequent writes until the conflict can be reconciled.
+          }
+          if (observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
+          throw promotionError;
+        }
+        // Ordinary unavailable/quota failures do not prove a competing
+        // revision; keep the mirror readable but do not call it a saved vault.
       }
     }
     rememberVaultSnapshot(name, fallback);
@@ -974,23 +1350,42 @@ const vaultStorage: StateStorage = {
   async setItem(name, value) {
     const writeSequence = ++vaultWriteSequence;
     const userId = persistedUserId(value);
-    const fallbackStore = localFallback();
+    let fallbackStore: Storage | null = null;
     let fallbackBaseFingerprint: string | null | undefined;
     let currentPacked: PackedFallbackCopy | null = null;
+    let previousRetiredRaw: string | null = null;
     try {
+      fallbackStore = localFallback(name);
+      assertNoPendingVaultRemoval(fallbackStore, name);
       const expected = workspaceExpectation(name);
       currentPacked = await readPackedFallback(fallbackStore, name);
       if (currentPacked) {
         assertPackedLegacyCurrent(fallbackStore, currentPacked);
-        if (currentPacked.userId !== userId) throw new PackedFallbackError("The compressed workspace belongs to a different local profile. Keep both copies and export saved work.");
-        if (!expected?.fingerprints.includes(currentPacked.valueFingerprint)) throw new VaultConflictError();
+        const retired = await retiredPackedReceipt(fallbackStore, name, currentPacked);
+        if (retired) {
+          // A confirmed older packed copy is not a new local edit. New writes
+          // compare against the current committed IDB, never the retired bytes.
+          let current: string | null = null;
+          try { current = await readVaultSnapshot(name); } catch { /* conflict below */ }
+          if (!verifiedRetiredPackedValue(retired, current)
+            || fallbackStore?.getItem(packedFallbackKey(name)) !== currentPacked.raw) throw new VaultConflictError();
+          assertPackedLegacyCurrent(fallbackStore, currentPacked);
+          previousRetiredRaw = currentPacked.raw;
+          currentPacked = null;
+        } else {
+          if (currentPacked.userId !== userId) throw new PackedFallbackError("The compressed workspace belongs to a different local profile. Keep both copies and export saved work.");
+          if (!expected?.fingerprints.includes(currentPacked.valueFingerprint)) throw new VaultConflictError();
+        }
       }
       const currentFallback = newerFallbackCopy(fallbackStore, name);
-      if (!currentPacked) assertFallbackStillCurrent(name, currentFallback, expected);
-      fallbackBaseFingerprint = currentPacked !== null ? currentPacked.baseFingerprint : currentFallback !== null
-        ? currentFallback.baseFingerprint
+      const retiredAtStart = currentFallback && retiredFallbackReceipt(fallbackStore, name, currentFallback);
+      const activeFallback = retiredAtStart && expected?.fingerprints.includes(retiredAtStart.committedFingerprint)
+        ? null : currentFallback;
+      if (!currentPacked) assertFallbackStillCurrent(name, activeFallback, expected);
+      fallbackBaseFingerprint = currentPacked !== null ? currentPacked.baseFingerprint : activeFallback !== null
+        ? activeFallback.baseFingerprint
         : observedVaultFingerprint(name);
-      if (currentPacked === null && currentFallback === null && fallbackBaseFingerprint === undefined) {
+      if (currentPacked === null && activeFallback === null && fallbackBaseFingerprint === undefined) {
         try {
           fallbackBaseFingerprint = workspaceFingerprint(await readVaultSnapshot(name));
         } catch {
@@ -1003,13 +1398,35 @@ const vaultStorage: StateStorage = {
       // A fallback save can replace only the vault snapshot on which its chain
       // began, or an idempotent promotion of the same fallback. A competing
       // commit is rejected inside the IndexedDB transaction.
-      const vaultExpectation = currentPacked !== null ? packedExpectation(currentPacked) : currentFallback !== null
-        ? fallbackExpectation(currentFallback)
+      const vaultExpectation = currentPacked !== null ? packedExpectation(currentPacked) : activeFallback !== null
+        ? fallbackExpectation(activeFallback)
         : expected;
       await writeVault(name, value, userId, vaultExpectation);
+      assertNoPendingVaultRemoval(fallbackStore, name);
       if (currentPacked) assertPackedLegacyCurrent(fallbackStore, currentPacked);
-      retirePackedFallback(fallbackStore, name, currentPacked?.raw ?? null);
-      clearFallbackCopy(fallbackStore, name, userId);
+      await retirePackedFallback(fallbackStore, name, currentPacked?.raw ?? previousRetiredRaw, userId, value);
+      if (observesWorkspace(name)) {
+        const latestFallback = newerFallbackCopy(fallbackStore, name);
+        // A different tab can acknowledge its own offline copy while the
+        // IndexedDB transaction is in flight. A successful vault commit must
+        // never clear that subsequently written recovery copy or claim that
+        // the two independent edits were reconciled.
+        if (
+          currentFallback?.marker !== latestFallback?.marker
+          || currentFallback?.value !== latestFallback?.value
+        ) throw new VaultConflictError();
+        if (currentFallback) {
+          retireFallbackCopyIfUnchanged(fallbackStore, name, currentFallback, userId, value);
+        } else if (userId && !currentPacked && previousRetiredRaw === null) {
+          // A retained packed receipt binds the original legacy active-user
+          // pointer. Changing it would make a valid receipt unrecoverable on
+          // the next tab start; the committed IDB already records this user.
+          // Unmarked mirrors are not deleted across tabs.
+          try { fallbackStore?.setItem(activeUserKey(name), userId); } catch { /* IDB is durable. */ }
+        }
+      } else {
+        clearFallbackCopy(fallbackStore, name, userId);
+      }
       rememberVaultSnapshot(name, value);
       markVaultWrite("indexeddb");
     } catch (indexedDbError) {
@@ -1021,7 +1438,7 @@ const vaultStorage: StateStorage = {
       }
       if (currentPacked) {
         try {
-          await writePackedFallback(fallbackStore, name, value, userId, fallbackBaseFingerprint, currentPacked);
+          await writePackedFallback(fallbackStore, name, value, userId, fallbackBaseFingerprint, currentPacked, previousRetiredRaw);
           rememberVaultSnapshot(name, value);
           markVaultWrite("local-fallback");
         } catch (error) {
@@ -1037,7 +1454,26 @@ const vaultStorage: StateStorage = {
       // the storage implementation itself is the authority on available room.
       let saved: boolean;
       let failure: unknown;
-      const previousFallback = newerFallbackCopy(fallbackStore, name);
+      let fallbackBeforeRetry: NewerFallbackCopy | null;
+      let retiredBeforeRetry: RetiredFallbackReceipt | null;
+      try {
+        fallbackBeforeRetry = newerFallbackCopy(fallbackStore, name);
+        retiredBeforeRetry = fallbackBeforeRetry && retiredFallbackReceipt(fallbackStore, name, fallbackBeforeRetry);
+      } catch (recoveryReadError) {
+        // A peer may update the receipt while the IndexedDB write is pending.
+        // A failed/malformed retry read is a rejected save, not a swallowed
+        // exception from the background write drain or permission to overwrite
+        // an independently acknowledged recovery copy.
+        const conflict = isVaultConflictError(recoveryReadError)
+          ? recoveryReadError : new VaultConflictError();
+        if (observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
+        vaultWriteFailures.set(writeSequence, conflict);
+        markVaultWriteFailure(new Date(), conflict);
+        return;
+      }
+      const retryExpected = workspaceExpectation(name);
+      const previousFallback = retiredBeforeRetry && retryExpected?.fingerprints.includes(retiredBeforeRetry.committedFingerprint)
+        ? null : fallbackBeforeRetry;
       try {
         const expected = workspaceExpectation(name);
         assertFallbackStillCurrent(name, previousFallback, expected);
@@ -1049,6 +1485,7 @@ const vaultStorage: StateStorage = {
           : fallbackBaseFingerprint === undefined
             ? expected?.fingerprints[0]
             : fallbackBaseFingerprint;
+        assertNoPendingVaultRemoval(fallbackStore, name);
         fallbackStore?.setItem(
           fallbackMarkerKey(name),
           encodeFallbackMarker(snapshotFingerprint(value), baseFingerprint),
@@ -1079,7 +1516,7 @@ const vaultStorage: StateStorage = {
         } catch { /* the last successful copy remains available for recovery */ }
         if (!isVaultConflictError(failure) && observesWorkspace(name)) {
           try {
-            await writePackedFallback(fallbackStore, name, value, userId, fallbackBaseFingerprint, null);
+            await writePackedFallback(fallbackStore, name, value, userId, fallbackBaseFingerprint, null, previousRetiredRaw);
             rememberVaultSnapshot(name, value);
             markVaultWrite("local-fallback");
             return;
@@ -1101,26 +1538,79 @@ const vaultStorage: StateStorage = {
   },
 
   async removeItem(name) {
-    const fallback = localFallback();
-    let active = fallback?.getItem(activeUserKey(name)) ?? undefined;
-    if (!active) {
-      try {
-        active = await withStore<string | undefined>("readonly", (store) => store.get(activeUserKey(name)), openExistingVault);
-      } catch {
-        // Continue with the localStorage cleanup path below.
-      }
-    }
-    fallback?.removeItem(name);
-    fallback?.removeItem(fallbackMarkerKey(name));
-    if (observesWorkspace(name)) fallback?.removeItem(packedFallbackKey(name));
-    fallback?.removeItem(activeUserKey(name));
-    if (active) fallback?.removeItem(scopedStateKey(name, active));
+    const writeSequence = ++vaultWriteSequence;
     try {
+      const fallback = localFallback(name);
+      let active = fallback?.getItem(activeUserKey(name)) ?? undefined;
+      if (!active) {
+        try {
+          active = await withStore<string | undefined>("readonly", (store) => store.get(activeUserKey(name)), openExistingVault);
+        } catch {
+          // The fallback may be the only readable account pointer.
+        }
+      }
+      let deletionIntent: string | null = null;
+      let recoveryBefore: readonly (string | null)[] | null = null;
+      if (observesWorkspace(name)) {
+        // A failed IDB readwrite transaction must not strand an older X after
+        // erasing a newer acknowledged local fallback Y. Reserve the removal
+        // durably first, then delete IDB atomically, THEN clean localStorage.
+        // If either phase fails the receipt survives a cold reload and blocks
+        // stale hydration or a blind competing write.
+        if (!fallback) throw new VaultConflictError();
+        assertNoPendingVaultRemoval(fallback, name);
+        recoveryBefore = [
+          fallback.getItem(name),
+          fallback.getItem(fallbackMarkerKey(name)),
+          fallback.getItem(packedFallbackKey(name)),
+          fallback.getItem(activeUserKey(name)),
+          active ? fallback.getItem(scopedStateKey(name, active)) : null,
+        ];
+        deletionIntent = JSON.stringify({
+          version: 1,
+          activeUser: active ?? null,
+          primaryFingerprint: workspaceFingerprint(recoveryBefore[0]),
+        });
+        fallback.setItem(removalIntentKey(name), deletionIntent);
+        if (fallback.getItem(removalIntentKey(name)) !== deletionIntent) throw new VaultConflictError();
+      }
       await removeVaultRecords(name, active);
+      if (recoveryBefore && fallback) {
+        if (fallback.getItem(removalIntentKey(name)) !== deletionIntent
+          || fallback.getItem(name) !== recoveryBefore[0]
+          || fallback.getItem(fallbackMarkerKey(name)) !== recoveryBefore[1]
+          || fallback.getItem(packedFallbackKey(name)) !== recoveryBefore[2]
+          || fallback.getItem(activeUserKey(name)) !== recoveryBefore[3]
+          || (active && fallback.getItem(scopedStateKey(name, active)) !== recoveryBefore[4])) {
+          throw new VaultConflictError();
+        }
+      }
+      fallback?.removeItem(name);
+      fallback?.removeItem(fallbackMarkerKey(name));
+      if (observesWorkspace(name)) {
+        fallback?.removeItem(packedFallbackKey(name));
+        fallback?.removeItem(packedRetiredKey(name));
+      }
+      fallback?.removeItem(activeUserKey(name));
+      if (active) fallback?.removeItem(scopedStateKey(name, active));
+      // Removal is complete only when all prior cleanup succeeded and this
+      // specific receipt still owns the operation. Clear it strictly last.
+      if (deletionIntent !== null) {
+        if (fallback?.getItem(removalIntentKey(name)) !== deletionIntent) throw new VaultConflictError();
+        fallback.removeItem(removalIntentKey(name));
+      }
       conflictedWorkspaceKeys.delete(name);
       rememberVaultSnapshot(name, null);
-    } catch {
-      // No-op; best effort cleanup.
+    } catch (error) {
+      // A partial localStorage cleanup is not proof that the IndexedDB or
+      // recovery copy was fully deleted. The next write must rehydrate and
+      // reconcile this account instead of reporting a successful removal.
+      const failure = isVaultConflictError(error) ? error
+        : observesWorkspace(name) ? new VaultConflictError()
+          : error instanceof Error ? error : new Error("AXOM could not remove local vault data.");
+      if (observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
+      vaultWriteFailures.set(writeSequence, failure);
+      markVaultWriteFailure(new Date(), failure);
     }
   },
 };
@@ -1135,14 +1625,115 @@ async function replaceVaultItem(name: string, value: string): Promise<void> {
   const writeSequence = ++vaultWriteSequence;
   const userId = persistedUserId(value);
   try {
-    const fallback = localFallback();
+    const fallback = localFallback(name);
+    // An explicitly authorized backup replacement may reconcile an aborted
+    // removal; ordinary reads and writes must continue to refuse its receipt.
+    const removalIntentAtStart = observesWorkspace(name) ? fallback?.getItem(removalIntentKey(name)) ?? null : null;
     const previousPacked = observesWorkspace(name) ? fallback?.getItem(packedFallbackKey(name)) ?? null : null;
+    const previousPlain = observesWorkspace(name) ? newerFallbackCopy(fallback, name) : null;
+    const previousMarker = observesWorkspace(name) ? fallback?.getItem(fallbackMarkerKey(name)) ?? null : null;
+    const previousPlainValue = observesWorkspace(name) ? fallback?.getItem(name) ?? null : null;
+    // An interrupted removal can leave the marker behind after deleting the
+    // primary plain fallback. An explicit verified restore must be able to
+    // reconcile that exact orphan without treating arbitrary marker bytes as
+    // recovery authorization or deleting the account-scoped recovery copy.
+    let orphanedMarkerEvidence: { activeUser: string; scopedValue: string } | null = null;
+    if (previousMarker !== null && previousPlain === null && observesWorkspace(name)) {
+      let receipt: unknown = null;
+      try { receipt = removalIntentAtStart === null ? null : JSON.parse(removalIntentAtStart); }
+      catch { /* Invalid removal receipts do not authorize reconciliation. */ }
+      if (receipt !== null && typeof receipt === "object" && !Array.isArray(receipt)) {
+        const intent = receipt as { version?: unknown; activeUser?: unknown; primaryFingerprint?: unknown };
+        if (
+          intent.version === 1
+          && typeof intent.activeUser === "string"
+          && intent.activeUser.length > 0
+          && intent.activeUser === userId
+          && typeof intent.primaryFingerprint === "string"
+          && fallback?.getItem(activeUserKey(name)) === intent.activeUser
+        ) {
+          const scopedValue = fallback?.getItem(scopedStateKey(name, intent.activeUser)) ?? null;
+          if (
+            scopedValue !== null
+            && snapshotFingerprint(scopedValue) === intent.primaryFingerprint
+            && persistedUserId(scopedValue) === intent.activeUser
+          ) {
+            // Validate the orphan against the retained scoped bytes using the
+            // same marker decoder as ordinary recovery, without writing keys.
+            const copy = newerFallbackCopy({
+              getItem: key => key === name ? scopedValue
+                : key === fallbackMarkerKey(name) ? previousMarker : null,
+            }, name);
+            if (copy?.value === scopedValue && copy.marker === previousMarker) {
+              orphanedMarkerEvidence = { activeUser: intent.activeUser, scopedValue };
+            }
+          }
+        }
+      }
+      if (orphanedMarkerEvidence === null) throw new VaultConflictError();
+    }
     await writeVault(name, value, userId);
     // Explicit verified restore already authorizes replacing the live workspace;
     // retire only the fallback captured before that write. A concurrent save
     // remains available and makes this replacement fail explicitly.
-    retirePackedFallback(fallback, name, previousPacked);
-    clearFallbackCopy(fallback, name, userId);
+    await retirePackedFallback(fallback, name, previousPacked, userId, value);
+    if (observesWorkspace(name)) {
+      // A peer can acknowledge a new marked fallback while writeVault is
+      // pending. Never retire a different marker, value or malformed record
+      // merely because this explicit restore reached IndexedDB.
+      const markerNow = fallback?.getItem(fallbackMarkerKey(name)) ?? null;
+      const valueNow = fallback?.getItem(name) ?? null;
+      if (markerNow !== previousMarker || valueNow !== previousPlainValue) {
+        throw new VaultConflictError();
+      }
+      if (markerNow !== null) {
+        if (previousPlain) {
+          if (previousPlain.marker !== markerNow || previousPlain.value !== valueNow) {
+            throw new VaultConflictError();
+          }
+          // A fully intact, captured fallback can be revision-bound as retired.
+          retireFallbackCopyIfUnchanged(fallback, name, previousPlain, userId, value);
+        } else {
+          // The unchanged orphan marker is not sufficient on its own. Recheck
+          // the matching account-scoped payload after the asynchronous IDB
+          // write, then leave both original recovery keys untouched.
+          if (
+            !orphanedMarkerEvidence
+            || fallback?.getItem(scopedStateKey(name, orphanedMarkerEvidence.activeUser))
+              !== orphanedMarkerEvidence.scopedValue
+            || fallback?.getItem(activeUserKey(name)) !== orphanedMarkerEvidence.activeUser
+          ) throw new VaultConflictError();
+          // One atomic retirement receipt makes a later immutable backup
+          // distinguish this captured orphan from an arbitrary corrupt marker.
+          // Retain the marker and original account-scoped bytes for recovery;
+          // deleting the marker across tabs would be an unsafe compare/remove.
+          fallback?.setItem(`${name}:fallback-retired`, JSON.stringify({
+            version: 1,
+            marker: markerNow,
+            valueFingerprint: snapshotFingerprint(orphanedMarkerEvidence.scopedValue),
+            fallbackUserId: orphanedMarkerEvidence.activeUser,
+            committedFingerprint: snapshotFingerprint(value),
+            committedUserId: userId,
+          } satisfies RetiredFallbackReceipt));
+          if (
+            fallback?.getItem(fallbackMarkerKey(name)) !== markerNow
+            || fallback?.getItem(name) !== null
+            || fallback?.getItem(scopedStateKey(name, orphanedMarkerEvidence.activeUser))
+              !== orphanedMarkerEvidence.scopedValue
+          ) throw new VaultConflictError();
+        }
+      } else if (userId && previousPacked === null) {
+        // The retained packed receipt keeps its captured legacy user binding.
+        // IndexedDB already holds the restored user's authoritative pointer.
+        try { fallback?.setItem(activeUserKey(name), userId); } catch { /* IndexedDB is durable. */ }
+      }
+    } else {
+      clearFallbackCopy(fallback, name, userId);
+    }
+    if (observesWorkspace(name)) {
+      if (fallback?.getItem(removalIntentKey(name)) !== removalIntentAtStart) throw new VaultConflictError();
+      if (removalIntentAtStart !== null) fallback?.removeItem(removalIntentKey(name));
+    }
     conflictedWorkspaceKeys.delete(name);
     rememberVaultSnapshot(name, value);
     markVaultWrite("indexeddb");
@@ -1195,7 +1786,14 @@ export function flushLocalVaultWrites(): Promise<void> {
 }
 
 export const localVaultStorage: StateStorage = {
-  getItem: (name) => vaultStorage.getItem(name),
+  getItem: async (name) => {
+    // Check before the asynchronous read and again before returning to the
+    // hydrated application; another tab may begin a removal during that read.
+    assertNoPendingVaultRemoval(localFallback(name), name);
+    const value = await vaultStorage.getItem(name);
+    assertNoPendingVaultRemoval(localFallback(name), name);
+    return value;
+  },
   setItem: (name, value) => scheduleVaultWrite(name, { kind: "set", value }),
   removeItem: (name) => scheduleVaultWrite(name, { kind: "remove" }),
 };

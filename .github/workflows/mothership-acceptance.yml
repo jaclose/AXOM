@@ -6,6 +6,10 @@ on:
       - 'web/e2e/dashboard-widget-layout.spec.ts'
       - 'web/src/lib/operator/hostClient.ts'
       - 'web/src/lib/operator/hostClient.access.test.tsx'
+      - 'web/src/lib/localVault.ts'
+      - 'web/src/lib/localVault.test.ts'
+      - 'web/src/lib/localVault.packedFallback.test.ts'
+      - 'web/src/lib/storageRecovery.test.ts'
       - '.github/workflows/mothership-acceptance.yml'
   workflow_dispatch:
 
@@ -38,6 +42,23 @@ jobs:
           node scripts/toolchain.mjs
       - run: npm ci
       - run: npm --prefix web ci
+      # This independent source-level lane must run even when the separate
+      # AXOM Quality web job stops at a generated Communications manifest drift.
+      # It does not waive the generated-bundle/release-integrity gate.
+      - name: Focused Local Vault recovery, packed fallback and snapshot regressions
+        run: |
+          result=0
+          npm --prefix web run test -- src/lib/localVault.test.ts src/lib/localVault.packedFallback.test.ts src/lib/storageRecovery.test.ts --reporter=verbose > "$RUNNER_TEMP/mothership-vault.log" 2>&1 || result=$?
+          tail -n 140 "$RUNNER_TEMP/mothership-vault.log"
+          exit "$result"
+      - name: Preserve independent Local Vault regression evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mothership-vault-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/mothership-vault.log
+          if-no-files-found: warn
+          retention-days: 7
       - name: Repository regression tests and hygiene
         run: npm run test:repo && npm run repo:check
       - name: Install isolated browser runtime
