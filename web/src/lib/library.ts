@@ -180,15 +180,32 @@ export function questionSetMetrics(
   questions: readonly QuestionRecord[],
   documents: readonly SourceDocument[] = [],
 ): CalculatedQuestionSetMetrics {
+  // QuestionSet membership is by canonical ID, never by the number of stored
+  // rows. Imported aliases with a collided ID cannot be attributed to one
+  // source question, even when the rows happen to have identical answers.
+  // Keep all original records intact; hold that membership for source review
+  // instead of inflating completion above 100% or borrowing a wrong key/topic.
   const ids = new Set(set.questionIds);
   const inSet = questions.filter((question) => ids.has(question.id));
-  const collection = questionCollectionMetrics(inSet, set.questionIds.length);
-  const mapping = summarizeQuestionMappings(inSet);
-  const confidenceScores = inSet
+  const rowCounts = new Map<ID, number>();
+  for (const question of inSet) {
+    rowCounts.set(question.id, (rowCounts.get(question.id) ?? 0) + 1);
+  }
+  const scorable = inSet.filter((question) => rowCounts.get(question.id) === 1);
+  const collection = questionCollectionMetrics(scorable, ids.size);
+  const mapping = summarizeQuestionMappings(scorable);
+  for (const id of ids) {
+    if ((rowCounts.get(id) ?? 0) < 2) continue;
+    mapping.unresolved += 1;
+    mapping.issueCount += 1;
+    mapping.issueQuestionIds.push(id);
+    mapping.unresolvedQuestionIds.push(id);
+  }
+  const confidenceScores = scorable
     .map((question) => question.extraction?.overallImportConfidence)
     .filter((value): value is number => typeof value === "number");
   const categories = new Map<string, number>();
-  for (const question of inSet) {
+  for (const question of scorable) {
     const category = question.category ?? question.system;
     if (category) categories.set(category, (categories.get(category) ?? 0) + 1);
   }

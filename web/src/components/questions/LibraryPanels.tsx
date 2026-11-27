@@ -12,7 +12,8 @@ import { enhanceQuestionSet, resolveActiveProvider } from "../../lib/ai";
 import { GlassCard, GButton, GhostButton, PanelHeader, Tag, EmptyState } from "../ui/primitives";
 import { Modal } from "../ui/Modal";
 import { pushToast } from "../../lib/toast";
-import type { QuestionRecord } from "../../lib/questions";
+import { questionMappingStatus, type QuestionRecord } from "../../lib/questions";
+import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent } from "../../lib/questionAttachmentScope";
 import type { MissingQuestionRecovery } from "../../lib/questionRecovery";
 import { QuestionSetCard } from "./QuestionSetCard";
 import { QuestionSetLibrarySubmitDialog } from "./QuestionSetLibrarySubmitDialog";
@@ -37,6 +38,61 @@ const SOURCE_PAGE_SIZE = 40;
 
 interface ManagedQuestionSetShare extends OwnedQuestionSetShare {
   link: string;
+}
+
+interface DigestMembership {
+  records: QuestionRecord[];
+  holdReason: string | null;
+}
+
+/** The saved set is an ID snapshot, not authority to pick an arbitrary imported
+ * row. Never send an ambiguous or incomplete membership to an AI provider. */
+function digestMembership(set: QuestionSet, questions: readonly QuestionRecord[]): DigestMembership {
+  const ids = new Set(set.questionIds);
+  const byId = new Map<string, QuestionRecord>();
+  const collisions = new Set<string>();
+  for (const question of questions) {
+    if (!ids.has(question.id)) continue;
+    if (byId.has(question.id)) collisions.add(question.id);
+    else byId.set(question.id, question);
+  }
+  if (collisions.size > 0) return {
+    records: [],
+    holdReason: `AI digest on hold: ${collisions.size} question ID${collisions.size === 1 ? " has" : "s have"} conflicting question records. Review source mapping first.`,
+  };
+  const missing = [...ids].filter((id) => !byId.has(id));
+  if (ids.size === 0 || missing.length > 0) return {
+    records: [],
+    holdReason: `AI digest on hold: ${missing.length || 1} missing question records or empty membership. Restore the original questions first.`,
+  };
+  const records = [...ids].map((id) => byId.get(id)!);
+  const held = records.filter((question) => questionMappingStatus(question) !== "ready");
+  if (held.length > 0) return {
+    records: [],
+    holdReason: `AI digest on hold: ${held.length} question answer mapping${held.length === 1 ? " needs" : "s need"} source review or a required figure. Review the original key and media before AI teaching.`,
+  };
+  return { records, holdReason: null };
+}
+
+/** Compare the actual teaching inputs, source provenance and set membership.
+ * Mutable attempt/progress overlays are deliberately excluded; a changed key,
+ * figure, source binding, explanation or set filing invalidates a pending digest. */
+function digestSourceFingerprint(set: QuestionSet, records: readonly QuestionRecord[]): string {
+  return JSON.stringify({
+    set: {
+      id: set.id, title: set.title, questionIds: set.questionIds,
+      sourceDocumentIds: set.sourceDocumentIds, scope: set.scope, tags: set.tags,
+      parserWarnings: set.parserWarnings, digest: set.digest,
+    },
+    records: records.map((q) => ({
+      id: q.id, source: q.source, sourceFile: q.sourceFile, sourceDocumentId: q.sourceDocumentId,
+      sourcePage: q.sourcePage, questionNumber: q.questionNumber, stem: q.stem,
+      options: q.options, correctKey: q.correctKey, correctAnswerText: q.correctAnswerText,
+      explanation: q.explanation, choiceRationales: q.choiceRationales, needsReview: q.needsReview,
+      extraction: q.extraction, content: q.content, attachments: q.attachments,
+      citation: q.citation, updatedAt: q.updatedAt,
+    })),
+  });
 }
 
 export function SourceLibrary({
@@ -193,15 +249,39 @@ export function QuestionSetList({
 
   async function enhance(set: QuestionSet) {
     if (!provider) return;
+    // Re-evaluate on activation, not only at render time. Missing/collided IDs
+    // must never reach the provider or create a persistent teaching digest.
+    const membership = digestMembership(set, questions);
+    if (membership.holdReason) {
+      pushToast({ title: "Digest held for source review", body: membership.holdReason, tone: "warn" });
+      return;
+    }
+    const accountScope = getQuestionAttachmentScope();
+    const fingerprint = digestSourceFingerprint(set, membership.records);
     setEnhancing(set.id);
     try {
-      const byId = new Map(questions.map((q) => [q.id, q]));
-      const forDigest = set.questionIds
-        .map((id) => byId.get(id))
-        .filter((q): q is NonNullable<typeof q> => !!q)
-        .map((q) => ({ stem: q.stem, correct: q.options.find((o) => o.key === q.correctKey)?.text, explanation: q.explanation }));
+      const forDigest = membership.records.map((q) => ({
+        stem: q.stem,
+        correct: q.options.find((o) => o.key === q.correctKey)?.text,
+        explanation: q.explanation,
+      }));
       const digest = await enhanceQuestionSet(provider, { title: set.title, questions: forDigest });
-      s.updateQuestionSet(set.id, {
+      // Never commit a provider response into an account or question mapping that
+      // changed while the async request was running (including A → B → A).
+      if (!isQuestionAttachmentScopeCurrent(accountScope)) return;
+      const latest = useStore.getState();
+      const currentSet = (latest.questionSets ?? []).find((candidate) => candidate.id === set.id);
+      const currentMembership = currentSet && digestMembership(currentSet, latest.questions ?? NO_QUESTIONS);
+      if (!currentSet || !currentMembership || currentMembership.holdReason
+        || digestSourceFingerprint(currentSet, currentMembership.records) !== fingerprint) {
+        pushToast({
+          title: "Digest source changed",
+          body: "The questions, answer review, or set changed during analysis. No old AI advice was saved; review the current source and retry.",
+          tone: "warn",
+        });
+        return;
+      }
+      latest.updateQuestionSet(set.id, {
         aiEnhanced: true,
         digest: { ...digest, generatedBy: provider.info.label, generatedAt: new Date().toISOString() },
       });
@@ -374,6 +454,7 @@ export function QuestionSetList({
 
   function renderCard(set: QuestionSet) {
     const metrics = questionSetMetrics(set, questions, s.documents ?? []);
+    const { holdReason } = digestMembership(set, questions);
     return (
       <QuestionSetCard
         key={set.id}
@@ -393,7 +474,12 @@ export function QuestionSetList({
         onSubmit={!compact ? () => setSubmitSet(set) : undefined}
         compact={compact}
       >
-        {!compact && set.digest && (
+        {!compact && (provider || set.digest) && holdReason && (
+          <p className="sub" role="status">
+            {holdReason}{set.digest ? " Earlier AI digest and its tracker suggestions are withheld until source identity is resolved." : ""}
+          </p>
+        )}
+        {!compact && set.digest && !holdReason && (
           <div className="stack" style={{ gap: 6, marginTop: 10 }}>
             <div className="question-explanation">
               <b>{set.digest.generatedBy}:</b> {set.digest.summary}
@@ -408,11 +494,11 @@ export function QuestionSetList({
         )}
         {!compact && <div className="row wrap gap6">
           {provider && !set.digest && (
-            <GhostButton disabled={enhancing === set.id} onClick={() => void enhance(set)}>
+            <GhostButton disabled={enhancing === set.id || Boolean(holdReason)} onClick={() => void enhance(set)}>
               <Sparkles size={ICON_SIZE.body} /> {enhancing === set.id ? "Analyzing…" : "Build digest"}
             </GhostButton>
           )}
-          {set.digest?.suggestedReview.length ? (
+          {!holdReason && set.digest?.suggestedReview.length ? (
             <GhostButton onClick={() => addDigestReview(set)}>
               <ListPlus size={ICON_SIZE.body} /> Add review to Tracker
             </GhostButton>

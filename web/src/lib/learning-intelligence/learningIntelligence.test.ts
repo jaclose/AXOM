@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { QuestionAttempt, QuestionRecord } from "../questions";
 import {
   attemptEvents, buildPatternReport, buildReviewSet, calibrateDifficulty, describeQuestionStyle, empiricalDifficulty,
-  questionFeatures, rankByReasons, reviewCandidates, reviewPriority, structuralDifficulty, styleObservations, tally,
+  questionFeatures, rankByReasons, reviewCandidates, reviewCandidatesForSession, reviewPriority, structuralDifficulty, styleObservations, tally,
   type ReviewSignals,
 } from "./index";
 
@@ -62,6 +62,115 @@ describe("attempts as events", () => {
     const guessed = attemptEvents([question({ attempts: [attempt(1, "guessed", { answerKey: "B" })] })])[0];
     expect(guessed).toMatchObject({ correct: true, certainty: "guess" });
     expect(attemptEvents([question({ attempts: [attempt(1, "correct")] })])[0].certainty).toBeUndefined();
+  });
+});
+
+describe("answer-readiness and historical analytics integrity", () => {
+  it("preserves recorded incorrect attempts without counting withdrawn mappings as current scores", () => {
+    const held = question({
+      needsReview: true,
+      attempts: [attempt(1, "incorrect", { certainty: "sure", errorType: "missed-clue" })],
+    });
+    const before = JSON.stringify(held.attempts);
+    const [event] = attemptEvents([held]);
+    expect(event).toMatchObject({ questionId: held.id, answerKey: "A", correctKey: undefined, correct: undefined });
+    expect(buildPatternReport([held]).totals.all).toEqual({ attempts: 0, correct: 0, accuracy: null });
+    expect(JSON.stringify(held.attempts)).toBe(before);
+  });
+
+  it("holds unreviewed extraction and missing or changed answer keys out of scored accuracy", () => {
+    const unreviewed = question({
+      extraction: { confidence: "medium", reviewed: false },
+      attempts: [attempt(1, "correct")],
+    });
+    const missingKey = question({
+      correctKey: undefined,
+      attempts: [attempt(1, "incorrect")],
+    });
+    const invalidKey = question({
+      correctKey: "Z",
+      attempts: [attempt(1, "correct")],
+    });
+    const records = [unreviewed, missingKey, invalidKey];
+    const before = JSON.stringify(records.map((record) => record.attempts));
+    expect(attemptEvents(records).map((event) => [event.correct, event.correctKey])).toEqual([
+      [undefined, undefined], [undefined, undefined], [undefined, undefined],
+    ]);
+    expect(buildPatternReport(records).totals.all).toEqual({ attempts: 0, correct: 0, accuracy: null });
+    expect(JSON.stringify(records.map((record) => record.attempts))).toBe(before);
+  });
+
+  it("does not create a weak-concept recommendation from six currently unverified keys", () => {
+    const held = Array.from({ length: 6 }, () => question({
+      topic: "Source held pending review",
+      needsReview: true,
+      attempts: [attempt(1, "incorrect")],
+    }));
+    const before = JSON.stringify(held);
+    const report = buildPatternReport(held);
+    expect(report.totals.all.attempts).toBe(0);
+    expect(report.byConcept).toEqual([]);
+    expect(report.findings.some((finding) => finding.kind === "weak-concept")).toBe(false);
+    expect(JSON.stringify(held)).toBe(before);
+  });
+
+  it("keeps historically recorded scores in ready mappings and existing attempt history unchanged", () => {
+    const ready = question({ attempts: [attempt(1, "incorrect"), attempt(2, "correct")] });
+    const before = JSON.stringify(ready);
+    expect(attemptEvents([ready]).map((event) => event.correct)).toEqual([false, true]);
+    expect(buildPatternReport([ready]).totals.all).toEqual({ attempts: 2, correct: 1, accuracy: 50 });
+    expect(JSON.stringify(ready)).toBe(before);
+  });
+});
+
+
+describe("current scoring after answer-key repair", () => {
+  it("holds a formerly correct or guessed answer whose saved choice contradicts the now-ready key", () => {
+    const repaired = question({
+      correctKey: "B",
+      attempts: [
+        attempt(1, "correct", { answerKey: "A", certainty: "sure" }),
+        attempt(2, "guessed", { answerKey: "A", certainty: "guess" }),
+      ],
+    });
+    const original = JSON.stringify(repaired);
+    const events = attemptEvents([repaired]);
+    expect(events.map((event) => [event.exposure, event.answerKey, event.correctKey, event.correct])).toEqual([
+      [1, "A", "B", undefined],
+      [2, "A", "B", undefined],
+    ]);
+    expect(buildPatternReport([repaired]).totals.all).toEqual({ attempts: 0, correct: 0, accuracy: null });
+    expect(JSON.stringify(repaired)).toBe(original);
+  });
+
+  it("holds an old incorrect flag when its saved choice is the current trusted answer", () => {
+    const repaired = question({
+      correctKey: "B",
+      attempts: [attempt(1, "incorrect", { answerKey: "B", certainty: "sure" })],
+    });
+    const original = JSON.stringify(repaired);
+    expect(attemptEvents([repaired])[0].correct).toBeUndefined();
+    const report = buildPatternReport([repaired]);
+    expect(report.sureAndWrong).toEqual([]);
+    expect(report.confusionPairs).toEqual([]);
+    expect(report.totals.all).toEqual({ attempts: 0, correct: 0, accuracy: null });
+    expect(JSON.stringify(repaired)).toBe(original);
+  });
+
+  it("retains coherent saved outcomes, exposure order and legacy status-only attempts", () => {
+    const coherent = question({
+      correctKey: "B",
+      attempts: [
+        attempt(3, "guessed", { answerKey: "B" }),
+        attempt(1, "incorrect", { answerKey: "A" }),
+        attempt(2, "correct", { answerKey: "B" }),
+        attempt(4, "correct", { answerKey: undefined }),
+      ],
+    });
+    expect(attemptEvents([coherent]).map((event) => [event.exposure, event.correct])).toEqual([
+      [1, false], [2, true], [3, true], [4, true],
+    ]);
+    expect(buildPatternReport([coherent]).totals.all).toEqual({ attempts: 4, correct: 3, accuracy: 75 });
   });
 });
 
@@ -155,6 +264,169 @@ describe("difficulty", () => {
     const calibrated = calibrateDifficulty([...easy, ...hard], attemptEvents([...easy, ...hard]));
     expect(calibrated.tracks).toBe(true);
     expect(calibrated.tiers.filter((tier) => tier.sufficient).map((tier) => tier.firstTime.accuracy)).toEqual([100, 25]);
+  });
+});
+
+describe("verified current misses versus historical error classifications", () => {
+  it("does not call five review-held, self-classified attempts currently scored misses", () => {
+    const held = Array.from({ length: 5 }, () => question({
+      needsReview: true,
+      attempts: [attempt(1, "incorrect", { errorType: "missed-clue" })],
+    }));
+    const original = JSON.stringify(held);
+    const report = buildPatternReport(held);
+    expect(report.totals.all).toEqual({ attempts: 0, correct: 0, accuracy: null });
+    expect(report.findings.filter((finding) => finding.kind === "error-pattern")).toEqual([]);
+    expect(JSON.stringify(held)).toBe(original);
+  });
+
+  it("excludes five saved incorrect flags contradicted by the now-reviewed answer key", () => {
+    const repaired = Array.from({ length: 5 }, () => question({
+      attempts: [attempt(1, "incorrect", { answerKey: "B", errorType: "missed-clue" })],
+    }));
+    const original = JSON.stringify(repaired);
+    expect(attemptEvents(repaired).every((event) => event.correct === undefined)).toBe(true);
+    const report = buildPatternReport(repaired);
+    expect(report.totals.all.attempts).toBe(0);
+    expect(report.findings.some((finding) => finding.kind === "error-pattern")).toBe(false);
+    expect(JSON.stringify(repaired)).toBe(original);
+  });
+
+  it("counts only verified incorrect error marks, not held or correct history", () => {
+    const currentMisses = Array.from({ length: 5 }, () => question({
+      attempts: [attempt(1, "incorrect", { errorType: "missed-clue" })],
+    }));
+    const held = Array.from({ length: 5 }, () => question({
+      needsReview: true,
+      attempts: [attempt(1, "incorrect", { errorType: "missed-clue" })],
+    }));
+    const correct = Array.from({ length: 3 }, () => question({
+      attempts: [attempt(1, "correct", { errorType: "missed-clue" })],
+    }));
+    const records = [...held, ...correct, ...currentMisses];
+    const original = JSON.stringify(records);
+    const report = buildPatternReport(records);
+    expect(report.totals.all).toEqual({ attempts: 8, correct: 3, accuracy: 38 });
+    expect(report.findings.find((finding) => finding.kind === "error-pattern")).toMatchObject({
+      title: "100% of the misses you explained: missed a clue",
+      basis: "observed",
+      sample: 5,
+      questionIds: currentMisses.map((item) => item.id),
+    });
+    expect(JSON.stringify(records)).toBe(original);
+  });
+});
+
+describe("computed pattern timing evidence must be valid", () => {
+  const right = (seconds: number[]) => seconds.map((timeSpentSeconds) => question({
+    attempts: [attempt(1, "correct", { timeSpentSeconds })],
+  }));
+  const wrong = (seconds: number[]) => seconds.map((timeSpentSeconds) => question({
+    status: "incorrect",
+    attempts: [attempt(1, "incorrect", { timeSpentSeconds })],
+  }));
+  const invalidDurations = [
+    Number.POSITIVE_INFINITY, Number.NaN, -5, 0, "25" as unknown as number,
+  ];
+
+  it("never counts invalid correct durations as a sixth valid fast-miss comparison sample", () => {
+    for (const invalid of invalidDurations) {
+      const records = [...right([80, 80, 80, 80, 80, invalid]), ...wrong([25, 25, 25, 25, 25, 25])];
+      const original = JSON.stringify(records);
+      const report = buildPatternReport(records);
+      expect(report.totals.all).toEqual({ attempts: 12, correct: 6, accuracy: 50 });
+      expect(report.timing).toEqual({ correctMedian: 80, incorrectMedian: 25 });
+      expect(report.findings.some((finding) => finding.kind === "fast-misses")).toBe(false);
+      expect(JSON.stringify(records)).toBe(original);
+    }
+  });
+
+  it("never counts invalid incorrect durations as a sixth valid fast-miss comparison sample", () => {
+    for (const invalid of invalidDurations) {
+      const records = [...right([80, 80, 80, 80, 80, 80]), ...wrong([25, 25, 25, 25, 25, invalid])];
+      const original = JSON.stringify(records);
+      const report = buildPatternReport(records);
+      expect(report.totals.all).toEqual({ attempts: 12, correct: 6, accuracy: 50 });
+      expect(report.timing).toEqual({ correctMedian: 80, incorrectMedian: 25 });
+      expect(report.findings.some((finding) => finding.kind === "fast-misses")).toBe(false);
+      expect(JSON.stringify(records)).toBe(original);
+    }
+  });
+
+  it("preserves six genuinely timed correct and incorrect samples and their action IDs", () => {
+    const correct = right([80, 80, 80, 80, 80, 80]);
+    const incorrect = wrong([25, 25, 25, 25, 25, 25]);
+    const report = buildPatternReport([...correct, ...incorrect]);
+    expect(report.timing).toEqual({ correctMedian: 80, incorrectMedian: 25 });
+    expect(report.findings.find((finding) => finding.kind === "fast-misses")).toMatchObject({
+      basis: "computed", sample: 12, questionIds: incorrect.map((q) => q.id),
+    });
+  });
+});
+
+describe("fast-miss timing requires a verifiable saved answer choice", () => {
+  const right = (count: number, patch: Partial<QuestionAttempt> = {}) => Array.from({ length: count }, () => question({
+    attempts: [attempt(1, "correct", { timeSpentSeconds: 80, ...patch })],
+  }));
+  const wrong = (count: number, patch: Partial<QuestionAttempt> = {}) => Array.from({ length: count }, () => question({
+    status: "incorrect",
+    attempts: [attempt(1, "incorrect", { timeSpentSeconds: 25, ...patch })],
+  }));
+  const fastMisses = (records: QuestionRecord[]) =>
+    buildPatternReport(records).findings.find((finding) => finding.kind === "fast-misses");
+
+  it("does not infer a current fast-miss pattern from twelve status-only legacy outcomes", () => {
+    const records = [...right(6, { answerKey: undefined }), ...wrong(6, { answerKey: undefined })];
+    const original = JSON.stringify(records);
+    const report = buildPatternReport(records);
+    // Preserve historical recorded scores while withholding unsupported timing conclusions.
+    expect(report.totals.all).toEqual({ attempts: 12, correct: 6, accuracy: 50 });
+    expect(report.timing).toEqual({ correctMedian: undefined, incorrectMedian: undefined });
+    expect(fastMisses(records)).toBeUndefined();
+    expect(JSON.stringify(records)).toBe(original);
+  });
+
+  it("does not allow one legacy status-only right answer to become the sixth comparison sample", () => {
+    const records = [...right(5), ...right(1, { answerKey: undefined }), ...wrong(6)];
+    const report = buildPatternReport(records);
+    expect(report.totals.all.attempts).toBe(12);
+    expect(report.timing).toEqual({ correctMedian: 80, incorrectMedian: 25 });
+    expect(fastMisses(records)).toBeUndefined();
+  });
+
+  it("does not allow one legacy status-only wrong answer to become the sixth comparison sample", () => {
+    const records = [...right(6), ...wrong(5), ...wrong(1, { answerKey: undefined })];
+    const report = buildPatternReport(records);
+    expect(report.totals.all.attempts).toBe(12);
+    expect(report.timing).toEqual({ correctMedian: 80, incorrectMedian: 25 });
+    expect(fastMisses(records)).toBeUndefined();
+  });
+
+  it("rejects an imported incorrect choice absent from the question's offered options", () => {
+    const records = [...right(6), ...wrong(5), ...wrong(1, { answerKey: "Z" })];
+    const original = JSON.stringify(records);
+    expect(buildPatternReport(records).totals.all.attempts).toBe(12);
+    expect(fastMisses(records)).toBeUndefined();
+    expect(JSON.stringify(records)).toBe(original);
+  });
+
+  it("keeps held mappings and contradictory saved statuses out of fast-miss samples", () => {
+    const held = question({ needsReview: true, attempts: [attempt(1, "incorrect", { timeSpentSeconds: 25 })] });
+    const contradictory = question({ attempts: [attempt(1, "incorrect", { answerKey: "B", timeSpentSeconds: 25 })] });
+    const records = [...right(6), ...wrong(4), held, contradictory];
+    expect(attemptEvents([held, contradictory]).every((event) => event.correct === undefined)).toBe(true);
+    expect(fastMisses(records)).toBeUndefined();
+  });
+
+  it("still recommends verified quick misses with exact retry IDs and no source mutation", () => {
+    const correct = right(6);
+    const incorrect = wrong(6);
+    const records = [...correct, ...incorrect];
+    const original = JSON.stringify(records);
+    expect(fastMisses(records)).toMatchObject({
+      basis: "computed", sample: 12, questionIds: incorrect.map((record) => record.id),
+    });
+    expect(JSON.stringify(records)).toBe(original);
   });
 });
 
@@ -304,6 +576,161 @@ describe("what to look at again after a block", () => {
     expect(byQuestion.has(block[5].id)).toBe(false);
   });
 
+  it("does not learn a fast correct-answer pace from six legacy status-only records", () => {
+    const legacy = Array.from({ length: 6 }, () => question({
+      attempts: [attempt(1, "correct", { answerKey: undefined, timeSpentSeconds: 10, quizSessionId: "earlier" })],
+    }));
+    const later = question({ attempts: [attempt(9, "correct", {
+      answerKey: "B", timeSpentSeconds: 100, quizSessionId: "later",
+    })] });
+    const all = [...legacy, later];
+    const original = JSON.stringify(all);
+    // Preserve the legacy analytics contract and its raw histories; only the
+    // evidence standard for a diagnostic timing recommendation becomes stricter.
+    expect(attemptEvents(legacy).every((event) => event.correct === true && event.answerKey === undefined)).toBe(true);
+    expect(tally(attemptEvents(legacy))).toEqual({ attempts: 6, correct: 6, accuracy: 100 });
+    expect(reviewCandidatesForSession("later", all)).toEqual([]);
+    expect(JSON.stringify(all)).toBe(original);
+  });
+
+  it("does not satisfy six verified pace samples by adding one legacy status-only flag", () => {
+    const matched = Array.from({ length: 5 }, () => question({
+      attempts: [attempt(1, "correct", { answerKey: "B", timeSpentSeconds: 10, quizSessionId: "earlier" })],
+    }));
+    const unverified = question({ attempts: [attempt(1, "correct", {
+      answerKey: undefined, timeSpentSeconds: 10, quizSessionId: "earlier",
+    })] });
+    const later = question({ attempts: [attempt(9, "correct", {
+      answerKey: "B", timeSpentSeconds: 100, quizSessionId: "later",
+    })] });
+    const all = [...matched, unverified, later];
+    const original = JSON.stringify(all);
+    expect(reviewCandidatesForSession("later", all)).toEqual([]);
+    expect(JSON.stringify(all)).toBe(original);
+  });
+
+  it("does not label a legacy status-only target slow even with six valid pace samples", () => {
+    const matched = Array.from({ length: 6 }, () => question({
+      attempts: [attempt(1, "correct", { answerKey: "B", timeSpentSeconds: 10, quizSessionId: "earlier" })],
+    }));
+    const later = question({ attempts: [attempt(9, "correct", {
+      answerKey: undefined, timeSpentSeconds: 100, quizSessionId: "later",
+    })] });
+    const all = [...matched, later];
+    const original = JSON.stringify(all);
+    expect(reviewCandidatesForSession("later", all)).toEqual([]);
+    expect(JSON.stringify(all)).toBe(original);
+  });
+
+  it("does not establish a paced-correct baseline from six historically correct flags on withdrawn keys", () => {
+    const held = Array.from({ length: 6 }, () => question({
+      needsReview: true,
+      attempts: [attempt(1, "correct", { timeSpentSeconds: 10, quizSessionId: "earlier" })],
+    }));
+    const later = question({ attempts: [attempt(9, "correct", { timeSpentSeconds: 100, quizSessionId: "later" })] });
+    const originals = JSON.stringify([...held, later]);
+    const historic = attemptEvents(held);
+    expect(historic.filter((event) => event.correct === true)).toHaveLength(0);
+    expect(reviewCandidatesForSession("later", [...held, later])).toEqual([]);
+    expect(JSON.stringify([...held, later])).toBe(originals);
+  });
+
+  it("does not establish paced-correct baseline from six saved correct flags contradicting a reviewed key", () => {
+    const contradicted = Array.from({ length: 6 }, () => question({
+      correctKey: "B",
+      attempts: [attempt(1, "correct", { answerKey: "A", timeSpentSeconds: 10, quizSessionId: "earlier" })],
+    }));
+    const later = question({ attempts: [attempt(9, "correct", { timeSpentSeconds: 100, quizSessionId: "later" })] });
+    const originals = JSON.stringify([...contradicted, later]);
+    expect(attemptEvents(contradicted).filter((event) => event.correct === true)).toHaveLength(0);
+    expect(reviewCandidatesForSession("later", [...contradicted, later])).toEqual([]);
+    expect(JSON.stringify([...contradicted, later])).toBe(originals);
+  });
+
+  it.each([
+    ["nonfinite Infinity", Number.POSITIVE_INFINITY],
+    ["nonfinite NaN", Number.NaN],
+    ["numeric string", "100"],
+    ["zero", 0],
+    ["negative", -30],
+  ])("does not recommend slow-right from %s as a recorded target duration", (_description, seconds) => {
+    const trusted = Array.from({ length: 6 }, () => question({
+      attempts: [attempt(1, "correct", { answerKey: "B", timeSpentSeconds: 10, quizSessionId: "earlier" })],
+    }));
+    // Simulate malformed imported legacy data at the runtime boundary. Do not
+    // normalize an invalid duration into trusted evidence or mutate attempts.
+    const target = question({ attempts: [attempt(9, "correct", {
+      answerKey: "B", timeSpentSeconds: seconds as number, quizSessionId: "later",
+    })] });
+    const source = [...trusted, target];
+    const originalAttempts = source.map((record) => [...record.attempts]);
+    const current = attemptEvents(source);
+    expect(current.filter((event) => event.correct === true)).toHaveLength(7);
+    expect(reviewCandidatesForSession("later", source)).toEqual([]);
+    expect(source.map((record) => record.attempts)).toEqual(originalAttempts);
+  });
+
+  it("keeps slow-right advice for valid finite slow timings, but not normal pace", () => {
+    const trusted = Array.from({ length: 6 }, () => question({
+      attempts: [attempt(1, "correct", { answerKey: "B", timeSpentSeconds: 10, quizSessionId: "earlier" })],
+    }));
+    const slow = question({ attempts: [attempt(9, "correct", {
+      answerKey: "B", timeSpentSeconds: 100, quizSessionId: "slow",
+    })] });
+    const normal = question({ attempts: [attempt(9, "correct", {
+      answerKey: "B", timeSpentSeconds: 12, quizSessionId: "normal",
+    })] });
+    expect(reviewCandidatesForSession("slow", [...trusted, slow])).toEqual([
+      expect.objectContaining({ questionId: slow.id, reasons: ["slow-right"] }),
+    ]);
+    expect(reviewCandidatesForSession("normal", [...trusted, normal])).toEqual([]);
+  });
+
+  it("keeps six actually reviewed, matching correct timings sufficient for a slow-right observation", () => {
+    const trusted = Array.from({ length: 6 }, () => question({
+      attempts: [attempt(1, "correct", { answerKey: "B", timeSpentSeconds: 10, quizSessionId: "earlier" })],
+    }));
+    const later = question({ attempts: [attempt(9, "correct", { answerKey: "B", timeSpentSeconds: 100, quizSessionId: "later" })] });
+    expect(reviewCandidatesForSession("later", [...trusted, later])).toEqual([
+      expect.objectContaining({ questionId: later.id, reasons: ["slow-right"], retry: ["this-week"] }),
+    ]);
+  });
+
+  it("does not infer slow-right from five unscored timed attempts and one trusted correct pace", () => {
+    const baseline = question({ attempts: [attempt(1, "correct", { timeSpentSeconds: 10 })] });
+    const held = Array.from({ length: 5 }, () => question({
+      attempts: [attempt(2, "needs-review", { answerKey: "A", timeSpentSeconds: 7 })],
+    }));
+    const slow = question({ attempts: [attempt(9, "correct", { timeSpentSeconds: 100 })] });
+    const source = [...held, baseline, slow];
+    const original = JSON.stringify(source);
+    const block = attemptEvents([slow]);
+    const history = attemptEvents([...held, baseline]);
+    expect(history.filter((event) => event.correct === true)).toHaveLength(1);
+    expect(history.filter((event) => event.seconds)).toHaveLength(6);
+    expect(reviewCandidates(block, history)).toEqual([]);
+    expect(JSON.stringify(source)).toBe(original);
+  });
+
+  it("does not use timed incorrect attempts to satisfy the correct-pace minimum", () => {
+    const baseline = question({ attempts: [attempt(1, "correct", { timeSpentSeconds: 10 })] });
+    const misses = Array.from({ length: 5 }, () => question({
+      attempts: [attempt(2, "incorrect", { timeSpentSeconds: 7 })],
+    }));
+    const slow = question({ attempts: [attempt(9, "correct", { timeSpentSeconds: 100 })] });
+    expect(reviewCandidates(attemptEvents([slow]), attemptEvents([baseline, ...misses]))).toEqual([]);
+  });
+
+  it("still identifies slow-right when six scored correct timed baselines support the median", () => {
+    const baseline = Array.from({ length: 6 }, () => question({
+      attempts: [attempt(1, "correct", { timeSpentSeconds: 10 })],
+    }));
+    const slow = question({ attempts: [attempt(9, "correct", { timeSpentSeconds: 100 })] });
+    expect(reviewCandidates(attemptEvents([slow]), attemptEvents(baseline))).toEqual([
+      expect.objectContaining({ questionId: slow.id, reasons: ["slow-right"], retry: ["this-week"] }),
+    ]);
+  });
+
   it("orders candidates by priority, and a question with no reason has none", () => {
     expect(reviewPriority([])).toBe(0);
     const block = [
@@ -341,6 +768,47 @@ describe("what to look at again after a block", () => {
     expect(usual.map((candidate) => candidate.priority)).toEqual(usual.map((candidate) => rankByReasons({ ...seen[0], reasons: candidate.reasons })));
   });
 
+  it("keeps an older block's miss reason and retry stable after a later block", () => {
+    const recorded = question({ attempts: [
+      attempt(16, "incorrect", { quizSessionId: "older" }),
+      attempt(18, "incorrect", { quizSessionId: "later" }),
+    ] });
+    expect(reviewCandidatesForSession("older", [recorded])).toEqual([
+      expect.objectContaining({ questionId: recorded.id, reasons: ["wrong"], retry: ["tomorrow"] }),
+    ]);
+    expect(reviewCandidatesForSession("later", [recorded])).toEqual([
+      expect.objectContaining({ questionId: recorded.id, reasons: ["repeat-miss"], retry: ["today", "this-week"] }),
+    ]);
+  });
+
+  it("never turns an older right answer into slow-right using future timed answers", () => {
+    const older = question({ attempts: [attempt(16, "correct", { quizSessionId: "older", timeSpentSeconds: 60 })] });
+    const later = Array.from({ length: 6 }, () => question({
+      attempts: [attempt(18, "correct", { quizSessionId: "later", timeSpentSeconds: 10 })],
+    }));
+    expect(reviewCandidatesForSession("older", [older])).toEqual([]);
+    expect(reviewCandidatesForSession("older", [older, ...later])).toEqual([]);
+  });
+
+  it("ignores another session's equal timestamp rather than counting it as earlier pace", () => {
+    const at = "2026-07-16T09:00:00.000Z";
+    const older = question({ attempts: [attempt(16, "correct", { quizSessionId: "older", timeSpentSeconds: 60 })] });
+    const sameTime = Array.from({ length: 6 }, () => question({
+      attempts: [attempt(16, "correct", { at, quizSessionId: "simultaneous", timeSpentSeconds: 10 })],
+    }));
+    expect(reviewCandidatesForSession("older", [older, ...sameTime])).toEqual([]);
+  });
+
+  it("fails closed on invalid session times instead of trusting incomparable history", () => {
+    const recorded = question({ attempts: [
+      attempt(10, "incorrect", { quizSessionId: "prior" }),
+      attempt(16, "incorrect", { at: "not-a-timestamp", quizSessionId: "invalid" }),
+    ] });
+    expect(reviewCandidatesForSession("invalid", [recorded])).toEqual([
+      expect.objectContaining({ questionId: recorded.id, reasons: ["wrong"], retry: ["tomorrow"] }),
+    ]);
+  });
+
   it("builds a review set that points at the same questions and keeps its place in the course", () => {
     const block = [question({ attempts: [attempt(9, "incorrect")] }), question({ attempts: [attempt(9, "correct", { certainty: "guess" })] })];
     const candidates = reviewCandidates(attemptEvents(block));
@@ -355,5 +823,426 @@ describe("what to look at again after a block", () => {
       kind: "review", parentSetId: "set-1", scope: { module: "FTM 1", week: 2 }, questionIds: [block[0].id], tags: ["missed-review"],
     });
     expect(set.title.startsWith("Week 2 practice: review, ")).toBe(true);
+  });
+});
+
+
+describe("session review cannot assign retry identity to duplicated canonical question IDs", () => {
+  const first = () => question({
+    id: "ambiguous-session-id",
+    status: "incorrect",
+    attempts: [attempt(1, "incorrect", { quizSessionId: "earlier" })],
+  });
+  const second = () => question({
+    id: "ambiguous-session-id",
+    status: "incorrect",
+    attempts: [attempt(3, "incorrect", { quizSessionId: "later" })],
+  });
+
+  it("does not call two source rows with separate first misses a repeat miss, in either order", () => {
+    for (const records of [[first(), second()], [second(), first()]]) {
+      const original = JSON.stringify(records);
+      expect(tally(attemptEvents(records))).toEqual({ attempts: 2, correct: 0, accuracy: 0 });
+      expect(reviewCandidatesForSession("earlier", records)).toEqual([]);
+      expect(reviewCandidatesForSession("later", records)).toEqual([]);
+      expect(JSON.stringify(records)).toBe(original);
+    }
+  });
+
+  it("quarantines an answered row when another source row uses its ID, even if the alias is held", () => {
+    const scored = question({
+      id: "held-session-alias",
+      status: "incorrect",
+      attempts: [attempt(3, "incorrect", { quizSessionId: "later", certainty: "sure" })],
+    });
+    const alias = question({ id: scored.id, needsReview: true, attempts: [] });
+    for (const records of [[scored, alias], [alias, scored]]) {
+      expect(tally(attemptEvents(records))).toEqual({ attempts: 1, correct: 0, accuracy: 0 });
+      expect(reviewCandidatesForSession("later", records)).toEqual([]);
+    }
+  });
+
+  it("never offers a retry for copied identical imported attempts under the same ID", () => {
+    const source = first();
+    const copied = question({ ...source, attempts: source.attempts.map((saved) => ({ ...saved })) });
+    const records = [source, copied];
+    const original = JSON.stringify(records);
+    expect(tally(attemptEvents(records)).attempts).toBe(2);
+    expect(reviewCandidatesForSession("earlier", records)).toEqual([]);
+    expect(JSON.stringify(records)).toBe(original);
+  });
+
+  it("retains real repeat-miss and ordinary wrong recommendations for unique source IDs", () => {
+    const unique = question({
+      id: "unique-session-miss",
+      status: "incorrect",
+      attempts: [
+        attempt(1, "incorrect", { quizSessionId: "earlier" }),
+        attempt(3, "incorrect", { quizSessionId: "later" }),
+      ],
+    });
+    const once = question({
+      id: "unique-session-once",
+      status: "incorrect",
+      attempts: [attempt(3, "incorrect", { quizSessionId: "later" })],
+    });
+    const records = [first(), second(), unique, once];
+    const before = JSON.stringify(records);
+    expect(reviewCandidatesForSession("later", records)).toEqual([
+      expect.objectContaining({ questionId: unique.id, reasons: ["repeat-miss"], retry: ["today", "this-week"] }),
+      expect.objectContaining({ questionId: once.id, reasons: ["wrong"], retry: ["tomorrow"] }),
+    ]);
+    expect(reviewCandidatesForSession("earlier", records)).toEqual([
+      expect.objectContaining({ questionId: unique.id, reasons: ["wrong"], retry: ["tomorrow"] }),
+    ]);
+    expect(tally(attemptEvents(records)).attempts).toBe(5);
+    expect(JSON.stringify(records)).toBe(before);
+  });
+});
+
+describe("review-set membership is unique while historical attempts remain intact", () => {
+  it("includes a question only once when repeated attempts create multiple review candidates", () => {
+    const candidates: Parameters<typeof buildReviewSet>[0]["candidates"] = [
+      { questionId: "q-repeat", reasons: ["repeat-miss"], priority: 5, retry: ["today"] },
+      { questionId: "q-repeat", reasons: ["wrong"], priority: 2, retry: ["tomorrow"] },
+      { questionId: "q-other", reasons: ["wrong"], priority: 1, retry: ["tomorrow"] },
+    ];
+    const original = JSON.stringify(candidates);
+    const result = buildReviewSet({
+      id: "review-unique", candidates, reasons: ["repeat-miss", "wrong"],
+      now: "2026-07-20T11:00:00.000Z",
+    });
+    expect(result.questionIds).toEqual(["q-repeat", "q-other"]);
+    expect(JSON.stringify(candidates)).toBe(original);
+  });
+
+  it("deduplicates after reason filtering so an unselected first occurrence cannot hide a selected retry", () => {
+    const result = buildReviewSet({
+      id: "review-filtered",
+      candidates: [
+        { questionId: "q-repeat", reasons: ["slow-right"], priority: 4, retry: ["this-week"] },
+        { questionId: "q-other", reasons: ["wrong"], priority: 3, retry: ["tomorrow"] },
+        { questionId: "q-repeat", reasons: ["wrong"], priority: 2, retry: ["tomorrow"] },
+      ],
+      reasons: ["wrong"], now: "2026-07-20T11:00:00.000Z",
+    });
+    expect(result.questionIds).toEqual(["q-other", "q-repeat"]);
+  });
+
+  it("does not change unique-member ordering or inherited course scope", () => {
+    const result = buildReviewSet({
+      id: "review-scoped",
+      candidates: [
+        { questionId: "q-a", reasons: ["wrong"], priority: 5, retry: ["tomorrow"] },
+        { questionId: "q-b", reasons: ["unsure-right"], priority: 4, retry: ["this-week"] },
+        { questionId: "q-c", reasons: ["wrong"], priority: 3, retry: ["tomorrow"] },
+      ],
+      reasons: ["wrong", "unsure-right"],
+      parent: { id: "original-set", title: "Module 3 Week 4", scope: { module: "DERS", week: 4 } },
+      now: "2026-07-20T11:00:00.000Z",
+    });
+    expect(result).toMatchObject({
+      questionIds: ["q-a", "q-b", "q-c"], parentSetId: "original-set",
+      scope: { module: "DERS", week: 4 }, kind: "review",
+    });
+  });
+});
+
+describe("confusion-pair text requires an unambiguous question identity", () => {
+  const sourceOptions = [
+    { key: "A", text: "Gastrin" },
+    { key: "B", text: "Secretin" },
+    { key: "C", text: "Somatostatin" },
+  ];
+  const aliasOptions = [
+    { key: "A", text: "Pepsin" },
+    { key: "B", text: "Trypsin" },
+    { key: "C", text: "Chymotrypsin" },
+  ];
+  const origin = () => question({
+    id: "source-confusion-duplicate",
+    options: sourceOptions,
+    correctKey: "B",
+    status: "incorrect",
+    attempts: [
+      attempt(1, "incorrect", { answerKey: "A" }),
+      attempt(2, "incorrect", { answerKey: "A" }),
+    ],
+  });
+
+  it("holds ambiguous duplicate-ID option text in both input orders, without rewriting scored history", () => {
+    const original = origin();
+    const alias = question({ id: original.id, options: aliasOptions, correctKey: "B", attempts: [] });
+    for (const records of [[original, alias], [alias, original]]) {
+      const before = JSON.stringify(records);
+      const report = buildPatternReport(records);
+      expect(report.totals.all).toEqual({ attempts: 2, correct: 0, accuracy: 0 });
+      expect(report.confusionPairs).toEqual([]);
+      expect(report.findings.filter((item) => item.kind === "confusion-pair")).toEqual([]);
+      expect(JSON.stringify(records)).toBe(before);
+    }
+  });
+
+  it("does not let a duplicate alias with unchanged offered text restore ambiguous confidence", () => {
+    const original = origin();
+    const alias = question({ id: original.id, options: sourceOptions, correctKey: "B", attempts: [] });
+    expect(buildPatternReport([original, alias]).confusionPairs).toEqual([]);
+  });
+
+  it("retains precisely attributed text and retry IDs for a unique verified question", () => {
+    const original = origin();
+    const before = JSON.stringify(original);
+    const report = buildPatternReport([original]);
+    expect(report.confusionPairs).toEqual([
+      { picked: "Gastrin", correct: "Secretin", count: 2, questionIds: [original.id] },
+    ]);
+    expect(report.findings.find((item) => item.kind === "confusion-pair")).toMatchObject({
+      title: 'You chose "Gastrin" when the answer was "Secretin"',
+      sample: 2,
+      questionIds: [original.id],
+    });
+    expect(JSON.stringify(original)).toBe(before);
+  });
+
+  it("does not infer a confusion pair from withdrawn or unreviewed answer mappings", () => {
+    const record = question({
+      ...origin(),
+      needsReview: true,
+    });
+    expect(buildPatternReport([record]).confusionPairs).toEqual([]);
+  });
+});
+
+describe("fast-miss evidence rejects duplicate canonical question IDs", () => {
+  const right = (count: number) => Array.from({ length: count }, () => question({
+    attempts: [attempt(1, "correct", { timeSpentSeconds: 80 })],
+  }));
+  const wrong = (count: number, answerKey = "A") => Array.from({ length: count }, () => question({
+    status: "incorrect",
+    attempts: [attempt(1, "incorrect", { answerKey, timeSpentSeconds: 25 })],
+  }));
+  const alias = (record: QuestionRecord, options = record.options) => question({
+    id: record.id,
+    options,
+    attempts: [],
+  });
+  const fast = (records: QuestionRecord[]) => buildPatternReport(records).findings.find((finding) => finding.kind === "fast-misses");
+
+  it("cannot validate unoffered imported choices using later aliases sharing their IDs, in either order", () => {
+    const correct = right(6);
+    const invalid = wrong(6, "Z");
+    const aliases = invalid.map((record) => alias(record, [...record.options, { key: "Z", text: "Not in source" }]));
+    for (const records of [[...correct, ...invalid, ...aliases], [...correct, ...aliases, ...invalid]]) {
+      const before = JSON.stringify(records);
+      const report = buildPatternReport(records);
+      expect(report.totals.all).toEqual({ attempts: 12, correct: 6, accuracy: 50 });
+      expect(report.timing).toEqual({ correctMedian: 80, incorrectMedian: undefined });
+      expect(fast(records)).toBeUndefined();
+      expect(JSON.stringify(records)).toBe(before);
+    }
+  });
+
+  it("does not treat an otherwise valid, duplicated wrong question ID as a sixth independent timing sample", () => {
+    const correct = right(6);
+    const incorrect = wrong(6);
+    const duplicate = alias(incorrect[0]);
+    for (const records of [[...correct, ...incorrect, duplicate], [...correct, duplicate, ...incorrect]]) {
+      const report = buildPatternReport(records);
+      expect(report.totals.all.attempts).toBe(12);
+      expect(report.timing).toEqual({ correctMedian: 80, incorrectMedian: 25 });
+      expect(fast(records)).toBeUndefined();
+    }
+  });
+
+  it("does not count duplicate correctly answered records toward the six-correct threshold", () => {
+    const correct = right(5);
+    const repeatedId = question({ attempts: [attempt(1, "correct", { timeSpentSeconds: 80 })] });
+    const duplicate = question({ id: repeatedId.id, attempts: [attempt(1, "correct", { timeSpentSeconds: 80 })] });
+    const incorrect = wrong(6);
+    const records = [...correct, repeatedId, ...incorrect, duplicate];
+    const before = JSON.stringify(records);
+    const report = buildPatternReport(records);
+    expect(report.totals.all).toEqual({ attempts: 13, correct: 7, accuracy: 54 });
+    expect(report.timing).toEqual({ correctMedian: 80, incorrectMedian: 25 });
+    expect(fast(records)).toBeUndefined();
+    expect(JSON.stringify(records)).toBe(before);
+  });
+
+  it("retains the fast-miss finding and exact retry IDs for six unique, verifiable records per group", () => {
+    const correct = right(6);
+    const incorrect = wrong(6);
+    const records = [...correct, ...incorrect];
+    const before = JSON.stringify(records);
+    const report = buildPatternReport(records);
+    expect(report.findings.find((finding) => finding.kind === "fast-misses")).toMatchObject({
+      sample: 12,
+      basis: "computed",
+      questionIds: incorrect.map((record) => record.id),
+    });
+    expect(JSON.stringify(records)).toBe(before);
+  });
+});
+
+
+describe("duplicate-ID metadata evidence must not borrow another source row", () => {
+  const wrong = (topic: string) => question({
+    topic,
+    stem: VIGNETTE_TREATMENT,
+    status: "incorrect",
+    attempts: [attempt(1, "incorrect")],
+  });
+  const alias = (record: QuestionRecord) => question({
+    id: record.id,
+    topic: "Cardiac",
+    stem: "Which enzyme is deficient in classic galactosemia?",
+    needsReview: true,
+    attempts: [],
+  });
+
+  it("does not invent a weak Cardiac concept from six wrong Renal source rows when aliases reorder", () => {
+    const renal = Array.from({ length: 6 }, () => wrong("Renal"));
+    const cardiacAliases = renal.map(alias);
+    for (const records of [[...renal, ...cardiacAliases], [...cardiacAliases, ...renal]]) {
+      const before = JSON.stringify(records);
+      const report = buildPatternReport(records);
+      expect(report.totals.all).toEqual({ attempts: 6, correct: 0, accuracy: 0 });
+      expect(report.byConcept).toEqual([]);
+      expect(report.findings.filter((finding) => finding.kind === "weak-concept")).toEqual([]);
+      expect(JSON.stringify(records)).toBe(before);
+    }
+  });
+
+  it("does not attribute collided attempts to another record's inferred task or reasoning depth", () => {
+    const source = Array.from({ length: 8 }, () => wrong("Renal"));
+    const aliases = source.map(alias);
+    for (const records of [[...source, ...aliases], [...aliases, ...source]]) {
+      const report = buildPatternReport(records);
+      expect(report.totals.all.attempts).toBe(8);
+      expect(report.byTask).toEqual([]);
+      expect(report.byDepth).toEqual([]);
+      expect(report.findings.some((finding) => ["task-gap", "depth-gap"].includes(finding.kind))).toBe(false);
+    }
+  });
+
+  it("retains observed certainty and raw scores without alias-derived topic naming", () => {
+    const source = Array.from({ length: 2 }, () => question({
+      topic: "Renal",
+      attempts: [attempt(1, "incorrect", { certainty: "sure" })],
+    }));
+    const aliases = source.map(alias);
+    for (const records of [[...source, ...aliases], [...aliases, ...source]]) {
+      const report = buildPatternReport(records);
+      const finding = report.findings.find((item) => item.kind === "sure-and-wrong");
+      expect(report.sureAndWrong).toHaveLength(2);
+      expect(report.totals.all.attempts).toBe(2);
+      expect(finding).toMatchObject({ sample: 2, questionIds: source.map((record) => record.id) });
+      expect(finding?.detail).not.toContain("Cardiac");
+      expect(finding?.detail).not.toContain("Renal");
+    }
+  });
+
+  it("does not infer missing figure evidence or retry IDs from collided question sources", () => {
+    const source = question({ stem: "The arrow in the photograph shown below indicates which structure?" });
+    const duplicate = alias(source);
+    for (const records of [[source, duplicate], [duplicate, source]]) {
+      const report = buildPatternReport(records);
+      expect(report.findings.find((finding) => finding.kind === "figure-missing")).toBeUndefined();
+    }
+    expect(buildPatternReport([source]).findings.find((finding) => finding.kind === "figure-missing")).toMatchObject({
+      sample: 1, questionIds: [source.id],
+    });
+  });
+
+  it("preserves correctly attributed metadata and weak-concept actions for six unique ready questions", () => {
+    const source = Array.from({ length: 6 }, () => wrong("Renal"));
+    const before = JSON.stringify(source);
+    const report = buildPatternReport(source);
+    expect(report.byConcept).toEqual([expect.objectContaining({
+      key: "renal", first: { attempts: 6, correct: 0, accuracy: 0 },
+      questionIds: source.map((record) => record.id),
+    })]);
+    expect(report.findings.find((finding) => finding.kind === "weak-concept")).toMatchObject({
+      title: "Renal: 0% the first time",
+      sample: 6,
+      questionIds: source.map((record) => record.id),
+    });
+    expect(report.byTask).not.toEqual([]);
+    expect(report.byDepth).not.toEqual([]);
+    expect(JSON.stringify(source)).toBe(before);
+  });
+});
+
+describe("repeat-miss actions require an unambiguous question identity", () => {
+  const missed = (id: string, day: number) => question({
+    id, status: "incorrect", attempts: [attempt(day, "incorrect")],
+  });
+  const repeatFinding = (records: QuestionRecord[]) =>
+    buildPatternReport(records).findings.find((finding) => finding.kind === "repeat-miss");
+
+  it("does not turn two distinct single misses sharing an ID into a repeat-miss action", () => {
+    const records = [missed("collision-two-rows", 1), missed("collision-two-rows", 2)];
+    const before = JSON.stringify(records);
+    const report = buildPatternReport(records);
+    expect(report.totals.all).toEqual({ attempts: 2, correct: 0, accuracy: 0 });
+    expect(report.totals.first).toEqual({ attempts: 2, correct: 0, accuracy: 0 });
+    expect(report.repeatMisses).toEqual([]);
+    expect(repeatFinding(records)).toBeUndefined();
+    expect(JSON.stringify(records)).toBe(before);
+  });
+
+  it("never claims a repeated miss from two copies of the identical imported attempt", () => {
+    const first = missed("collision-copy", 3);
+    const records = [first, question({ ...first, attempts: first.attempts.map((saved) => ({ ...saved })) })];
+    const report = buildPatternReport(records);
+    expect(report.totals.all.attempts).toBe(2);
+    expect(report.repeatMisses).toEqual([]);
+    expect(repeatFinding(records)).toBeUndefined();
+  });
+
+  it("is order-independent when colliding rows have different provenance or answer readiness", () => {
+    const source = missed("collision-order", 1);
+    const alias = missed("collision-order", 2);
+    alias.topic = "Unrelated concept";
+    const held = question({ id: "collision-held", needsReview: true, attempts: [] });
+    const answered = question({
+      id: held.id, status: "incorrect",
+      attempts: [attempt(1, "incorrect"), attempt(2, "incorrect")],
+    });
+    for (const records of [[source, alias], [alias, source], [answered, held], [held, answered]]) {
+      const before = JSON.stringify(records);
+      const report = buildPatternReport(records);
+      expect(report.repeatMisses).toEqual([]);
+      expect(report.findings.some((finding) => finding.kind === "repeat-miss")).toBe(false);
+      expect(JSON.stringify(records)).toBe(before);
+    }
+  });
+
+  it("keeps true repeated misses and retry IDs for a unique, verifiable source row", () => {
+    const original = question({
+      id: "unique-repeated-miss", status: "incorrect",
+      attempts: [attempt(1, "incorrect"), attempt(2, "incorrect")],
+    });
+    const report = buildPatternReport([original]);
+    expect(report.repeatMisses).toEqual([original.id]);
+    expect(report.findings.find((finding) => finding.kind === "repeat-miss")).toMatchObject({
+      title: "1 question missed more than once",
+      sample: 2, questionIds: [original.id],
+      actionLabel: "Retry 1 question",
+    });
+  });
+
+  it("preserves a unique repeat-miss recommendation alongside ambiguous collided histories", () => {
+    const distinct = question({
+      id: "unique-repeat-alongside-collision", status: "incorrect",
+      attempts: [attempt(1, "incorrect"), attempt(2, "incorrect")],
+    });
+    const collided = [missed("collision-mixed", 1), missed("collision-mixed", 2)];
+    const records = [...collided, distinct];
+    const report = buildPatternReport(records);
+    expect(report.totals.all).toEqual({ attempts: 4, correct: 0, accuracy: 0 });
+    expect(report.repeatMisses).toEqual([distinct.id]);
+    expect(report.findings.find((finding) => finding.kind === "repeat-miss")).toMatchObject({
+      sample: 2, questionIds: [distinct.id],
+    });
   });
 });
