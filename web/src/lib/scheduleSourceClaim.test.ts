@@ -359,3 +359,46 @@ describe("strict value snapshots for schedule review confirmation", () => {
     expect(checkScheduleReviewValueBinding(binding, { ...input, rows: input.rows.slice(1) })).toBe("stale-records");
   });
 });
+
+describe("aggregate schedule review snapshot admission", () => {
+  it("refuses a batch of individually admissible large records", () => {
+    const record = { note: "x".repeat(1_100_000) };
+    expect(snapshotScheduleReviewValue(record)).not.toBe(undefined);
+    const input = { workspaceLease: {}, candidateBatch: [],
+      rows: [{ recordId: "a", record }, { recordId: "b", record }] };
+    expect(captureScheduleReviewValueBinding(input)).toEqual({ state: "invalid-input" });
+    const small = { ...input, rows: input.rows.slice(0, 1) };
+    const captured = captureScheduleReviewValueBinding(small);
+    if (captured.state !== "captured") throw new Error("small snapshot refused");
+    expect(checkScheduleReviewValueBinding(captured.binding, input)).toBe("invalid-input");
+    expect(checkScheduleReviewValueBinding(captured.binding, { ...input, workspaceLease: {} })).toBe("stale-scope");
+  });
+
+  it("shares node and character budgets with the ordered candidate batch", () => {
+    const record = Array(55_000).fill(null);
+    expect(snapshotScheduleReviewValue(record)).not.toBe(undefined);
+    const input = { workspaceLease: {}, candidateBatch: record, rows: [{ recordId: "a", record }] };
+    expect(captureScheduleReviewValueBinding(input)).toEqual({ state: "invalid-input" });
+    const large = "x".repeat(1_100_000);
+    expect(captureScheduleReviewValueBinding({ ...input, candidateBatch: [large],
+      rows: [{ recordId: "a", record: large }] })).toEqual({ state: "invalid-input" });
+    expect(captureScheduleReviewValueBinding({ ...input, candidateBatch: [],
+      rows: [{ recordId: large, record: large }] })).toEqual({ state: "invalid-input" });
+  });
+
+  it("charges structural characters, rejects raw oversized bindings, and admits exact limits", () => {
+    const lease = {};
+    const atLimit = { workspaceLease: lease, candidateBatchSnapshot: "[]",
+      rows: [{ recordId: "a", recordSnapshot: "x".repeat(1_999_997) }] };
+    const captured = captureScheduleReviewBinding(atLimit);
+    if (captured.state !== "captured") throw new Error("boundary refused");
+    const over = { ...atLimit, rows: [{ recordId: "a", recordSnapshot: "x".repeat(1_999_998) }] };
+    expect(captureScheduleReviewBinding(over)).toEqual({ state: "invalid-input" });
+    expect(checkScheduleReviewBinding(captured.binding, over)).toBe("invalid-input");
+    expect(snapshotScheduleReviewValue(["x".repeat(1_999_996)])?.length).toBe(2_000_000);
+    expect(snapshotScheduleReviewValue(["x".repeat(1_999_997)])).toBe(undefined);
+    expect(snapshotScheduleReviewValue(["\\n".repeat(999_999)])).toBe(undefined);
+    expect(captureScheduleReviewValueBinding({ workspaceLease: lease, candidateBatch: [],
+      rows: Array(100_001).fill({ recordId: "a", record: null }) })).toEqual({ state: "invalid-input" });
+  });
+});

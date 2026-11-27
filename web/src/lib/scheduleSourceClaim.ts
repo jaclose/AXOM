@@ -200,19 +200,27 @@ export type ScheduleReviewBindingCapture =
 export type ScheduleReviewBindingCheck =
   | ScheduleReviewBindingFailure | "stale-scope" | "stale-candidates" | "stale-records" | "current";
 
+// Aggregate limits apply to a whole confirmation, not independently to each row.
+const MAX_REVIEW_NODES = 100_000;
+const MAX_REVIEW_CHARACTERS = 2_000_000;
+
 export function captureScheduleReviewBinding(input: ScheduleReviewBindingInput): ScheduleReviewBindingCapture {
   if (!isRecord(input.workspaceLease) || typeof input.candidateBatchSnapshot !== "string" ||
-      !input.candidateBatchSnapshot.trim() || !Array.isArray(input.rows)) {
+      input.candidateBatchSnapshot.length > MAX_REVIEW_CHARACTERS ||
+      !input.candidateBatchSnapshot.trim() || !Array.isArray(input.rows) || input.rows.length > MAX_REVIEW_NODES) {
     return { state: "invalid-input" };
   }
+  let remainingCharacters = MAX_REVIEW_CHARACTERS - input.candidateBatchSnapshot.length;
   const ids = new Set<string>();
   const rows: { recordId: string; recordSnapshot: string }[] = [];
   for (const row of input.rows) {
-    if (!row || typeof row.recordId !== "string" || !row.recordId.trim() ||
-        typeof row.recordSnapshot !== "string" || !row.recordSnapshot.trim()) {
+    if (!row || typeof row.recordId !== "string" || typeof row.recordSnapshot !== "string" ||
+        row.recordId.length + row.recordSnapshot.length > remainingCharacters ||
+        !row.recordId.trim() || !row.recordSnapshot.trim()) {
       return { state: "invalid-input" };
     }
     if (ids.has(row.recordId)) return { state: "duplicate-record-id" };
+    remainingCharacters -= row.recordId.length + row.recordSnapshot.length;
     ids.add(row.recordId);
     rows.push(Object.freeze({ recordId: row.recordId, recordSnapshot: row.recordSnapshot }));
   }
@@ -249,7 +257,7 @@ export function checkScheduleReviewBinding(
  * them. Object property order is irrelevant; array order is significant.
  * Shared acyclic subobjects are equivalent to their expanded JSON tree.
  * Do not call on untrusted executable objects/proxies or log the result.
- * Limits bound traversal and encoded scalar/key bytes per value; exceeding
+ * Limits bound traversal and encoded UTF-16 code units; exceeding
  * them means confirmation needs a different authoritative revision mechanism.
  */
 type ScheduleSnapshotBudget = { nodes: number; characters: number };
@@ -277,6 +285,10 @@ function encodeScheduleSnapshot(
   if (array ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) return undefined;
   const keys = Reflect.ownKeys(value);
   if (keys.length > budget.nodes + (array ? 1 : 0)) return undefined;
+  const entries = keys.length - (array ? 1 : 0);
+  // Charge brackets/braces, separators and object colons before descending.
+  budget.characters -= 2 + Math.max(0, entries - 1) + (array ? 0 : entries);
+  if (budget.characters < 0) return undefined;
   active.add(value);
   try {
     const parts: string[] = [];
@@ -308,12 +320,16 @@ function encodeScheduleSnapshot(
   }
 }
 
-export function snapshotScheduleReviewValue(value: unknown): string | undefined {
+function snapshotWithBudget(value: unknown, budget: ScheduleSnapshotBudget): string | undefined {
   try {
-    return encodeScheduleSnapshot(value, new WeakSet(), { nodes: 100_000, characters: 2_000_000 }, 0);
+    return encodeScheduleSnapshot(value, new WeakSet(), budget, 0);
   } catch {
     return undefined;
   }
+}
+
+export function snapshotScheduleReviewValue(value: unknown): string | undefined {
+  return snapshotWithBudget(value, { nodes: MAX_REVIEW_NODES, characters: MAX_REVIEW_CHARACTERS });
 }
 
 /**
@@ -331,12 +347,16 @@ export interface ScheduleReviewValueInput {
 
 function snapshotScheduleReviewInput(input: ScheduleReviewValueInput): ScheduleReviewBindingInput | undefined {
   if (!Array.isArray(input.candidateBatch) || !Array.isArray(input.rows)) return undefined;
-  const candidateBatchSnapshot = snapshotScheduleReviewValue(input.candidateBatch);
+  const budget = { nodes: MAX_REVIEW_NODES, characters: MAX_REVIEW_CHARACTERS };
+  if (input.rows.length > budget.nodes) return undefined;
+  const candidateBatchSnapshot = snapshotWithBudget(input.candidateBatch, budget);
   if (candidateBatchSnapshot === undefined) return undefined;
   const rows: { recordId: string; recordSnapshot: string }[] = [];
   for (const row of input.rows) {
-    if (!row || typeof row.recordId !== "string" || !row.recordId.trim()) return undefined;
-    const recordSnapshot = snapshotScheduleReviewValue(row.record);
+    if (!row || typeof row.recordId !== "string" || --budget.nodes < 0 ||
+        row.recordId.length > budget.characters || !row.recordId.trim()) return undefined;
+    budget.characters -= row.recordId.length;
+    const recordSnapshot = snapshotWithBudget(row.record, budget);
     if (recordSnapshot === undefined) return undefined;
     rows.push({ recordId: row.recordId, recordSnapshot });
   }
