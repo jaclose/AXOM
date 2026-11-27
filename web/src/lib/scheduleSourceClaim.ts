@@ -260,7 +260,8 @@ export function checkScheduleReviewBinding(
  * Limits bound traversal and encoded UTF-16 code units; exceeding
  * them means confirmation needs a different authoritative revision mechanism.
  */
-type ScheduleSnapshotBudget = { nodes: number; characters: number };
+export type ScheduleReviewValueDomain = "json" | "tracker-memory-v1";
+type ScheduleSnapshotBudget = { nodes: number; characters: number; domain?: ScheduleReviewValueDomain };
 
 function snapshotScalar(value: string | number | boolean | null, budget: ScheduleSnapshotBudget): string | undefined {
   if (typeof value === "string" && value.length > budget.characters) return undefined;
@@ -270,9 +271,15 @@ function snapshotScalar(value: string | number | boolean | null, budget: Schedul
 }
 
 function encodeScheduleSnapshot(
-  value: unknown, active: WeakSet<object>, budget: ScheduleSnapshotBudget, depth: number,
+  value: unknown, active: WeakSet<object>, budget: ScheduleSnapshotBudget, depth: number, objectProperty = false,
 ): string | undefined {
   if (--budget.nodes < 0 || depth > 64) return undefined;
+  // Admit own optional data properties only in the ephemeral Tracker domain.
+  // Bare undefined differs from absence, null and the quoted string.
+  if (value === undefined && objectProperty && budget.domain === "tracker-memory-v1") {
+    budget.characters -= 9;
+    return budget.characters < 0 ? undefined : "undefined";
+  }
   if (value === null || typeof value === "string" || typeof value === "boolean") {
     return snapshotScalar(value, budget);
   }
@@ -310,7 +317,7 @@ function encodeScheduleSnapshot(
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
       if (!descriptor?.enumerable || !Object.prototype.hasOwnProperty.call(descriptor, "value")) return undefined;
       const name = snapshotScalar(key, budget);
-      const encoded = encodeScheduleSnapshot(descriptor.value, active, budget, depth + 1);
+      const encoded = encodeScheduleSnapshot(descriptor.value, active, budget, depth + 1, true);
       if (name === undefined || encoded === undefined) return undefined;
       parts.push(name + ":" + encoded);
     }
@@ -345,9 +352,11 @@ export interface ScheduleReviewValueInput {
   rows: readonly { recordId: string; record: unknown }[];
 }
 
-function snapshotScheduleReviewInput(input: ScheduleReviewValueInput): ScheduleReviewBindingInput | undefined {
+function snapshotScheduleReviewInput(input: ScheduleReviewValueInput, domain: ScheduleReviewValueDomain): ScheduleReviewBindingInput | undefined {
   if (!Array.isArray(input.candidateBatch) || !Array.isArray(input.rows)) return undefined;
-  const budget = { nodes: MAX_REVIEW_NODES, characters: MAX_REVIEW_CHARACTERS };
+  if (domain !== "json" && domain !== "tracker-memory-v1") return undefined;
+  const prefix = domain === "tracker-memory-v1" ? "tracker-memory-v1:" : "";
+  const budget = { nodes: MAX_REVIEW_NODES, characters: MAX_REVIEW_CHARACTERS - prefix.length, domain };
   if (input.rows.length > budget.nodes) return undefined;
   const candidateBatchSnapshot = snapshotWithBudget(input.candidateBatch, budget);
   if (candidateBatchSnapshot === undefined) return undefined;
@@ -360,18 +369,24 @@ function snapshotScheduleReviewInput(input: ScheduleReviewValueInput): ScheduleR
     if (recordSnapshot === undefined) return undefined;
     rows.push({ recordId: row.recordId, recordSnapshot });
   }
-  return { workspaceLease: input.workspaceLease, candidateBatchSnapshot, rows };
+  return { workspaceLease: input.workspaceLease, candidateBatchSnapshot: prefix + candidateBatchSnapshot, rows };
 }
 
-export function captureScheduleReviewValueBinding(input: ScheduleReviewValueInput): ScheduleReviewBindingCapture {
-  const snapshots = snapshotScheduleReviewInput(input);
+/** Explicit Tracker domain is ephemeral, not a persistence codec.
+ * The caller still needs an authoritative revision, non-reused hydration
+ * lease and atomic durable receipt, especially for large workspaces.
+ */
+export function captureScheduleReviewValueBinding(
+  input: ScheduleReviewValueInput, domain: ScheduleReviewValueDomain = "json",
+): ScheduleReviewBindingCapture {
+  const snapshots = snapshotScheduleReviewInput(input, domain);
   return snapshots ? captureScheduleReviewBinding(snapshots) : { state: "invalid-input" };
 }
 
 export function checkScheduleReviewValueBinding(
-  binding: ScheduleReviewBinding, current: ScheduleReviewValueInput,
+  binding: ScheduleReviewBinding, current: ScheduleReviewValueInput, domain: ScheduleReviewValueDomain = "json",
 ): ScheduleReviewBindingCheck {
   if (binding.workspaceLease !== current.workspaceLease) return "stale-scope";
-  const snapshots = snapshotScheduleReviewInput(current);
+  const snapshots = snapshotScheduleReviewInput(current, domain);
   return snapshots ? checkScheduleReviewBinding(binding, snapshots) : "invalid-input";
 }

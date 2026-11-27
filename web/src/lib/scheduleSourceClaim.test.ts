@@ -402,3 +402,65 @@ describe("aggregate schedule review snapshot admission", () => {
       rows: Array(100_001).fill({ recordId: "a", record: null }) })).toEqual({ state: "invalid-input" });
   });
 });
+
+describe("explicit Tracker in-memory review domain", () => {
+  it("admits normal optional candidate and edited Tracker fields without normalizing them", () => {
+    const candidate = Object.freeze({ title: "Lecture", problem: undefined, assessmentDate: undefined });
+    const record = Object.freeze({ title: "Edited", note: undefined, studyPlanOverride: undefined,
+      difficulty: undefined, assessmentDate: undefined, explicitPriority: undefined,
+      future: Object.freeze({ raw: undefined }) });
+    const input = { workspaceLease: {}, candidateBatch: [candidate], rows: [{ recordId: "a", record }] };
+    expect(captureScheduleReviewValueBinding(input).state).toBe("invalid-input");
+    const result = captureScheduleReviewValueBinding(input, "tracker-memory-v1");
+    expect(result.state).toBe("captured");
+    if (result.state !== "captured") return;
+    expect(checkScheduleReviewValueBinding(result.binding, input, "tracker-memory-v1")).toBe("current");
+    const { note, ...withoutNote } = record;
+    expect(note).toBe(undefined);
+    for (const changed of [withoutNote, { ...record, note: null }, { ...record, note: "undefined" },
+      { ...record, future: {} }]) {
+      expect(checkScheduleReviewValueBinding(result.binding, { ...input, rows: [{ recordId: "a", record: changed }] }, "tracker-memory-v1")).toBe("stale-records");
+    }
+    expect(checkScheduleReviewValueBinding(result.binding, { ...input, candidateBatch: [{ title: "Lecture", assessmentDate: undefined }] }, "tracker-memory-v1")).toBe("stale-candidates");
+    expect(checkScheduleReviewValueBinding(result.binding, { ...input, workspaceLease: {} }, "tracker-memory-v1")).toBe("stale-scope");
+    expect(Object.prototype.hasOwnProperty.call(record, "note")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(candidate, "problem")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(record.future, "raw")).toBe(true);
+  });
+
+  it("binds the snapshot domain even if the records are plain JSON", () => {
+    const input = { workspaceLease: {}, candidateBatch: [{ title: "Lecture" }], rows: [{ recordId: "a", record: {} }] };
+    const strict = captureScheduleReviewValueBinding(input);
+    const memory = captureScheduleReviewValueBinding(input, "tracker-memory-v1");
+    expect(strict.state).toBe("captured");
+    expect(memory.state).toBe("captured");
+    if (strict.state !== "captured" || memory.state !== "captured") return;
+    expect(checkScheduleReviewValueBinding(strict.binding, input, "tracker-memory-v1")).toBe("stale-candidates");
+    expect(checkScheduleReviewValueBinding(memory.binding, input)).toBe("stale-candidates");
+    expect(snapshotScheduleReviewValue({ note: undefined })).toBe(undefined);
+  });
+
+  it("still refuses unsupported values and undefined array slots", () => {
+    let calls = 0;
+    const getter = Object.defineProperty({}, "note", { enumerable: true, get() { calls++; return undefined; } });
+    const invalid = [undefined, [undefined], Array(1), { note: NaN }, { note: -0 }, { note: Infinity },
+      { note: new Date(0) }, getter, Object.assign([1], { note: undefined }), { [Symbol("note")]: undefined }];
+    for (const record of invalid) {
+      expect(captureScheduleReviewValueBinding({ workspaceLease: {}, candidateBatch: [], rows: [{ recordId: "a", record }] }, "tracker-memory-v1").state).toBe("invalid-input");
+    }
+    expect(captureScheduleReviewValueBinding({ workspaceLease: {}, candidateBatch: [undefined], rows: [] }, "tracker-memory-v1").state).toBe("invalid-input");
+    expect(calls).toBe(0);
+  });
+
+  it("charges the domain prefix and optional-property token against the aggregate budget", () => {
+    const input = { workspaceLease: {}, candidateBatch: [], rows: [{ recordId: "a", record: { x: "", note: undefined } }] };
+    const base = captureScheduleReviewValueBinding(input, "tracker-memory-v1");
+    expect(base.state).toBe("captured");
+    if (base.state !== "captured") return;
+    const size = base.binding.candidateBatchSnapshot.length + base.binding.rows[0].recordId.length + base.binding.rows[0].recordSnapshot.length;
+    const exact = { ...input, rows: [{ recordId: "a", record: { x: "a".repeat(2_000_000 - size), note: undefined } }] };
+    expect(captureScheduleReviewValueBinding(exact, "tracker-memory-v1").state).toBe("captured");
+    const over = { ...exact, rows: [{ recordId: "a", record: { x: exact.rows[0].record.x + "a", note: undefined } }] };
+    expect(captureScheduleReviewValueBinding(over, "tracker-memory-v1").state).toBe("invalid-input");
+  });
+});
