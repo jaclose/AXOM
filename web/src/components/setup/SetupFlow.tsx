@@ -45,12 +45,15 @@ export function SetupFlow({ mode, onComplete, onCancel }: {
   const effectiveMode: OnboardingMode = mode ?? (profile.onboarded ? "rerun" : "first-run");
   const [choices, setChoices] = useState<SetupChoices>(() => readSetupDraft(defaultChoices(useStore.getState().profile), effectiveMode));
   const [direction, setDirection] = useState<"forward" | "back">("forward");
+  const [draftSaveState, setDraftSaveState] = useState<"checking" | "saved" | "failed">("checking");
   const headingRef = useRef<HTMLHeadingElement>(null);
   const firstStepRender = useRef(true);
   const titleId = useId();
   const otherWorkspace = otherWorkspaceUrl(location.hostname);
 
-  useEffect(() => writeSetupDraft(choices, effectiveMode), [choices, effectiveMode]);
+  useEffect(() => {
+    setDraftSaveState(writeSetupDraft(choices, effectiveMode) ? "saved" : "failed");
+  }, [choices, effectiveMode]);
   useEffect(() => {
     // The first screen puts the caret in the name field; later screens move
     // focus to their heading so screen readers hear where they are.
@@ -58,7 +61,11 @@ export function SetupFlow({ mode, onComplete, onCancel }: {
     headingRef.current?.focus({ preventScroll: true });
   }, [choices.step]);
 
-  const update = (patch: Partial<SetupChoices>) => setChoices((current) => ({ ...current, ...patch }));
+  const update = (patch: Partial<SetupChoices>) => {
+    setDraftSaveState("checking");
+    setChoices((current) => ({ ...current, ...patch }));
+  };
+  const retryDraftSave = () => setDraftSaveState(writeSetupDraft(choices, effectiveMode) ? "saved" : "failed");
   const go = (step: number) => {
     setDirection(step > choices.step ? "forward" : "back");
     update({ step: Math.max(0, Math.min(STEPS.length - 1, step)) });
@@ -114,10 +121,16 @@ export function SetupFlow({ mode, onComplete, onCancel }: {
           </div>
         </div>
 
+        {draftSaveState === "failed" && (
+          <div className="setup-reassure" role="alert">
+            <span>Setup draft not saved on this device. Keep this tab open.</span>
+            <button type="button" className="setup-back" onClick={retryDraftSave}>Retry saving</button>
+          </div>
+        )}
         <footer className="setup-nav">
           {choices.step > 0
             ? <button type="button" className="setup-back" onClick={() => go(choices.step - 1)}><ArrowLeft size={ICON_SIZE.body} aria-hidden="true" /> Back</button>
-            : <span className="setup-reassure"><ShieldCheck size={ICON_SIZE.body} aria-hidden="true" /> Saved on this device as you go</span>}
+            : draftSaveState !== "failed" && <span className="setup-reassure" role="status" aria-live="polite"><ShieldCheck size={ICON_SIZE.body} aria-hidden="true" /> {draftSaveState === "saved" ? "Setup draft saved on this device" : "Checking draft storage"}</span>}
           <button type="submit" className="setup-next">
             <span>{last ? (effectiveMode === "rerun" ? "Save changes" : "Enter AXOM") : "Continue"}</span>
             <span className="setup-next-icon" aria-hidden="true"><ArrowRight size={ICON_SIZE.body} /></span>

@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeSeed } from "../../lib/seed";
 import { useStore } from "../../lib/store";
+import { defaultChoices, readSetupDraft } from "../../lib/setupPlan";
 import { SetupFlow } from "./SetupFlow";
 
 beforeEach(() => {
@@ -17,12 +18,38 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 const next = () => fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 const tool = (name: string) => screen.getByRole("button", { name: new RegExp(`^${name}`) });
 
 describe("SetupFlow", () => {
+  it("does not claim success when draft storage is blocked, then retries without losing the current step", async () => {
+    let blocked = true;
+    const originalSetItem = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
+      if (key === "axom.setup.v2" && blocked) throw new DOMException("Denied", "SecurityError");
+      return originalSetItem.call(this, key, value);
+    });
+    render(<SetupFlow mode="first-run" />);
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/draft not saved/i));
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByText("Setup draft saved on this device")).toBeNull();
+    next();
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/keep this tab open/i));
+    blocked = false;
+    fireEvent.click(screen.getByRole("button", { name: "Retry saving" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(readSetupDraft(defaultChoices(), "first-run").step).toBe(1);
+  });
+
+  it("announces a saved draft only after a successful storage write", async () => {
+    render(<SetupFlow mode="first-run" />);
+    await waitFor(() => expect(screen.getByRole("status").textContent).toMatch(/setup draft saved on this device/i));
+    expect(readSetupDraft(defaultChoices(), "first-run")).toMatchObject({ step: 0, version: 2 });
+  });
+
   it("offers the other hosted workspace without leaving or changing apex work", () => {
     vi.stubGlobal("location", { hostname: "axom.info" });
     render(<SetupFlow mode="first-run" />);
