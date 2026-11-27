@@ -117,3 +117,55 @@ describe("private source object proof", () => {
     expect(JSON.stringify(f.state)).toBe(before);
   });
 });
+
+describe("lossless private source decoding", () => {
+  it.each([
+    [0x80], [0xc0, 0xaf], [0xed, 0xa0, 0x80],
+    [0xf4, 0x90, 0x80, 0x80], [0xe2, 0x82], [0xff],
+  ].map(bytes => ({ bytes })))("rejects hash-matching malformed UTF-8 without caching: $bytes", async ({ bytes }) => {
+    const f = await fixture();
+    const blob = new Blob(['{"stem":"', Uint8Array.from(bytes), '"}']);
+    const ref = { ...f.reference, hash: await sha256(new Uint8Array(await blob.arrayBuffer())),
+      byteSize: blob.size, expandedBytes: size(await blob.text()) };
+    for (const owner of [A, B]) f.blobs.set(owner + "/" + ref.hash, blob);
+    const before = JSON.stringify(f.state);
+    for (const owner of [A, A, B, A]) {
+      await expect(f.hydrate(owner, ref)).rejects.toThrow();
+      expect(JSON.stringify(f.state)).toBe(before);
+    }
+    expect(f.download).toHaveBeenCalledTimes(4);
+  });
+
+  it.each([false, true])("preserves valid replacement characters and legacy leading BOM (BOM=%s)", async bom => {
+    const f = await fixture();
+    const stem = "Synthetic � é 字";
+    const text = JSON.stringify({ stem });
+    const blob = new Blob([(bom ? "\uFEFF" : "") + text]);
+    const ref = { ...f.reference, hash: await sha256(new Uint8Array(await blob.arrayBuffer())),
+      byteSize: blob.size, expandedBytes: size(text) };
+    for (const owner of [A, B]) f.blobs.set(owner + "/" + ref.hash, blob);
+    const before = JSON.stringify(f.state);
+    for (const owner of [A, A, B, A]) {
+      expect((await f.hydrate(owner, ref)).questions[0]).toMatchObject({ stem, notes: "Keep learner overlay" });
+    }
+    expect(f.download).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(f.state)).toBe(before);
+  });
+
+  it.each([
+    { text: '{"stem":"ok"}', delta: 1 },
+    { text: '{"forbidden":1}', delta: 0 },
+    { text: '{', delta: 0 },
+  ])("does not cache a rejected source: $text", async ({ text, delta }) => {
+    const f = await fixture();
+    const blob = new Blob([text]);
+    const ref = { ...f.reference, hash: await sha256(new Uint8Array(await blob.arrayBuffer())),
+      byteSize: blob.size, expandedBytes: size(text) + delta };
+    f.blobs.set(A + "/" + ref.hash, blob);
+    const before = JSON.stringify(f.state);
+    await expect(f.hydrate(A, ref)).rejects.toThrow();
+    await expect(f.hydrate(A, ref)).rejects.toThrow();
+    expect(f.download).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(f.state)).toBe(before);
+  });
+});

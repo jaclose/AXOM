@@ -180,6 +180,7 @@ export async function hydrateCloudContent(client: SupabaseClient, userId: string
       const cached = reference.academic ? undefined : contentCache.get(`${userId}/${reference.hash}`);
       if (cached && cached.byteSize !== reference.byteSize) throw new Error("A source file could not be downloaded or verified. Your current workspace is unchanged.");
       let packed = cached?.packed;
+      let verifiedBytes: number | undefined;
       if (packed === undefined) {
         let data: Blob | null;
         let error: unknown;
@@ -191,15 +192,19 @@ export async function hydrateCloudContent(client: SupabaseClient, userId: string
           const projected = await projectCloudRecord({ ...source, id: reference.id }, reference.collection);
           data = new Blob([projected.canonicalText]);
         } else ({ data, error } = await client.storage.from(CONTENT_BUCKET).download(`${userId}/${reference.hash}`));
-        if (error || !data || data.size !== reference.byteSize || await sha256(new Uint8Array(await data.arrayBuffer())) !== reference.hash) throw new Error("A source file could not be downloaded or verified. Your current workspace is unchanged.");
-        packed = await data.text();
-        if (!reference.academic) cacheContent(`${userId}/${reference.hash}`, packed, data.size);
+        if (error || !data || data.size !== reference.byteSize) throw new Error("A source file could not be downloaded or verified. Your current workspace is unchanged.");
+        const bytes = new Uint8Array(await data.arrayBuffer());
+        if (await sha256(bytes) !== reference.hash) throw new Error("A source file could not be downloaded or verified. Your current workspace is unchanged.");
+        // Match historical Blob.text BOM handling, but never replace invalid UTF-8.
+        packed = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+        if (!reference.academic) verifiedBytes = bytes.byteLength;
       }
       const text = await decompressText(packed, reference.expandedBytes);
       if (new TextEncoder().encode(text).length !== reference.expandedBytes) throw new Error("A source file has an invalid expanded size.");
       const source = JSON.parse(text) as Record<string, unknown>;
       const allowed: readonly string[] = reference.collection === "documents" ? DOCUMENT_FIELDS : QUESTION_FIELDS;
       if (!source || typeof source !== "object" || Array.isArray(source) || Object.keys(source).some((key) => !allowed.includes(key))) throw new Error("A source file contains unexpected fields.");
+      if (verifiedBytes !== undefined) cacheContent(`${userId}/${reference.hash}`, packed, verifiedBytes);
       Object.assign(workspace[reference.collection][index] = { ...workspace[reference.collection][index] }, source);
     }
   }
