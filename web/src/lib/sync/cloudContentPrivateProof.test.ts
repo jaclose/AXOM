@@ -217,3 +217,91 @@ describe("private digest size agreement", () => {
     expect(f.download).not.toHaveBeenCalled();
   });
 });
+
+describe("fresh private upload byte proof", () => {
+  it.each([false, true])("rejects a same-size wrong object before any storage request (reverse=%s)", async reverse => {
+    const f = await fixture("Synthetic A");
+    const other = await fixture("Synthetic B");
+    const good: ContentUpload = { reference: f.reference, content: f.packed, canonicalText: "", canonicalHash: f.reference.hash };
+    const bad: ContentUpload = { reference: { ...other.reference, id: "q2" }, content: f.packed, canonicalText: "", canonicalHash: other.reference.hash };
+    expect(bad.reference.byteSize).toBe(size(bad.content));
+    const batch = reverse ? [bad, good] : [good, bad];
+    const before = JSON.stringify(batch);
+    const client = { storage: { from: () => ({ download: f.download, upload: f.upload }) } } as unknown as SupabaseClient;
+    await expect(uploadCloudContent(client, A, batch, [], guard)).rejects.toThrow(/could not be verified/);
+    expect(f.upload).not.toHaveBeenCalled();
+    expect(f.download).not.toHaveBeenCalled();
+    expect(JSON.stringify(batch)).toBe(before);
+    await uploadCloudContent(client, A, [good, { ...bad, content: other.packed }], [], guard);
+    expect(f.upload).toHaveBeenCalledTimes(2);
+    await uploadCloudContent(client, A, [good, { ...bad, content: other.packed }], [], guard);
+    expect(f.upload).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([false, true])("refuses conflicting fresh duplicate payloads (reverse=%s)", async reverse => {
+    const f = await fixture("Synthetic A");
+    const other = await fixture("Synthetic B");
+    const good: ContentUpload = { reference: f.reference, content: f.packed, canonicalText: "", canonicalHash: f.reference.hash };
+    const bad = { ...good, reference: { ...good.reference, id: "q2" }, content: other.packed };
+    const client = { storage: { from: () => ({ download: f.download, upload: f.upload }) } } as unknown as SupabaseClient;
+    await expect(uploadCloudContent(client, A, reverse ? [bad, good] : [good, bad], [], guard)).rejects.toThrow(/could not be verified/);
+    expect(f.upload).not.toHaveBeenCalled();
+    await uploadCloudContent(client, A, [good, { ...bad, content: good.content }], [], guard);
+    expect(f.upload).toHaveBeenCalledTimes(1);
+  });
+
+  it("snapshots the verified path and content before asynchronous hashing", async () => {
+    const f = await fixture("Synthetic A");
+    const other = await fixture("Synthetic B");
+    const object: ContentUpload = { reference: { ...f.reference }, content: f.packed, canonicalText: "", canonicalHash: f.reference.hash };
+    const client = { storage: { from: () => ({ download: f.download, upload: f.upload }) } } as unknown as SupabaseClient;
+    const pending = uploadCloudContent(client, A, [object], [], guard);
+    object.content = other.packed;
+    object.reference.hash = other.reference.hash;
+    await pending;
+    expect(f.upload).toHaveBeenCalledTimes(1);
+    expect(f.upload.mock.calls[0][0]).toBe(A + "/" + f.reference.hash);
+    expect(await f.upload.mock.calls[0][1].text()).toBe(f.packed);
+  });
+
+  it.each(["success", "conflict"] as const)("rejects reset during upload before receipt or conflict read (%s)", async outcome => {
+    const f = await fixture();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    f.upload.mockImplementationOnce(async () => {
+      await gate;
+      return { error: outcome === "conflict" ? { statusCode: "409" } : null };
+    });
+    const pending = f.push(A);
+    const result = expect(pending).rejects.toThrow(/cache changed/);
+    await vi.waitFor(() => expect(f.upload).toHaveBeenCalledTimes(1));
+    clearCloudContentCache();
+    clearCloudContentCache();
+    release();
+    await result;
+    expect(f.download).not.toHaveBeenCalled();
+    await f.push(A);
+    expect(f.upload).toHaveBeenCalledTimes(2);
+    await f.push(A);
+    expect(f.upload).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects reset during verification of an existing conflict", async () => {
+    const f = await fixture();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    f.upload.mockResolvedValueOnce({ error: { statusCode: "409" } });
+    f.download.mockImplementationOnce(async () => {
+      await gate;
+      return { data: new Blob([f.packed]), error: null };
+    });
+    const pending = f.push(A);
+    const result = expect(pending).rejects.toThrow(/cache changed/);
+    await vi.waitFor(() => expect(f.download).toHaveBeenCalledTimes(1));
+    clearCloudContentCache();
+    release();
+    await result;
+    await f.push(A);
+    expect(f.upload).toHaveBeenCalledTimes(2);
+  });
+});

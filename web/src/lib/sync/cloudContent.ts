@@ -138,18 +138,33 @@ export async function uploadCloudContent(client: SupabaseClient, userId: string,
   readContentReferences(objects.map(({ reference }) => reference));
   const confirmed = confirmedContentUploads.get(userId) ?? new Set<string>();
   confirmedContentUploads.set(userId, confirmed);
+  const generation = contentCacheGeneration;
+  function assertGeneration() {
+    if (generation !== contentCacheGeneration) throw new Error("The account content cache changed during upload. Retry from the current account.");
+  }
   // Academic revisions and private account objects occupy different storage namespaces.
   const known = new Set([...previous.filter(entry => !entry.academic).map(privateReceiptKey), ...confirmed]);
-  const pending = objects.filter(({ reference }) => {
+  const fresh = new Map<string, { reference: ContentReference; content: string }>();
+  for (const { reference, content } of objects) {
     const receipt = privateReceiptKey(reference);
-    if (reference.academic || known.has(receipt)) return false;
-    known.add(receipt);
-    return true;
-  });
-  // Only new objects need measuring; existing exact receipts retain the fast path.
-  // Check the entire pending batch before any network request.
+    if (reference.academic || known.has(receipt)) continue;
+    const duplicate = fresh.get(receipt);
+    if (duplicate) {
+      if (duplicate.content !== content) throw new Error("A source file could not be verified in your account.");
+      continue;
+    }
+    // Capture immutable text and a reference snapshot before the first await.
+    fresh.set(receipt, { reference: { ...reference }, content });
+  }
+  const pending = [...fresh.values()];
+  // Check every new immutable object before any storage request. Exact prior
+  // receipts retain the fast path; identical fresh objects are hashed once.
   for (const { reference, content } of pending) {
-    if (new Blob([content]).size !== reference.byteSize) throw new Error("A source file could not be verified in your account.");
+    const bytes = new TextEncoder().encode(content);
+    if (bytes.byteLength !== reference.byteSize || await sha256(bytes) !== reference.hash) {
+      throw new Error("A source file could not be verified in your account.");
+    }
+    assertGeneration();
   }
   let cursor = 0;
   let completed = 0;
@@ -161,15 +176,20 @@ export async function uploadCloudContent(client: SupabaseClient, userId: string,
       const { reference, content } = pending[cursor++];
       try {
         await assertCurrent();
+        assertGeneration();
         if (failed) return;
         const path = `${userId}/${reference.hash}`;
         const bucket = client.storage.from(CONTENT_BUCKET);
         const result = await bucket.upload(path, new Blob([content], { type: "text/plain" }), { contentType: "text/plain", upsert: false, cacheControl: "31536000" });
         if (result.error) {
           if (!("statusCode" in result.error) || String(result.error.statusCode) !== "409") throw result.error;
+          await assertCurrent();
+          assertGeneration();
           const existing = await bucket.download(path);
           if (existing.error || !existing.data || existing.data.size !== reference.byteSize || await sha256(new Uint8Array(await existing.data.arrayBuffer())) !== reference.hash) throw new Error("A source file could not be verified in your account.");
         }
+        await assertCurrent();
+        assertGeneration();
         confirmed.add(privateReceiptKey(reference));
         onProgress?.(++completed, pending.length);
       } catch (error) {
@@ -181,6 +201,7 @@ export async function uploadCloudContent(client: SupabaseClient, userId: string,
   await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENT_CONTENT_UPLOADS, pending.length) }, worker));
   if (failed) throw firstError;
   await assertCurrent();
+  assertGeneration();
 }
 
 export async function hydrateCloudContent(client: SupabaseClient, userId: string, state: NoctyriumState, value: unknown, assertCurrent: () => Promise<void>): Promise<NoctyriumState> {
