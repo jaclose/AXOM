@@ -54,6 +54,8 @@ export interface PublicationSource {
   /** The catalog's own module label, when it has one. */
   moduleKey?: string;
   hasBank: boolean;
+  /** Exact prepared package reviewed by this inventory, not the original source checksum. */
+  bankIdentity?: { path: string; digest: string };
   /** Question rows in its package, unreadable rows included, when the package could be read. */
   rows?: number;
   original?: { extension: string };
@@ -152,7 +154,10 @@ export async function readPublicationInventory(
       ...(source.duplicateOf ? { duplicateOf: source.duplicateOf } : {}) };
     if (source.bankFile) {
       try {
-        const bank = readPreparedBank(JSON.parse(decode(await read(safeLibraryPath(source.bankFile)))));
+        const path = safeLibraryPath(source.bankFile);
+        const bytes = Uint8Array.from(await read(path));
+        const bank = readPreparedBank(JSON.parse(decode(bytes)));
+        entry.bankIdentity = { path, digest: await sha256(bytes) };
         entry.rows = bank.pkg.questions.length + (bank.unreadableQuestions ?? 0);
         const manifest = bank.pkg.manifest;
         const filing = bank.reviewedFiling;
@@ -353,9 +358,27 @@ export function courseLibraryReader(read: LibraryReader, inventory: PublicationI
     || new Set(sources.map(source => source.id)).size !== sources.length
     || new Set(sources.map(source => source.checksum)).size !== sources.length)
     throw new Error("The planned course has missing or duplicate source identities. Review its source filing.");
+  const reviewedBanks = new Map<string, string>();
+  for (const source of sources) {
+    if (!source.hasBank) continue;
+    const identity = source.bankIdentity;
+    if (!identity || !/^sha256:[a-f0-9]{64}$/.test(identity.digest)
+      || (reviewedBanks.has(identity.path) && reviewedBanks.get(identity.path) !== identity.digest))
+      throw new Error("The planned course has missing or conflicting reviewed bank identities. Review the plan again.");
+    reviewedBanks.set(safeLibraryPath(identity.path), identity.digest);
+  }
   let catalog: Uint8Array | undefined;
   return async path => {
-    if (safeLibraryPath(path) !== "catalog.json") return read(path);
+    if (safeLibraryPath(path) !== "catalog.json") {
+      const digest = reviewedBanks.get(path);
+      if (digest === undefined) return read(path);
+      // Verify the exact bytes returned to the uploader, not a prior read.
+      // A retry must verify again, even when the original files are omitted.
+      const bytes = Uint8Array.from(await read(path));
+      if (await sha256(bytes) !== digest)
+        throw new Error("The reviewed question package changed while publishing. Choose the library again and review the plan.");
+      return bytes;
+    }
     if (!catalog) {
       const original = readCatalog(JSON.parse(decode(await read("catalog.json"))));
       const rows = new Map<string, CatalogSource>();
@@ -370,7 +393,8 @@ export function courseLibraryReader(read: LibraryReader, inventory: PublicationI
       const selected = sources.map(source => {
         const row = rows.get(source.id);
         if (!row || row.checksum !== source.checksum || row.name !== source.name || row.status !== source.status
-          || Boolean(row.bankFile) !== source.hasBank)
+          || Boolean(row.bankFile) !== source.hasBank
+          || (source.hasBank && row.bankFile !== source.bankIdentity?.path))
           throw new Error("The library changed while publishing. Choose it again and review the plan.");
         const extension = row.originalFile?.split(".").at(-1)?.toLowerCase() ?? "";
         return options.originals === false || (row.originalFile && !UPLOADABLE_ORIGINALS.has(extension))

@@ -335,3 +335,101 @@ describe("publication raw UTF-8 admission", () => {
     expect(fixture.files.get(file)).toEqual(snapshot);
   });
 });
+
+describe("publication reviewed bank identity", () => {
+  async function reviewedFixture() {
+    const fixture = await library();
+    const source = fixture.catalog.sources.find(item => item.name === "goer-pq.pdf")!;
+    const path = source.bankFile!;
+    const original = fixture.files.get(path)!;
+    const bank = JSON.parse(new TextDecoder().decode(original));
+    bank.pkg.questions[0].stem[0].text = bank.pkg.questions[0].stem[0].text.replace("stem 1", "stem X");
+    const edited = new TextEncoder().encode(JSON.stringify(bank));
+    expect(edited).not.toEqual(original);
+    expect(edited.length).toBe(original.length);
+    const inventory = await readPublicationInventory(fixture.read);
+    const course = planPublication(inventory).courses.find(item => item.moduleKey === "goer")!;
+    return { fixture, source, path, original, edited, inventory, course };
+  }
+
+  it("rejects a same-size, same-count valid bank edit until the library is explicitly reviewed again", async () => {
+    const { fixture, path, original, edited, inventory, course } = await reviewedFixture();
+    const unchanged = await publicationJobs(fixture.read, inventory, [course]).jobs[0].prepare();
+    expect(unchanged.metadata.ready_questions).toBe(1);
+    fixture.files.set(path, edited);
+    const snapshot = edited.slice();
+    const { jobs, notes } = publicationJobs(fixture.read, inventory, [course]);
+    await expect(jobs[0].prepare()).rejects.toThrow(/reviewed question package changed/);
+    expect(notes.failures.get(course.catalogId)).toMatch(/reviewed question package changed/);
+    expect(notes.keptLocal.size).toBe(0);
+
+    const fresh = await readPublicationInventory(fixture.read);
+    const replanned = planPublication(fresh).courses.find(item => item.moduleKey === "goer")!;
+    const upload = await publicationJobs(fixture.read, fresh, [replanned]).jobs[0].prepare();
+    expect(upload.metadata.ready_questions).toBe(unchanged.metadata.ready_questions);
+    expect(upload.metadata.review_questions).toBe(unchanged.metadata.review_questions);
+    const stored = JSON.parse(new TextDecoder().decode(upload.files.find(file => file.path === path)!.bytes));
+    expect(stored.pkg.questions[0].stem[0].text).toContain("stem X");
+    expect(fixture.files.get(path)).toEqual(snapshot);
+    expect(new TextDecoder().decode(original)).toContain("stem 1");
+  });
+
+  it("rejects a changed bank path even when the replacement contains identical bytes", async () => {
+    const { fixture, source, path, original, inventory, course } = await reviewedFixture();
+    const moved = path.replace("/bank.json", "/moved.json");
+    expect(moved).not.toBe(path);
+    fixture.files.set(moved, original.slice());
+    source.bankFile = moved;
+    fixture.files.set("catalog.json", new TextEncoder().encode(JSON.stringify(fixture.catalog)));
+    await expect(publicationJobs(fixture.read, inventory, [course]).jobs[0].prepare())
+      .rejects.toThrow(/library changed while publishing/);
+    expect(fixture.files.get(moved)).toEqual(original);
+  });
+
+  it("checks the bytes actually consumed after the scoped catalog has been read", async () => {
+    const { fixture, path, original, edited, inventory, course } = await reviewedFixture();
+    const reader = courseLibraryReader(fixture.read, inventory, course);
+    await reader("catalog.json");
+    const checked = await reader(path);
+    expect(checked).toEqual(original);
+    expect(checked).not.toBe(original);
+    fixture.files.set(path, edited);
+    await expect(reader(path)).rejects.toThrow(/reviewed question package changed/);
+    expect(fixture.files.get(path)).toEqual(edited);
+  });
+
+  it.each([false, true])("rechecks the bank on an optional-original retry (bank changed: %s)", async changed => {
+    const { fixture, path, edited, inventory, course } = await reviewedFixture();
+    const optional = fixture.catalog.sources.find(item => course.optionalSourceIds.includes(item.id))!;
+    expect(optional.originalFile).toBeDefined();
+    let refusedOriginals = 0;
+    const read = async (file: string) => {
+      if (file === optional.originalFile) {
+        refusedOriginals += 1;
+        if (changed) fixture.files.set(path, edited);
+        // Inject the uploader's supported size failure without allocating a huge fixture.
+        throw new Error("exceeds the supported upload size");
+      }
+      return fixture.read(file);
+    };
+    const { jobs, notes } = publicationJobs(read, inventory, [course]);
+    if (changed) {
+      await expect(jobs[0].prepare()).rejects.toThrow(/reviewed question package changed/);
+      expect(notes.keptLocal.size).toBe(0);
+      expect(notes.failures.get(course.catalogId)).toMatch(/reviewed question package changed/);
+    } else {
+      const upload = await jobs[0].prepare();
+      expect(upload.metadata.ready_questions).toBe(1);
+      expect(notes.keptLocal.get(course.catalogId)).toBe(1);
+      expect(notes.failures.size).toBe(0);
+    }
+    expect(refusedOriginals).toBe(1);
+  });
+
+  it("fails closed when the reviewed inventory has no bank digest", async () => {
+    const { fixture, source, inventory, course } = await reviewedFixture();
+    delete inventory.sources.find(item => item.id === source.id)!.bankIdentity;
+    await expect(publicationJobs(fixture.read, inventory, [course]).jobs[0].prepare())
+      .rejects.toThrow(/missing or conflicting reviewed bank identities/);
+  });
+});
