@@ -43,6 +43,16 @@ export interface PublicationSection {
   problem?: string;
 }
 
+// A duplicate-linked row is an excluded alias, not a second canonical source.
+function isLinkedAlias(source: Pick<CatalogSource, "status" | "duplicateOf">): boolean {
+  return source.status === "duplicate-linked" || Boolean(source.duplicateOf);
+}
+
+function linkedAliasIdentity(source: CatalogSource): string {
+  return JSON.stringify([source.id, source.name, source.sourcePath, source.checksum, source.module,
+    source.status, source.reason, source.bankFile, source.originalFile, source.ready, source.review, source.duplicateOf]);
+}
+
 export interface PublicationSource {
   id: string;
   name: string;
@@ -63,6 +73,8 @@ export interface PublicationSource {
   bank?: { term: Term; module: string; moduleKey: string; reviewedFiling: boolean; reviewedUnfiled?: boolean;
     reviewedOverride?: boolean; humanReviewed?: boolean } | { problem: string };
   duplicateOf?: string;
+  /** Exact catalog metadata for an excluded linked alias, never uploaded. */
+  linkedAliasIdentity?: string;
 }
 
 /** Everything the plan needs, read once from the prepared library. */
@@ -151,7 +163,8 @@ export async function readPublicationInventory(
       reason: source.reason, ready: source.ready, review: source.review, hasBank: Boolean(source.bankFile),
       ...(source.module !== undefined && moduleIdentity(source.module) ? { moduleKey: moduleIdentity(source.module) } : {}),
       ...(source.originalFile ? { original: { extension } } : {}),
-      ...(source.duplicateOf ? { duplicateOf: source.duplicateOf } : {}) };
+      ...(source.duplicateOf ? { duplicateOf: source.duplicateOf } : {}),
+      ...(isLinkedAlias(source) ? { linkedAliasIdentity: linkedAliasIdentity(source) } : {}) };
     if (source.bankFile) {
       try {
         const path = safeLibraryPath(source.bankFile);
@@ -360,6 +373,21 @@ export function courseLibraryReader(read: LibraryReader, inventory: PublicationI
     || new Set(sources.map(source => source.id)).size !== sources.length
     || new Set(sources.map(source => source.checksum)).size !== sources.length)
     throw new Error("The planned course has missing or duplicate source identities. Review its source filing.");
+  const selectedChecksums = new Set(sources.map(source => source.checksum));
+  const relevant = (source: Pick<CatalogSource, "id" | "checksum" | "duplicateOf">) =>
+    ids.has(source.id) || selectedChecksums.has(source.checksum) || (source.duplicateOf !== undefined && ids.has(source.duplicateOf));
+  // Match a multiset: legacy aliases can share IDs and checksums with the
+  // canonical row, and their ordering has no bearing on publication.
+  const reviewedAliases = new Map<string, number>();
+  const reviewedAliasIds = new Set<string>();
+  for (const source of inventory.sources) {
+    if (!isLinkedAlias(source) || !relevant(source)) continue;
+    const identity = source.linkedAliasIdentity;
+    if (identity === undefined)
+      throw new Error("The reviewed linked source aliases are incomplete. Choose the library again and review the plan.");
+    reviewedAliases.set(identity, (reviewedAliases.get(identity) ?? 0) + 1);
+    reviewedAliasIds.add(source.id);
+  }
   const reviewedBanks = new Map<string, string>();
   for (const source of sources) {
     if (!includedIds.has(source.id) || !source.hasBank) continue;
@@ -385,15 +413,30 @@ export function courseLibraryReader(read: LibraryReader, inventory: PublicationI
       const original = readCatalog(JSON.parse(decode(await read("catalog.json"))));
       const rows = new Map<string, CatalogSource>();
       const checksums = new Set<string>();
+      const remainingAliases = new Map(reviewedAliases);
       for (const source of original.sources) {
-        if (!ids.has(source.id)) continue;
+        if (isLinkedAlias(source)) {
+          if (!relevant(source) && !reviewedAliasIds.has(source.id)) continue;
+          const identity = linkedAliasIdentity(source);
+          const count = remainingAliases.get(identity) ?? 0;
+          if (!count)
+            throw new Error("The library changed while publishing: reviewed linked source aliases differ. Choose it again and review the plan.");
+          if (count === 1) remainingAliases.delete(identity);
+          else remainingAliases.set(identity, count - 1);
+          continue;
+        }
+        if (!ids.has(source.id)) {
+          if (reviewedAliasIds.has(source.id) || selectedChecksums.has(source.checksum))
+            throw new Error("The library contains duplicate source identities. Review its source filing.");
+          continue;
+        }
         if (rows.has(source.id) || checksums.has(source.checksum))
           throw new Error("The library contains duplicate source identities. Review its source filing.");
-        if (source.status === "duplicate-linked" || source.duplicateOf)
-          throw new Error("The library changed while publishing. Choose it again and review the plan.");
         rows.set(source.id, source);
         checksums.add(source.checksum);
       }
+      if (remainingAliases.size)
+        throw new Error("The library changed while publishing: reviewed linked source aliases differ. Choose it again and review the plan.");
       const selected = sources.map(source => {
         const row = rows.get(source.id);
         if (!row || row.checksum !== source.checksum || row.name !== source.name || row.status !== source.status

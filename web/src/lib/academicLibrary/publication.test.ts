@@ -189,6 +189,54 @@ describe("publishing a prepared library as one course per term and module", () =
     expect(upload.metadata).toMatchObject({ ready_questions: 2, review_questions: 0 });
   });
 
+  it.each(["unchanged", "added", "removed", "renamed", "retargeted", "canonical-converted", "alias-converted"] as const)(
+    "revalidates reviewed linked aliases across an actual uploader size retry (%s)", async change => {
+      const fixture = await library();
+      const canonical = fixture.catalog.sources.find(source => source.name === "goer-pq.pdf")!;
+      const optional = fixture.catalog.sources.find(source => source.name === "goer-slides.pdf")!;
+      const alias = { ...canonical, name: "synthetic-linked.pdf", sourcePath: "Synthetic/linked.pdf",
+        status: "duplicate-linked" as const, duplicateOf: canonical.id, ready: 0, review: 0 };
+      delete alias.bankFile;
+      delete alias.originalFile;
+      fixture.catalog.sources.unshift(alias);
+      const save = () => fixture.files.set("catalog.json", new TextEncoder().encode(JSON.stringify(fixture.catalog)));
+      save();
+      const inventory = await readPublicationInventory(fixture.read);
+      const course = planPublication(inventory).courses.find(item => item.moduleKey === "goer")!;
+      const originalPath = optional.originalFile!;
+      let sizeRefusals = 0;
+      const read = async (path: string) => {
+        if (path === originalPath) {
+          sizeRefusals += 1;
+          switch (change) {
+            case "unchanged": fixture.catalog.sources.reverse(); break;
+            case "added": fixture.catalog.sources.push({ ...alias }); break;
+            case "removed": fixture.catalog.sources = fixture.catalog.sources.filter(source => source !== alias); break;
+            case "renamed": alias.name = "changed-linked.pdf"; break;
+            case "retargeted": alias.duplicateOf = optional.id; break;
+            case "canonical-converted": Object.assign(canonical, { status: "duplicate-linked", duplicateOf: canonical.id }); break;
+            case "alias-converted": Object.assign(alias, { status: "prepared", duplicateOf: undefined }); break;
+          }
+          save();
+          throw new Error("exceeds the supported upload size");
+        }
+        return fixture.read(path);
+      };
+      const { jobs, notes } = publicationJobs(read, inventory, [course]);
+      if (change === "unchanged") {
+        const upload = await jobs[0].prepare();
+        const projected = JSON.parse(new TextDecoder().decode(upload.files.find(file => file.path === "catalog.json")!.bytes)) as PrivateLibraryCatalog;
+        expect(projected.sources.map(source => source.id)).toEqual([canonical.id]);
+        expect(upload.metadata.ready_questions).toBe(1);
+        expect(notes.keptLocal.get(course.catalogId)).toBe(1);
+      } else {
+        await expect(jobs[0].prepare()).rejects.toThrow(/library changed while publishing|duplicate source identities/);
+        expect(notes.keptLocal.has(course.catalogId)).toBe(false);
+      }
+      expect(sizeRefusals).toBe(1);
+    },
+  );
+
   it("rejects an unmarked duplicate source identity before preparing a course", async () => {
     const fixture = await library();
     const original = fixture.catalog.sources.find(source => source.name === "cpr1-imcq.pdf")!;
