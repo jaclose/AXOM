@@ -86,6 +86,7 @@ export async function splitCloudContent(state: NoctyriumState): Promise<{ worksp
     );
     Object.assign(workspace, { [collection]: [...compact, ...deferredRows].sort((a, b) => String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0) });
   }
+  readContentReferences(references);
   return { workspace, objects, references: references.sort((a, b) => `${a.collection}:${a.id}` < `${b.collection}:${b.id}` ? -1 : `${a.collection}:${a.id}` > `${b.collection}:${b.id}` ? 1 : 0) };
 }
 
@@ -93,10 +94,15 @@ function academicFileLocator(asset: AcademicRecordReference): string {
   return JSON.stringify([asset.revisionId.toLowerCase(), asset.path]);
 }
 
+function privateReceiptKey(reference: ContentReference): string {
+  return JSON.stringify([reference.hash, reference.byteSize, reference.expandedBytes]);
+}
+
 export function readContentReferences(value: unknown): ContentReference[] {
   if (!Array.isArray(value) || value.length > 30_000) throw new Error("The source-content index is invalid.");
   const ids = new Set<string>();
   const academicHashes = new Map<string, string>();
+  const privateSizes = new Map<string, string>();
   let expanded = 0;
   return value.map((entry: ContentReference) => {
     const key = `${entry?.collection}:${entry?.id}`;
@@ -111,6 +117,13 @@ export function readContentReferences(value: unknown): ContentReference[] {
         throw new Error("The source-content index contains conflicting academic file hashes. Your current workspace is unchanged.");
       }
       academicHashes.set(locator, entry.academic.sha256);
+    } else {
+      const receipt = privateReceiptKey(entry);
+      const previous = privateSizes.get(entry.hash);
+      if (previous !== undefined && previous !== receipt) {
+        throw new Error("The source-content index contains conflicting private file sizes. Your current workspace is unchanged.");
+      }
+      privateSizes.set(entry.hash, receipt);
     }
     expanded += entry.expandedBytes;
     if (expanded > 256 * 1024 * 1024) throw new Error("The source library exceeds the safe restore size.");
@@ -120,15 +133,22 @@ export function readContentReferences(value: unknown): ContentReference[] {
 }
 
 export async function uploadCloudContent(client: SupabaseClient, userId: string, objects: ContentUpload[], previous: ContentReference[], assertCurrent: () => Promise<void>, onProgress?: (completed: number, total: number) => void): Promise<void> {
+  readContentReferences(objects.map(({ reference }) => reference));
   const confirmed = confirmedContentUploads.get(userId) ?? new Set<string>();
   confirmedContentUploads.set(userId, confirmed);
   // Academic revisions and private account objects occupy different storage namespaces.
-  const known = new Set([...previous.filter(entry => !entry.academic).map(entry => entry.hash), ...confirmed]);
+  const known = new Set([...previous.filter(entry => !entry.academic).map(privateReceiptKey), ...confirmed]);
   const pending = objects.filter(({ reference }) => {
-    if (reference.academic || known.has(reference.hash)) return false;
-    known.add(reference.hash);
+    const receipt = privateReceiptKey(reference);
+    if (reference.academic || known.has(receipt)) return false;
+    known.add(receipt);
     return true;
   });
+  // Only new objects need measuring; existing exact receipts retain the fast path.
+  // Check the entire pending batch before any network request.
+  for (const { reference, content } of pending) {
+    if (new Blob([content]).size !== reference.byteSize) throw new Error("A source file could not be verified in your account.");
+  }
   let cursor = 0;
   let completed = 0;
   onProgress?.(completed, pending.length);
@@ -146,9 +166,9 @@ export async function uploadCloudContent(client: SupabaseClient, userId: string,
         if (result.error) {
           if (!("statusCode" in result.error) || String(result.error.statusCode) !== "409") throw result.error;
           const existing = await bucket.download(path);
-          if (existing.error || !existing.data || await sha256(new Uint8Array(await existing.data.arrayBuffer())) !== reference.hash) throw new Error("A source file could not be verified in your account.");
+          if (existing.error || !existing.data || existing.data.size !== reference.byteSize || await sha256(new Uint8Array(await existing.data.arrayBuffer())) !== reference.hash) throw new Error("A source file could not be verified in your account.");
         }
-        confirmed.add(reference.hash);
+        confirmed.add(privateReceiptKey(reference));
         onProgress?.(++completed, pending.length);
       } catch (error) {
         if (!failed) { failed = true; firstError = error; }

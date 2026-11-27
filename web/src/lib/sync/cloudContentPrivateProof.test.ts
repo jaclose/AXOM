@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { compressText, sha256 } from "../compressedText";
 import { makeSeed } from "../seed";
 import type { NoctyriumState } from "../types";
-import { clearCloudContentCache, hydrateCloudContent, uploadCloudContent, type ContentReference, type ContentUpload } from "./cloudContent";
+import { clearCloudContentCache, hydrateCloudContent, readContentReferences, uploadCloudContent, type ContentReference, type ContentUpload } from "./cloudContent";
 
 const A = "synthetic-a";
 const B = "synthetic-b";
@@ -167,5 +167,53 @@ describe("lossless private source decoding", () => {
     await expect(f.hydrate(A, ref)).rejects.toThrow();
     expect(f.download).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(f.state)).toBe(before);
+  });
+});
+
+describe("private digest size agreement", () => {
+  it.each(["byteSize", "expandedBytes"] as const)("refuses conflicting %s before download or upload in either order", async field => {
+    const f = await fixture();
+    const second: ContentReference = { ...f.reference, id: "q2", [field]: f.reference[field] + 1 };
+    const state = { ...f.state, questions: [...f.state.questions, { ...f.state.questions[0], id: "q2" }] };
+    const before = JSON.stringify(state);
+    const client = { storage: { from: () => ({ download: f.download, upload: f.upload }) } } as unknown as SupabaseClient;
+    for (const refs of [[f.reference, second], [second, f.reference]]) {
+      const snapshot = JSON.stringify(refs);
+      expect(() => readContentReferences(refs)).toThrow(/conflicting private file sizes/);
+      await expect(hydrateCloudContent(client, A, state, refs, guard)).rejects.toThrow(/conflicting private file sizes/);
+      await expect(uploadCloudContent(client, A, refs.map(reference => ({ reference, content: f.packed, canonicalText: "", canonicalHash: reference.hash })), [], guard)).rejects.toThrow(/conflicting private file sizes/);
+      expect(JSON.stringify(refs)).toBe(snapshot);
+    }
+    expect(f.download).not.toHaveBeenCalled();
+    expect(f.upload).not.toHaveBeenCalled();
+    expect(JSON.stringify(state)).toBe(before);
+  });
+
+  it("admits identical reuse across collections and separate academic claims", async () => {
+    const f = await fixture();
+    const twin: ContentReference = { ...f.reference, collection: "documents" };
+    const academic: ContentReference = { ...f.reference, id: "shared", byteSize: f.reference.byteSize + 1, academic: {
+      revisionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", path: "banks/source.json", sha256: "f".repeat(64),
+      adapterVersion: 1, kind: "question", questionId: "shared", reviewedAt: "2026-11-01T00:00:00Z",
+    } };
+    expect(readContentReferences([f.reference, twin, academic])).toEqual([f.reference, twin, academic]);
+  });
+
+  it("does not reuse a prior receipt with different size claims", async () => {
+    const f = await fixture();
+    await f.push(A, [{ ...f.reference, expandedBytes: f.reference.expandedBytes + 1 }]);
+    expect(f.upload).toHaveBeenCalledTimes(1);
+    await f.push(A);
+    expect(f.upload).toHaveBeenCalledTimes(1);
+  });
+
+  it("checks packed byte size before starting a new upload despite a same-hash receipt", async () => {
+    const f = await fixture();
+    await f.push(A);
+    const client = { storage: { from: () => ({ download: f.download, upload: f.upload }) } } as unknown as SupabaseClient;
+    const object: ContentUpload = { reference: { ...f.reference, byteSize: f.reference.byteSize + 1 }, content: f.packed, canonicalText: "", canonicalHash: f.reference.hash };
+    await expect(uploadCloudContent(client, A, [object], [], guard)).rejects.toThrow(/could not be verified/);
+    expect(f.upload).toHaveBeenCalledTimes(1);
+    expect(f.download).not.toHaveBeenCalled();
   });
 });
