@@ -65,6 +65,64 @@ describe("attempts as events", () => {
   });
 });
 
+describe("answer-readiness and historical analytics integrity", () => {
+  it("preserves recorded incorrect attempts without counting withdrawn mappings as current scores", () => {
+    const held = question({
+      needsReview: true,
+      attempts: [attempt(1, "incorrect", { certainty: "sure", errorType: "missed-clue" })],
+    });
+    const before = JSON.stringify(held.attempts);
+    const [event] = attemptEvents([held]);
+    expect(event).toMatchObject({ questionId: held.id, answerKey: "A", correctKey: undefined, correct: undefined });
+    expect(buildPatternReport([held]).totals.all).toEqual({ attempts: 0, correct: 0, accuracy: null });
+    expect(JSON.stringify(held.attempts)).toBe(before);
+  });
+
+  it("holds unreviewed extraction and missing or changed answer keys out of scored accuracy", () => {
+    const unreviewed = question({
+      extraction: { confidence: "medium", reviewed: false },
+      attempts: [attempt(1, "correct")],
+    });
+    const missingKey = question({
+      correctKey: undefined,
+      attempts: [attempt(1, "incorrect")],
+    });
+    const invalidKey = question({
+      correctKey: "Z",
+      attempts: [attempt(1, "correct")],
+    });
+    const records = [unreviewed, missingKey, invalidKey];
+    const before = JSON.stringify(records.map((record) => record.attempts));
+    expect(attemptEvents(records).map((event) => [event.correct, event.correctKey])).toEqual([
+      [undefined, undefined], [undefined, undefined], [undefined, undefined],
+    ]);
+    expect(buildPatternReport(records).totals.all).toEqual({ attempts: 0, correct: 0, accuracy: null });
+    expect(JSON.stringify(records.map((record) => record.attempts))).toBe(before);
+  });
+
+  it("does not create a weak-concept recommendation from six currently unverified keys", () => {
+    const held = Array.from({ length: 6 }, () => question({
+      topic: "Source held pending review",
+      needsReview: true,
+      attempts: [attempt(1, "incorrect")],
+    }));
+    const before = JSON.stringify(held);
+    const report = buildPatternReport(held);
+    expect(report.totals.all.attempts).toBe(0);
+    expect(report.byConcept).toEqual([]);
+    expect(report.findings.some((finding) => finding.kind === "weak-concept")).toBe(false);
+    expect(JSON.stringify(held)).toBe(before);
+  });
+
+  it("keeps historically recorded scores in ready mappings and existing attempt history unchanged", () => {
+    const ready = question({ attempts: [attempt(1, "incorrect"), attempt(2, "correct")] });
+    const before = JSON.stringify(ready);
+    expect(attemptEvents([ready]).map((event) => event.correct)).toEqual([false, true]);
+    expect(buildPatternReport([ready]).totals.all).toEqual({ attempts: 2, correct: 1, accuracy: 50 });
+    expect(JSON.stringify(ready)).toBe(before);
+  });
+});
+
 describe("reading a question from its wording", () => {
   it("separates a direct recall question from a case with a hidden step", () => {
     const recall = questionFeatures(question());
