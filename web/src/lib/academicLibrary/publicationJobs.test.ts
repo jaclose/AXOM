@@ -1,15 +1,22 @@
 // @vitest-environment node
+import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { prepareAcademicUpload, preflightAcademicUpload } from "./upload";
 import { publicationJobs, type PlannedCourse, type PublicationInventory } from "./publication";
 
 vi.mock("./upload", () => ({ prepareAcademicUpload: vi.fn(), preflightAcademicUpload: vi.fn() }));
 
+const bankPath = `banks/${"a".repeat(64)}/bank.json`;
+// The uploader is mocked here: these bytes exercise the actual reviewed-bank reader,
+// not the prepared-bank schema (covered by publication.test.ts and upload.test.ts).
+const bankBytes = new TextEncoder().encode(JSON.stringify({ fixture: "publication-job-bank" }));
+const bankDigest = `sha256:${createHash("sha256").update(bankBytes).digest("hex")}`;
 const inventory: PublicationInventory = {
   library: { format: "axom-private-library", schemaVersion: 1, id: "academic-library", version: "v1" },
   sections: [],
   sources: [
-    { id: "bank", name: "bank.pdf", checksum: "a".repeat(64), status: "prepared", reason: "", ready: 3, review: 0, hasBank: true },
+    { id: "bank", name: "bank.pdf", checksum: "a".repeat(64), status: "prepared", reason: "", ready: 3, review: 0, hasBank: true,
+      bankIdentity: { path: bankPath, digest: bankDigest } },
     { id: "slides", name: "slides.pdf", checksum: "b".repeat(64), status: "reference/template-only", reason: "", ready: 0, review: 0, hasBank: false },
   ],
 };
@@ -23,7 +30,21 @@ const catalog = {
     module: "NCRS", status: source.status, reason: "", ready: source.ready, review: 0,
     ...(source.hasBank ? { bankFile: `banks/${source.checksum}/bank.json` } : {}) })),
 };
-const read = vi.fn(async (path: string) => path === "catalog.json" ? new TextEncoder().encode(JSON.stringify(catalog)) : new Uint8Array());
+const read = vi.fn(async (path: string) => path === "catalog.json" ? new TextEncoder().encode(JSON.stringify(catalog))
+  : path === bankPath ? bankBytes.slice() : new Uint8Array());
+const consumeBank = async (reader: Parameters<typeof prepareAcademicUpload>[0]) => {
+  // Model the real uploader: select the scoped catalog before consuming its bank.
+  const selected = JSON.parse(new TextDecoder().decode(await reader("catalog.json"))) as typeof catalog;
+  const bank = selected.sources.find(source => source.id === "bank");
+  expect(bank?.bankFile).toBe(bankPath);
+  expect(await reader(bankPath)).toEqual(bankBytes);
+};
+const afterBank = (result: Awaited<ReturnType<typeof prepareAcademicUpload>> | Error) =>
+  async (reader: Parameters<typeof prepareAcademicUpload>[0]) => {
+    await consumeBank(reader);
+    if (result instanceof Error) throw result;
+    return result;
+  };
 const prepared = (): Awaited<ReturnType<typeof prepareAcademicUpload>> => ({
   catalogId: course.catalogId,
   metadata: { ready_questions: course.ready, review_questions: course.review },
@@ -44,8 +65,8 @@ describe("publication jobs", () => {
   it("keeps optional originals on this device only when the course exceeds its size limit", async () => {
     const upload = prepared();
     vi.mocked(prepareAcademicUpload)
-      .mockRejectedValueOnce(new Error("This collection exceeds the supported upload size."))
-      .mockResolvedValueOnce(upload);
+      .mockImplementationOnce(afterBank(new Error("This collection exceeds the supported upload size.")))
+      .mockImplementationOnce(afterBank(upload));
     const { jobs, notes } = publicationJobs(read, inventory, [course]);
     await expect(jobs[0].prepare()).resolves.toBe(upload);
     expect(preflightAcademicUpload).toHaveBeenCalledOnce();
@@ -65,8 +86,9 @@ describe("publication jobs", () => {
     const heldCatalog = { ...catalog, sources: catalog.sources.map(source => source.id === "bank"
       ? { ...source, review: 2 } : source) };
     const heldRead = async (path: string) => path === "catalog.json"
-      ? new TextEncoder().encode(JSON.stringify(heldCatalog)) : new Uint8Array();
+      ? new TextEncoder().encode(JSON.stringify(heldCatalog)) : path === bankPath ? bankBytes.slice() : new Uint8Array();
     vi.mocked(prepareAcademicUpload).mockImplementation(async reader => {
+      await consumeBank(reader);
       const bytes = await reader("catalog.json");
       const selected = JSON.parse(new TextDecoder().decode(bytes)) as typeof catalog;
       return {
@@ -100,8 +122,8 @@ describe("publication jobs", () => {
       original: { extension: source.id === "bank" ? "pptx" : "pdf" } })) };
     const upload = prepared();
     vi.mocked(prepareAcademicUpload)
-      .mockRejectedValueOnce(new Error("This collection exceeds the supported upload size."))
-      .mockResolvedValueOnce(upload);
+      .mockImplementationOnce(afterBank(new Error("This collection exceeds the supported upload size.")))
+      .mockImplementationOnce(afterBank(upload));
     const { jobs, notes } = publicationJobs(read, mixed, [course]);
     await expect(jobs[0].prepare()).resolves.toBe(upload);
     expect(prepareAcademicUpload).toHaveBeenCalledTimes(2);
@@ -113,16 +135,16 @@ describe("publication jobs", () => {
       ? { ...source, original: { extension: "pdf" } } : source) };
     const upload = prepared();
     vi.mocked(prepareAcademicUpload)
-      .mockRejectedValueOnce(new Error("This collection exceeds the supported upload size."))
-      .mockRejectedValueOnce(new Error("A private academic upload must contain 1–1500 verified files."))
-      .mockResolvedValueOnce(upload);
+      .mockImplementationOnce(afterBank(new Error("This collection exceeds the supported upload size.")))
+      .mockImplementationOnce(afterBank(new Error("A private academic upload must contain 1–1500 verified files.")))
+      .mockImplementationOnce(afterBank(upload));
     const first = publicationJobs(read, bankWithOriginal, [course]);
     await expect(first.jobs[0].prepare()).resolves.toBe(upload);
     expect(first.notes.keptLocal.get(course.catalogId)).toBe(2);
     const third = JSON.parse(new TextDecoder().decode(await vi.mocked(prepareAcademicUpload).mock.calls[2][0]("catalog.json"))) as typeof catalog;
     expect(third.sources.map(source => source.id)).toEqual(["bank"]);
 
-    vi.mocked(prepareAcademicUpload).mockReset().mockRejectedValue(new Error("This collection exceeds the supported upload size."));
+    vi.mocked(prepareAcademicUpload).mockReset().mockImplementation(afterBank(new Error("This collection exceeds the supported upload size.")));
     const second = publicationJobs(read, bankWithOriginal, [course]);
     await expect(second.jobs[0].prepare()).rejects.toThrow(/larger than 512 MB or 1,500 files even without its source files/);
     expect(prepareAcademicUpload).toHaveBeenCalledTimes(3);
@@ -130,11 +152,40 @@ describe("publication jobs", () => {
   });
 
   it("does not hide other preparation failures behind the size fallback", async () => {
-    vi.mocked(prepareAcademicUpload).mockRejectedValueOnce(new Error("A reviewed question is missing its source checksum."));
+    vi.mocked(prepareAcademicUpload).mockImplementationOnce(afterBank(new Error("A reviewed question is missing its source checksum.")));
     const { jobs, notes } = publicationJobs(read, inventory, [course]);
     await expect(jobs[0].prepare()).rejects.toThrow(/source checksum/);
     expect(prepareAcademicUpload).toHaveBeenCalledTimes(1);
     expect(notes.keptLocal.size).toBe(0);
+  });
+
+  it("refuses a planned bank without reviewed byte identity before preparation or preflight", async () => {
+    const missing: PublicationInventory = { ...inventory, sources: inventory.sources.map(source => source.id === "bank"
+      ? { ...source, bankIdentity: undefined } : source) };
+    const { jobs, notes } = publicationJobs(read, missing, [course]);
+    await expect(jobs[0].prepare()).rejects.toThrow(/missing or conflicting reviewed bank identities/);
+    expect(prepareAcademicUpload).not.toHaveBeenCalled();
+    expect(preflightAcademicUpload).not.toHaveBeenCalled();
+    expect(notes.keptLocal.size).toBe(0);
+    expect(notes.failures.get(course.catalogId)).toMatch(/reviewed bank identities/);
+  });
+
+  it("revalidates consumed bank bytes on an optional-original retry after preflight rejects size", async () => {
+    let bankReads = 0;
+    const changed = bankBytes.slice();
+    changed[12] ^= 1;
+    const driftRead = async (path: string) => path === bankPath
+      ? (++bankReads === 1 ? bankBytes.slice() : changed.slice()) : read(path);
+    vi.mocked(prepareAcademicUpload).mockImplementation(afterBank(prepared()));
+    vi.mocked(preflightAcademicUpload).mockRejectedValueOnce(new Error("This collection exceeds the supported upload size."));
+
+    const { jobs, notes } = publicationJobs(driftRead, inventory, [course]);
+    await expect(jobs[0].prepare()).rejects.toThrow(/reviewed question package changed/);
+    expect(bankReads).toBe(2);
+    expect(prepareAcademicUpload).toHaveBeenCalledTimes(2);
+    expect(preflightAcademicUpload).toHaveBeenCalledTimes(1);
+    expect(notes.keptLocal.size).toBe(0);
+    expect(notes.failures.get(course.catalogId)).toMatch(/reviewed question package changed/);
   });
 
   it("stops before preparing when publishing is cancelled", async () => {
