@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256 } from "../compressedText";
 import { makeSeed } from "../seed";
+import { readPreparedBank } from "../privateLibrary/install";
 import type { NoctyriumState } from "../types";
 import { clearCloudContentCache, hydrateCloudContent, readContentReferences, type ContentReference } from "./cloudContent";
 
@@ -24,8 +25,8 @@ const PACKED = JSON.stringify({ stem: "Synthetic source" });
 const BANK = "{}";
 const guard = async () => {};
 
-async function fixture() {
-  const assetHash = await sha256(new TextEncoder().encode(BANK));
+async function fixture(bank = new Blob([BANK])) {
+  const assetHash = await sha256(new Uint8Array(await bank.arrayBuffer()));
   const hash = await sha256(new TextEncoder().encode(PACKED));
   const denied = new Set<string>();
   const checked: string[] = [];
@@ -48,7 +49,7 @@ async function fixture() {
               checked.push(revision + ":" + path);
               return denied.has(revision)
                 ? { data: null, error: { message: "Synthetic denied" } }
-                : { data: { object_path: revision + "/" + path, sha256: assetHash, byte_size: BANK.length, mime_type: "application/json" }, error: null };
+                : { data: { object_path: revision + "/" + path, sha256: assetHash, byte_size: bank.size, mime_type: "application/json" }, error: null };
             },
           };
           return query;
@@ -60,7 +61,7 @@ async function fixture() {
         return {
           async download(path: string) {
             downloads.push(bucket + "/" + path);
-            if (bucket === "academic-content") return { data: new Blob([BANK]), error: null };
+            if (bucket === "academic-content") return { data: bank, error: null };
             if (bucket === "workspace-content") return { data: new Blob([PACKED]), error: null };
             throw new Error("Unexpected bucket");
           },
@@ -81,9 +82,49 @@ async function fixture() {
   return { client, denied, checked, downloads, ref, stateFor };
 }
 
-beforeEach(() => clearCloudContentCache());
+beforeEach(() => {
+  clearCloudContentCache();
+  vi.mocked(readPreparedBank).mockClear();
+});
 
 describe("academic source hydration binds immutable asset identity", () => {
+  it.each([
+    [0x80], [0xc0, 0xaf], [0xed, 0xa0, 0x80],
+    [0xf4, 0x90, 0x80, 0x80], [0xe2, 0x82], [0xff],
+  ].map(bytes => ({ bytes })))("rejects checksum-valid malformed UTF-8 before parsing ($bytes)", async ({ bytes }) => {
+    const bank = new Blob(['{"stem":"', Uint8Array.from(bytes), '"}']);
+    const { client, checked, downloads, ref, stateFor } = await fixture(bank);
+    const refs = [ref("a")];
+    const state = stateFor(refs);
+    const before = JSON.stringify(state);
+    // Even a retry must verify and reject the original bytes, never cache lossy text.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await expect(hydrateCloudContent(client, OWNER, state, refs, guard)).rejects.toThrow();
+    }
+    expect(readPreparedBank).not.toHaveBeenCalled();
+    expect(checked).toHaveLength(2);
+    expect(downloads).toHaveLength(2);
+    expect(JSON.stringify(state)).toBe(before);
+  });
+
+  it.each(["ASCII", "é漢😀", "\uFFFD", "\uFEFF"])("preserves valid source text (%s)", async stem => {
+    const bank = new Blob([JSON.stringify({ stem })]);
+    const { client, ref, stateFor } = await fixture(bank);
+    const refs = [ref("a")];
+    await hydrateCloudContent(client, OWNER, stateFor(refs), refs, guard);
+    expect(readPreparedBank).toHaveBeenCalledTimes(1);
+    expect(readPreparedBank).toHaveBeenCalledWith({ stem });
+  });
+
+  it("retains single leading UTF-8 BOM compatibility", async () => {
+    const bank = new Blob([Uint8Array.from([0xef, 0xbb, 0xbf]), '{"stem":"valid"}']);
+    const { client, ref, stateFor } = await fixture(bank);
+    const refs = [ref("a")];
+    await hydrateCloudContent(client, OWNER, stateFor(refs), refs, guard);
+    expect(readPreparedBank).toHaveBeenCalledTimes(1);
+    expect(readPreparedBank).toHaveBeenCalledWith({ stem: "valid" });
+  });
+
   it.each([false, true])("rejects conflicting file hashes before I/O (reverse=%s)", async reverse => {
     const { client, checked, downloads, ref, stateFor } = await fixture();
     const refs = [ref("a"), ref("b", REV_A, "f".repeat(64))];

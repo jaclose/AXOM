@@ -207,7 +207,14 @@ export async function hydrateCloudContent(client: SupabaseClient, userId: string
         if (reference.academic) {
           const key = JSON.stringify([academicFileLocator(reference.academic), reference.academic.sha256]);
           let request = academicFiles.get(key);
-          if (!request) { request = downloadAcademicAsset(client, reference.academic).then(async blob => readPreparedBank(JSON.parse(await blob.text()))); academicFiles.set(key, request); }
+          if (!request) {
+            request = downloadAcademicAsset(client, reference.academic).then(async blob => {
+              // Verified raw bytes must decode losslessly before reconstructing academic records.
+              const text = new TextDecoder("utf-8", { fatal: true }).decode(await blob.arrayBuffer());
+              return readPreparedBank(JSON.parse(text));
+            });
+            academicFiles.set(key, request);
+          }
           const source = academicRecord(await request, reference.academic);
           const projected = await projectCloudRecord({ ...source, id: reference.id }, reference.collection);
           data = new Blob([projected.canonicalText]);
