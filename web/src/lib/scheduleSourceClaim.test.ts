@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readScheduleSourceClaim, scheduleSourceReplayStatus, collectScheduleSourceReviewEvidence, captureScheduleReviewBinding, checkScheduleReviewBinding, type ScheduleSourceClaimV1 } from "./scheduleSourceClaim";
+import { readScheduleSourceClaim, scheduleSourceReplayStatus, collectScheduleSourceReviewEvidence, captureScheduleReviewBinding, checkScheduleReviewBinding, snapshotScheduleReviewValue, captureScheduleReviewValueBinding, checkScheduleReviewValueBinding, type ScheduleSourceClaimV1 } from "./scheduleSourceClaim";
 
 function claim(): ScheduleSourceClaimV1 {
   return {
@@ -274,5 +274,88 @@ describe("ephemeral schedule review binding", () => {
       { ...input, rows: [{ recordId: "", recordSnapshot: "{}" }] },
       { ...input, rows: [{ recordId: "a", recordSnapshot: "" }] },
     ]) expect(captureScheduleReviewBinding(value)).toEqual({ state: "invalid-input" });
+  });
+});
+
+describe("strict value snapshots for schedule review confirmation", () => {
+  it("refuses all five lossy JSON.stringify collision pairs at the binding boundary", () => {
+    const pairs = [
+      [{}, { field: undefined }],
+      [{ field: null }, { field: NaN }],
+      [{ field: null }, { field: Infinity }],
+      [{ field: 0 }, { field: -0 }],
+      [{ field: [null] }, { field: Array(1) }],
+    ];
+    for (const [valid, invalid] of pairs) {
+      expect(JSON.stringify(valid)).toBe(JSON.stringify(invalid));
+      const input = { workspaceLease: {}, candidateBatch: [], rows: [{ recordId: "a", record: valid }] };
+      const changed = { ...input, rows: [{ recordId: "a", record: invalid }] };
+      const captured = captureScheduleReviewValueBinding(input);
+      if (captured.state !== "captured") throw new Error("valid snapshot refused");
+      expect(checkScheduleReviewValueBinding(captured.binding, input)).toBe("current");
+      expect(checkScheduleReviewValueBinding(captured.binding, changed)).toBe("invalid-input");
+      expect(captureScheduleReviewValueBinding(changed)).toEqual({ state: "invalid-input" });
+      expect(captureScheduleReviewValueBinding({ ...input, candidateBatch: [invalid] })).toEqual({ state: "invalid-input" });
+    }
+  });
+
+  it("preserves ordinary nested JSON, array ordering, unknown fields and special property names", () => {
+    const original = JSON.parse('{"z":[1,true,null,"x"],"__proto__":{"value":1},"future":{"version":7,"raw":"x"}}');
+    const before = JSON.stringify(original);
+    const snapshot = snapshotScheduleReviewValue(original);
+    if (snapshot === undefined) throw new Error("valid snapshot refused");
+    expect(JSON.parse(snapshot)).toEqual(original);
+    expect(JSON.stringify(original)).toBe(before);
+    expect(snapshotScheduleReviewValue({ future: original.future, z: original.z, ["__proto__"]: original["__proto__"] })).toBe(snapshot);
+    expect(snapshotScheduleReviewValue({ ...original, z: [...original.z].reverse() }) === snapshot).toBe(false);
+    expect(snapshotScheduleReviewValue({ ...original, future: { ...original.future, raw: "y" } }) === snapshot).toBe(false);
+    const repeated = { a: original, b: original };
+    expect(snapshotScheduleReviewValue(repeated)).toBe(snapshotScheduleReviewValue(JSON.parse(JSON.stringify(repeated))));
+    expect(snapshotScheduleReviewValue(Object.freeze(original))).toBe(snapshot);
+  });
+
+  it("rejects non-JSON properties and objects without invoking getters or custom JSON hooks", () => {
+    let calls = 0;
+    const getter = Object.defineProperty({}, "x", { enumerable: true, get() { calls++; return 1; } });
+    const custom = { toJSON() { calls++; return {}; } };
+    const hidden = Object.defineProperty({}, "x", { value: 1 });
+    const arrayExtra = Object.assign([1], { note: "hidden by JSON" });
+    const symbolKey = { [Symbol("x")]: 1 };
+    const cycle = Object.assign({}, { self: {} });
+    cycle.self = cycle;
+    for (const value of [getter, custom, hidden, arrayExtra, symbolKey, cycle,
+      new Date(0), new Map(), new Set(), BigInt(1), Symbol("x"), undefined,
+      () => 1, -Infinity, Object.create({ inherited: 1 })]) {
+      expect(snapshotScheduleReviewValue(value)).toBe(undefined);
+    }
+    expect(calls).toBe(0);
+    expect(Object.getOwnPropertyDescriptor(getter, "x")?.get !== undefined).toBe(true);
+    expect(cycle.self).toBe(cycle);
+  });
+
+  it("fails closed on excessive depth, node count and scalar length", () => {
+    let deep = {};
+    for (let i = 0; i < 70; i++) deep = { child: deep };
+    expect(snapshotScheduleReviewValue(deep)).toBe(undefined);
+    expect(snapshotScheduleReviewValue(Array(100_001).fill(null))).toBe(undefined);
+    expect(snapshotScheduleReviewValue("x".repeat(2_000_001))).toBe(undefined);
+    expect(snapshotScheduleReviewValue([{}, null, "", 0])).toBe('[{},null,"",0]');
+  });
+
+  it("binds valid whole records and candidate order, rejects duplicate IDs and renewed leases", () => {
+    const input = { workspaceLease: {}, candidateBatch: [{ id: "one" }, { id: "two" }],
+      rows: [{ recordId: "a", record: { title: "Before", future: 1 } },
+        { recordId: "b", record: { title: "Other" } }] };
+    const captured = captureScheduleReviewValueBinding(input);
+    if (captured.state !== "captured") throw new Error("valid snapshot refused");
+    const binding = captured.binding;
+    expect(checkScheduleReviewValueBinding(binding, { ...input, rows: [...input.rows].reverse() })).toBe("current");
+    expect(checkScheduleReviewValueBinding(binding, { ...input, candidateBatch: [...input.candidateBatch].reverse() })).toBe("stale-candidates");
+    expect(checkScheduleReviewValueBinding(binding, { ...input, rows: [{ ...input.rows[0], record: { title: "Before", future: 2 } }, input.rows[1]] })).toBe("stale-records");
+    expect(checkScheduleReviewValueBinding(binding, { ...input, rows: [...input.rows, input.rows[0]] })).toBe("duplicate-record-id");
+    expect(checkScheduleReviewValueBinding(binding, { ...input, workspaceLease: {} })).toBe("stale-scope");
+    expect(checkScheduleReviewValueBinding(binding, { ...input, workspaceLease: {} })).toBe("stale-scope");
+    expect(checkScheduleReviewValueBinding(binding, { ...input, candidateBatch: [{ id: undefined }] })).toBe("invalid-input");
+    expect(checkScheduleReviewValueBinding(binding, { ...input, rows: input.rows.slice(1) })).toBe("stale-records");
   });
 });

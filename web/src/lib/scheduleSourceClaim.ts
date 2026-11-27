@@ -241,3 +241,117 @@ export function checkScheduleReviewBinding(
   }
   return "current";
 }
+
+/**
+ * Strict structural snapshot of trusted plain JSON data, not a recovery codec.
+ * JSON.stringify alone loses undefined, non-finite numbers, negative zero,
+ * sparse slots and custom properties. Refuse these rather than normalizing
+ * them. Object property order is irrelevant; array order is significant.
+ * Shared acyclic subobjects are equivalent to their expanded JSON tree.
+ * Do not call on untrusted executable objects/proxies or log the result.
+ * Limits bound traversal and encoded scalar/key bytes per value; exceeding
+ * them means confirmation needs a different authoritative revision mechanism.
+ */
+type ScheduleSnapshotBudget = { nodes: number; characters: number };
+
+function snapshotScalar(value: string | number | boolean | null, budget: ScheduleSnapshotBudget): string | undefined {
+  if (typeof value === "string" && value.length > budget.characters) return undefined;
+  const encoded = JSON.stringify(value);
+  budget.characters -= encoded.length;
+  return budget.characters < 0 ? undefined : encoded;
+}
+
+function encodeScheduleSnapshot(
+  value: unknown, active: WeakSet<object>, budget: ScheduleSnapshotBudget, depth: number,
+): string | undefined {
+  if (--budget.nodes < 0 || depth > 64) return undefined;
+  if (value === null || typeof value === "string" || typeof value === "boolean") {
+    return snapshotScalar(value, budget);
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) && !Object.is(value, -0) ? snapshotScalar(value, budget) : undefined;
+  }
+  if (typeof value !== "object" || active.has(value)) return undefined;
+  const prototype = Object.getPrototypeOf(value);
+  const array = Array.isArray(value);
+  if (array ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) return undefined;
+  const keys = Reflect.ownKeys(value);
+  if (keys.length > budget.nodes + (array ? 1 : 0)) return undefined;
+  active.add(value);
+  try {
+    const parts: string[] = [];
+    if (Array.isArray(value)) {
+      // Dense ordinary arrays only, with no extra properties or symbols.
+      if (keys.length !== value.length + 1) return undefined;
+      for (let index = 0; index < value.length; index++) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        if (!descriptor?.enumerable || !Object.prototype.hasOwnProperty.call(descriptor, "value")) return undefined;
+        const encoded = encodeScheduleSnapshot(descriptor.value, active, budget, depth + 1);
+        if (encoded === undefined) return undefined;
+        parts.push(encoded);
+      }
+      return "[" + parts.join(",") + "]";
+    }
+    const names = keys.filter((key): key is string => typeof key === "string");
+    if (names.length !== keys.length) return undefined;
+    for (const key of names.sort()) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor?.enumerable || !Object.prototype.hasOwnProperty.call(descriptor, "value")) return undefined;
+      const name = snapshotScalar(key, budget);
+      const encoded = encodeScheduleSnapshot(descriptor.value, active, budget, depth + 1);
+      if (name === undefined || encoded === undefined) return undefined;
+      parts.push(name + ":" + encoded);
+    }
+    return "{" + parts.join(",") + "}";
+  } finally {
+    active.delete(value);
+  }
+}
+
+export function snapshotScheduleReviewValue(value: unknown): string | undefined {
+  try {
+    return encodeScheduleSnapshot(value, new WeakSet(), { nodes: 100_000, characters: 2_000_000 }, 0);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Preferred value-based adapter for capture and final check. The caller still
+ * supplies ALL authoritative records and the ordered batch under its current
+ * non-reused workspace lease. This does not supply a transaction/CAS or prove
+ * that the records are complete. Unsupported values block confirmation; never
+ * remove unknown fields or serialize a projection to make admission succeed.
+ */
+export interface ScheduleReviewValueInput {
+  workspaceLease: object;
+  candidateBatch: readonly unknown[];
+  rows: readonly { recordId: string; record: unknown }[];
+}
+
+function snapshotScheduleReviewInput(input: ScheduleReviewValueInput): ScheduleReviewBindingInput | undefined {
+  if (!Array.isArray(input.candidateBatch) || !Array.isArray(input.rows)) return undefined;
+  const candidateBatchSnapshot = snapshotScheduleReviewValue(input.candidateBatch);
+  if (candidateBatchSnapshot === undefined) return undefined;
+  const rows: { recordId: string; recordSnapshot: string }[] = [];
+  for (const row of input.rows) {
+    if (!row || typeof row.recordId !== "string" || !row.recordId.trim()) return undefined;
+    const recordSnapshot = snapshotScheduleReviewValue(row.record);
+    if (recordSnapshot === undefined) return undefined;
+    rows.push({ recordId: row.recordId, recordSnapshot });
+  }
+  return { workspaceLease: input.workspaceLease, candidateBatchSnapshot, rows };
+}
+
+export function captureScheduleReviewValueBinding(input: ScheduleReviewValueInput): ScheduleReviewBindingCapture {
+  const snapshots = snapshotScheduleReviewInput(input);
+  return snapshots ? captureScheduleReviewBinding(snapshots) : { state: "invalid-input" };
+}
+
+export function checkScheduleReviewValueBinding(
+  binding: ScheduleReviewBinding, current: ScheduleReviewValueInput,
+): ScheduleReviewBindingCheck {
+  if (binding.workspaceLease !== current.workspaceLease) return "stale-scope";
+  const snapshots = snapshotScheduleReviewInput(current);
+  return snapshots ? checkScheduleReviewBinding(binding, snapshots) : "invalid-input";
+}
