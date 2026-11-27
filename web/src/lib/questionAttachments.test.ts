@@ -24,6 +24,7 @@ import {
   type QuestionImageAttachment,
 } from "./questionAttachments";
 import { DB_NAME, DB_VERSION, STORE_NAME, BACKUP_STORE_NAME, ATTACHMENT_STORE_NAME, ensureVaultStores } from "./localVault";
+import { getQuestionAttachmentScope } from "./questionAttachmentScope";
 
 function deleteDatabase(name: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -438,7 +439,7 @@ describe("portable backup payloads", () => {
     expect(await listQuestionAttachmentBlobKeys()).toEqual([]);
   });
 
-  it("stages only absent immutable blob keys and rolls back only its own bytes", async () => {
+  it("stages only absent immutable blob keys and retains them on abandonment", async () => {
     const existing = metadata({ id: "existing" });
     const added = metadata({ id: "added" });
     await putQuestionAttachmentBlob(existing.blobKey, {
@@ -452,7 +453,123 @@ describe("portable backup payloads", () => {
     expect(stage).toMatchObject({ restored: 1, skipped: 1 });
     await stage.rollback();
     expect(await getQuestionAttachmentBlob(existing.blobKey)).toBeTruthy();
-    expect(await getQuestionAttachmentBlob(added.blobKey)).toBeUndefined();
+    expect(await getQuestionAttachmentBlob(added.blobKey)).toBeTruthy();
+  });
+
+  it.each([true, false])("concurrent staging preserves the winner (identical bytes: %s)", async (identical) => {
+    const meta = metadata({ id: "concurrent-stage" });
+    const other = PNG_BYTES.slice();
+    if (!identical) other[other.length - 1] ^= 0xff;
+    const values = await Promise.all([PNG_BYTES, other].map(bytes =>
+      blobToBase64(new Blob([bytes.buffer as ArrayBuffer]))));
+    const results = await Promise.allSettled(values.map(base64 =>
+      stageQuestionAttachmentPayloads([{ ...meta, questionId: "q1", base64 }],
+        [{ id: "q1", attachments: [meta] }]),
+    ));
+    const winners = results.filter(result => result.status === "fulfilled");
+    expect(winners).toHaveLength(identical ? 2 : 1);
+    expect(winners.reduce((sum, result) => sum + result.value.restored, 0)).toBe(1);
+    const winnerIndex = results.findIndex(result => result.status === "fulfilled" && result.value.restored === 1);
+    expect(winnerIndex).toBeGreaterThanOrEqual(0);
+    for (const result of winners) await result.value.rollback();
+    const record = await getQuestionAttachmentBlob(meta.blobKey);
+    expect(await blobToBase64(record!.blob)).toBe(values[winnerIndex]);
+  });
+
+  it.each(["legacy-only", "same", "different", "quota", "unauthorized"] as const)(
+    "staging establishes a scoped receipt instead of trusting a legacy fallback (%s)",
+    async (scenario) => {
+      const meta = metadata({ id: "legacy-stage" });
+      const other = PNG_BYTES.slice();
+      other[other.length - 1] ^= 0xff;
+      const record = (bytes: Uint8Array) => ({
+        blob: new Blob([bytes.buffer as ArrayBuffer], { type: meta.mimeType }),
+        mimeType: meta.mimeType, byteSize: bytes.byteLength, questionId: "q1", updatedAt: meta.updatedAt,
+      });
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        request.onupgradeneeded = () => ensureVaultStores(request.result);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const raw = async <T>(mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest<T>) =>
+        new Promise<T>((resolve, reject) => {
+          const tx = db.transaction(ATTACHMENT_STORE_NAME, mode);
+          const request = action(tx.objectStore(ATTACHMENT_STORE_NAME));
+          tx.oncomplete = () => resolve(request.result);
+          tx.onerror = tx.onabort = () => reject(tx.error);
+        });
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const tx = db.transaction(STORE_NAME, "readwrite");
+          tx.objectStore(STORE_NAME).put({ owner: scenario === "unauthorized" ? "account:other" : getQuestionAttachmentScope().owner }, "axom.attachments.legacy-owner.v1");
+          tx.oncomplete = () => resolve();
+          tx.onerror = tx.onabort = () => reject(tx.error);
+        });
+        const legacyBytes = scenario === "unauthorized" ? other : PNG_BYTES;
+        await raw("readwrite", store => store.put(record(legacyBytes), meta.blobKey));
+        if (scenario === "same" || scenario === "different") {
+          await putQuestionAttachmentBlob(meta.blobKey, record(scenario === "same" ? PNG_BYTES : other));
+        }
+        const originalGet = FakeIDBObjectStore.prototype.get;
+        const originalAdd = FakeIDBObjectStore.prototype.add;
+        let miss = scenario === "same" || scenario === "different";
+        // Model a scoped insertion after the first scoped lookup; the winner
+        // is a real row, and the eventual add hits the real IDB constraint.
+        const get = vi.spyOn(FakeIDBObjectStore.prototype, "get").mockImplementation(function (this: IDBObjectStore, key) {
+          if (miss && this.name === ATTACHMENT_STORE_NAME && Array.isArray(key)) {
+            miss = false;
+            return originalGet.call(this, "simulated-scoped-miss");
+          }
+          return originalGet.call(this, key);
+        });
+        const add = vi.spyOn(FakeIDBObjectStore.prototype, "add").mockImplementation(function (this: IDBObjectStore, value, key) {
+          if (scenario === "quota" && this.name === ATTACHMENT_STORE_NAME) throw new DOMException("Quota", "QuotaExceededError");
+          return originalAdd.call(this, value, key);
+        });
+        try {
+          const base64 = await blobToBase64(record(PNG_BYTES).blob);
+          const stage = stageQuestionAttachmentPayloads([{ ...meta, questionId: "q1", base64 }],
+            [{ id: "q1", attachments: [meta] }]);
+          if (scenario === "different") await expect(stage).rejects.toThrow("existing storage key with different bytes");
+          else if (scenario === "quota") await expect(stage).rejects.toThrow("Quota");
+          else expect(await stage).toMatchObject({ restored: scenario === "same" ? 0 : 1, skipped: scenario === "same" ? 1 : 0 });
+        } finally { get.mockRestore(); add.mockRestore(); }
+        const scoped = await raw("readonly", store => store.get(["axom-attachment-v1", getQuestionAttachmentScope().owner, meta.blobKey])) as ReturnType<typeof record> | undefined;
+        if (scenario === "quota") expect(scoped).toBeUndefined();
+        else expect(await blobToBase64(scoped!.blob)).toBe(await blobToBase64(record(scenario === "different" ? other : PNG_BYTES).blob));
+        const legacy = await raw("readonly", store => store.get(meta.blobKey)) as ReturnType<typeof record>;
+        expect(await blobToBase64(legacy.blob)).toBe(await blobToBase64(record(legacyBytes).blob));
+      } finally { db.close(); }
+    },
+  );
+
+  it("retains previously staged bytes when a later payload fails validation", async () => {
+    const first = metadata({ id: "retained-first" });
+    const second = metadata({ id: "invalid-second" });
+    const base64 = await blobToBase64(new Blob([PNG_BYTES.buffer as ArrayBuffer]));
+    await expect(stageQuestionAttachmentPayloads([
+      { ...first, questionId: "q1", base64 },
+      { ...second, questionId: "q1", base64: "" },
+    ], [{ id: "q1", attachments: [first, second] }])).rejects.toThrow("failed validation");
+    expect(await blobToBase64((await getQuestionAttachmentBlob(first.blobKey))!.blob)).toBe(base64);
+    expect(await getQuestionAttachmentBlob(second.blobKey)).toBeUndefined();
+  });
+
+  it("abandonment never deletes a row replaced by another writer", async () => {
+    const meta = metadata({ id: "replaced-stage" });
+    const base64 = await blobToBase64(new Blob([PNG_BYTES.buffer as ArrayBuffer]));
+    const stage = await stageQuestionAttachmentPayloads(
+      [{ ...meta, questionId: "q1", base64 }], [{ id: "q1", attachments: [meta] }],
+    );
+    const other = PNG_BYTES.slice();
+    other[other.length - 1] ^= 0xff;
+    const blob = new Blob([other.buffer as ArrayBuffer], { type: meta.mimeType });
+    await putQuestionAttachmentBlob(meta.blobKey, {
+      blob, mimeType: meta.mimeType, byteSize: blob.size, questionId: "q1", updatedAt: meta.updatedAt,
+    });
+    await stage.rollback();
+    expect(await blobToBase64((await getQuestionAttachmentBlob(meta.blobKey))!.blob)).toBe(await blobToBase64(blob));
   });
 
   it("rejects a colliding immutable blob key without changing its bytes", async () => {

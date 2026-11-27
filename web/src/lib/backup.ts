@@ -1,4 +1,5 @@
 import { contentMetadata, readDeferredContent } from "./sync/deferredContent";
+import { getQuestionAttachmentScope, isQuestionAttachmentScopeCurrent } from "./questionAttachmentScope";
 import { readWorkspaceContent } from "./question-content/workspaceContent";
 import { privateReviewMedia } from "./privateLibrary/media";
 import { backupOriginalDocuments, createMediaBackupArchive, LARGE_MEDIA_BACKUP_BYTES, mediaBackupBytes } from "./backupArchive";
@@ -54,6 +55,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isPortableRecordIdentity(value: unknown): boolean {
+  return value === undefined || value === null || value === ""
+    || (typeof value === "string" && value.trim() === value);
+}
+
 export function toPortableState(state: NoctyriumState): NoctyriumState {
   const payload: Record<string, unknown> = {};
   const src = state as unknown as Record<string, unknown>;
@@ -78,10 +84,18 @@ export type BackupScope = "complete" | "saved-work";
 export async function exportStateWithAttachments(
   state: NoctyriumState,
   scope: BackupScope = "complete",
-): Promise<{ attachmentCount: number; missingBlobKeys: string[]; originalCount: number; missingOriginalIds: string[]; deferredSourceCount: number }> {
+): Promise<{ attachmentCount: number; missingBlobKeys: string[]; originalCount: number; missingOriginalIds: string[]; deferredSourceCount: number; workspaceAdmissionFailed?: true }> {
+  const accountScope = getQuestionAttachmentScope();
+  const assertCurrent = () => {
+    if (!isQuestionAttachmentScopeCurrent(accountScope)) {
+      throw new Error("The account changed during export. Start a new export from the current workspace.");
+    }
+  };
   if (state.deferredContent && scope === "complete") {
     const { materializeState } = await import("./sync/contentDownloads");
+    assertCurrent();
     state = await materializeState(state);
+    assertCurrent();
   }
   const payload: Record<string, unknown> = {
     _app: BRAND.productName,
@@ -91,12 +105,14 @@ export async function exportStateWithAttachments(
   };
   const metadata = contentMetadata(state);
   const deferredSourceCount = state.deferredContent?.sources.length ?? 0;
-  const options = { localOnly: scope === "saved-work" };
+  const options = { localOnly: scope === "saved-work", scope: accountScope };
   const references = [...(metadata.questions ?? []), ...privateReviewMedia(metadata.documents)];
   if (backupOriginalDocuments(metadata.documents).length || mediaBackupBytes(references) > LARGE_MEDIA_BACKUP_BYTES) {
     const result = await createMediaBackupArchive(payload, references, metadata.documents, options);
-    downloadBackupBlob(result.blob, "zip", scope);
-    return { attachmentCount: result.attachmentCount, missingBlobKeys: result.missingBlobKeys, originalCount: result.originalCount, missingOriginalIds: result.missingOriginalIds, deferredSourceCount };
+    assertCurrent();
+    const admission = workspaceAdmissionReceipt(payload);
+    downloadBackupBlob(result.blob, "zip", scope, admission.workspaceAdmissionFailed);
+    return { attachmentCount: result.attachmentCount, missingBlobKeys: result.missingBlobKeys, originalCount: result.originalCount, missingOriginalIds: result.missingOriginalIds, deferredSourceCount, ...admission };
   }
   let attachmentCount = 0;
   let missingBlobKeys: string[];
@@ -106,29 +122,33 @@ export async function exportStateWithAttachments(
     attachmentCount = collected.payloads.length;
     missingBlobKeys = collected.missingBlobKeys;
   } catch {
+    // Account cancellation is not a recoverable missing-file error.
+    assertCurrent();
     // Blob store unavailable (private mode): export metadata-only, reported.
     missingBlobKeys = references.flatMap((question) =>
       (question.attachments ?? []).map((attachment) => attachment.blobKey));
   }
-  downloadBackupPayload(payload, scope);
-  return { attachmentCount, missingBlobKeys, originalCount: 0, missingOriginalIds: [], deferredSourceCount };
+  assertCurrent();
+  const admission = workspaceAdmissionReceipt(payload);
+  downloadBackupPayload(payload, scope, admission.workspaceAdmissionFailed);
+  return { attachmentCount, missingBlobKeys, originalCount: 0, missingOriginalIds: [], deferredSourceCount, ...admission };
 }
 
-function downloadBackupPayload(payload: Record<string, unknown>, scope: BackupScope = "complete") {
+function downloadBackupPayload(payload: Record<string, unknown>, scope: BackupScope = "complete", workspaceAdmissionFailed = false) {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-  downloadBackupBlob(blob, "json", scope);
+  downloadBackupBlob(blob, "json", scope, workspaceAdmissionFailed);
 }
 
-function downloadBackupBlob(blob: Blob, extension: "json" | "zip", scope: BackupScope = "complete") {
+function downloadBackupBlob(blob: Blob, extension: "json" | "zip", scope: BackupScope = "complete", workspaceAdmissionFailed = false) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   const stamp = new Date().toISOString().slice(0, 10);
   a.href = url;
-  a.download = `${BRAND.productName.toLowerCase()}-${scope === "saved-work" ? "saved-work" : "backup"}-${stamp}.${extension}`;
+  a.download = `${BRAND.productName.toLowerCase()}-${workspaceAdmissionFailed ? "recovery-copy" : scope === "saved-work" ? "saved-work" : "backup"}-${stamp}.${extension}`;
   a.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
   // A references-only recovery copy must not imply the whole library is backed up.
-  if (scope === "complete") markBackupDone();
+  if (scope === "complete" && !workspaceAdmissionFailed) markBackupDone();
 }
 
 /** Record when the user last exported, for the data-health panel. */
@@ -211,21 +231,83 @@ function mergeById(
   imported: Array<Record<string, unknown>>,
   idKey: string,
 ): Array<Record<string, unknown>> {
-  const stamp = (r: Record<string, unknown>) =>
-    String(r.updatedAt ?? r.updated ?? r.createdAt ?? r.created ?? "");
-  const byId = new Map<string, Record<string, unknown>>();
-  for (const record of imported) {
-    const id = String(record[idKey] ?? "");
-    if (id) byId.set(id, record);
-  }
-  for (const record of current) {
-    const id = String(record[idKey] ?? "");
-    if (!id) continue;
+  // Compare explicit ISO instants, not timestamp spellings. Keep sub-millisecond
+  // precision from database exports instead of truncating it through Date.parse.
+  const stamp = (record: Record<string, unknown>) => {
+    const raw = record.updatedAt ?? record.updated ?? record.createdAt ?? record.created;
+    if (raw === undefined || raw === null || raw === "") return { seconds: -Infinity, fraction: "" };
+    const match = typeof raw === "string"
+      ? /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|[+-]\d{2}:?\d{2})$/.exec(raw)
+      : null;
+    if (match && match[0] === raw) {
+      const [, year, month, day, hour, minute, second = "00", fraction = "", zone] = match;
+      const y = Number(year);
+      const m = Number(month);
+      const leap = y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0);
+      const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+      const seconds = Date.parse(year + "-" + month + "-" + day + "T" + hour + ":" + minute + ":" + second + zone) / 1000;
+      if (m >= 1 && m <= 12 && Number(day) >= 1 && Number(day) <= days[m - 1]
+        && Number(hour) < 24 && Number(minute) < 60 && Number(second) < 60 && Number.isFinite(seconds)) {
+        return { seconds, fraction: fraction.replace(/0+$/, "") };
+      }
+    }
+    throw new Error("This merge contains competing records with an invalid or unzoned timestamp. Keep both original workspaces.");
+  };
+  const compare = (left: Record<string, unknown>, right: Record<string, unknown>) => {
+    const a = stamp(left);
+    const b = stamp(right);
+    if (a.seconds !== b.seconds) return a.seconds < b.seconds ? -1 : 1;
+    return a.fraction === b.fraction ? 0 : a.fraction < b.fraction ? -1 : 1;
+  };
+  // JSON object member order is not data; array order is. Preserve the input
+  // records and treat different timestamp spellings at one instant as a tie,
+  // not evidence that either conflicting record is newer.
+  const canonical = (record: Record<string, unknown>) => JSON.stringify(record, (_key, value: unknown) =>
+    isRecord(value) ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value);
+  const equivalent = (left: Record<string, unknown>, right: Record<string, unknown>) => canonical(left) === canonical(right);
+  // Resolve each side before comparing them. Otherwise an older duplicate
+  // later in the imported list can hide a newer record before the local
+  // comparison. Equal latest timestamps with distinct contents on one side
+  // have no reliable ordering; refuse that merge without adopting anything.
+  // A malformed ID must never alias a legitimate string through coercion.
+  // Missing/null/empty legacy identities remain unkeyed and are retained;
+  // explicit non-string or padded identities require non-destructive review.
+  const identity = (record: Record<string, unknown>): string => {
+    const id = record[idKey];
+    if (id === undefined || id === null || id === "") return "";
+    if (!isPortableRecordIdentity(id)) {
+      throw new Error("This merge contains an invalid or noncanonical record identity. Keep both original workspaces.");
+    }
+    return id as string;
+  };
+  const latestById = (records: Array<Record<string, unknown>>) => {
+    const result = new Map<string, Record<string, unknown>>();
+    const ambiguous = new Set<string>();
+    for (const record of records) {
+      const id = identity(record);
+      if (!id) continue;
+      const prior = result.get(id);
+      if (prior && equivalent(record, prior)) continue;
+      const order = prior ? compare(record, prior) : 1;
+      if (order > 0) {
+        result.set(id, record);
+        ambiguous.delete(id);
+      } else if (order === 0) {
+        ambiguous.add(id);
+      }
+    }
+    if (ambiguous.size) {
+      throw new Error("This merge contains conflicting records with the same identity and timestamp. Keep both original workspaces.");
+    }
+    return result;
+  };
+  const byId = latestById(imported);
+  for (const [id, record] of latestById(current)) {
     const other = byId.get(id);
-    byId.set(id, !other || stamp(record) >= stamp(other) ? record : other);
+    byId.set(id, !other || equivalent(record, other) || compare(record, other) >= 0 ? record : other);
   }
   // Keep unkeyed records from both sides rather than dropping them.
-  const unkeyed = [...current, ...imported].filter((r) => !String(r[idKey] ?? ""));
+  const unkeyed = [...current, ...imported].filter((r) => !identity(r));
   return [...byId.values(), ...unkeyed];
 }
 
@@ -352,12 +434,89 @@ function preferDailyWordPuzzle(left: DailyWordPuzzleState, right: DailyWordPuzzl
   return left;
 }
 
-export function parseImport(text: string): NoctyriumState {
-  const data = JSON.parse(text);
-  if (!data || typeof data !== "object" || !Array.isArray(data.terms)) {
+/** Shared structural admission, before normalization or media staging. */
+function assertPortableWorkspaceAdmission(data: unknown): number {
+  if (!isRecord(data) || !Array.isArray(data.terms)) {
     throw new Error("This file doesn't look like an AXOM backup.");
   }
-  // accept the file even if schemaVersion is missing/older — fill the gaps
+  // Missing version is the supported legacy format. Do not project a future
+  // or malformed explicit version onto the current schema and lose fields.
+  const version = data.schemaVersion;
+  if (version !== undefined) {
+    if (typeof version !== "number" || !Number.isSafeInteger(version) || version < 0) {
+      throw new Error("This backup has an invalid workspace schema version. Keep the original file.");
+    }
+    if (version > SCHEMA_VERSION) {
+      throw new Error("This backup was created with a newer workspace schema. Open it in a compatible newer AXOM version instead.");
+    }
+  }
+  // A present collection must be structurally usable before normalization.
+  // Omitted fields remain supported for legacy backups; explicit malformed
+  // values must not be silently converted into an empty collection or adopted.
+  const collections = [
+    "terms", "courses", "tracker", "productivityTrackers", "resources", "tasks", "journal",
+    "premedExperiences", "prompts", "folders", "logs", "integrations", "blueprintInstalls",
+    "dayPlans", "dailyArchives", "dailyRolloverEvents", "energyFactors", "habits", "habitEntries",
+    "sessions", "closeouts", "recoveryPlans", "questions", "quizSessions", "documents",
+    "questionSets", "savedQuestionFilters", "quizBlocks", "ankiCards", "cardReviews", "dailyWordPuzzles",
+  ] as const;
+  for (const key of collections) {
+    const collection: unknown = data[key];
+    if (collection !== undefined && (!Array.isArray(collection) || !collection.every(isRecord))) {
+      throw new Error(`This backup has an invalid workspace collection (${key}). Keep the original file.`);
+    }
+  }
+  // These generic collections must satisfy the same identity rule for
+  // both Merge and Replace, before either can stage media or adopt state.
+  // Keep legacy unkeyed records verbatim; never trim or coerce an identity.
+  for (const [collection, identity] of [
+    ["tasks", "id"], ["logs", "id"], ["dayPlans", "dayKey"], ["dailyArchives", "date"],
+  ] as const) {
+    for (const record of (data[collection] as Record<string, unknown>[] | undefined) ?? []) {
+      if (!isPortableRecordIdentity(record[identity])) {
+        throw new Error(`This backup has an invalid or noncanonical record identity (${collection}). Keep the original file.`);
+      }
+    }
+  }
+  // Course Tracker consumes each present course's module array directly.
+  // Missing modules are not a documented legacy migration; do not silently
+  // replace a malformed or incomplete course with an empty course.
+  for (const course of (data.courses as Record<string, unknown>[] | undefined) ?? []) {
+    const modules: unknown = course.modules;
+    if (!Array.isArray(modules) || !modules.every(module =>
+      isRecord(module) && typeof module.id === "string" && module.id.trim() !== "" &&
+      typeof module.name === "string")) {
+      throw new Error("This backup has an invalid course module collection. Keep the original file.");
+    }
+  }
+  // Tracker paths are consumed as strings by the scope tree. Preserve legacy
+  // grouping strings verbatim, but refuse records without any usable segment.
+  for (const item of (data.tracker as Record<string, unknown>[] | undefined) ?? []) {
+    const path: unknown = item.path;
+    if (typeof path !== "string" || !path.split("/").some(part => part.trim() !== "")) {
+      throw new Error("This backup has an invalid Course Tracker path. Keep the original file.");
+    }
+  }
+  return version === undefined ? 0 : version;
+}
+
+function workspaceAdmissionReceipt(payload: Record<string, unknown>): { workspaceAdmissionFailed?: true } {
+  try {
+    // Exercise the same reader as restoration, including ordered-question
+    // content and migrations. Work on serialized workspace metadata so the
+    // dry run cannot change the raw recovery copy. Embedded binary payloads
+    // are validated separately and are not consumed by parseImport.
+    parseImport(JSON.stringify({ ...payload, [ATTACHMENT_EXPORT_KEY]: undefined }));
+    return {};
+  } catch {
+    // Preserve the raw recovery copy, not a normalized substitute.
+    return { workspaceAdmissionFailed: true };
+  }
+}
+
+export function parseImport(text: string): NoctyriumState {
+  const data = JSON.parse(text);
+  const importedSchemaVersion = assertPortableWorkspaceAdmission(data);
   const profile = data.profile && typeof data.profile === "object"
     ? data.profile as Record<string, unknown>
     : {};
@@ -369,7 +528,6 @@ export function parseImport(text: string): NoctyriumState {
   const activeFocus = focusOption(activeFocusId);
   const educationTrack = resolveTrack(typeof profile.educationTrack === "string" ? profile.educationTrack : undefined).id;
 
-  const importedSchemaVersion = typeof data.schemaVersion === "number" ? data.schemaVersion : 0;
   return {
     schemaVersion: SCHEMA_VERSION,
     profile: {

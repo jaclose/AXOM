@@ -7,6 +7,89 @@ import { buildQuizPool } from "./quiz";
 import { DEFAULT_JOURNAL_NOTEBOOK } from "./journalNotebook";
 
 describe("portable backup safety", () => {
+  it.each([
+    ["tasks", {}], ["courses", "bad"], ["questions", [null]],
+    ["journal", [42]], ["documents", null], ["dayPlans", [[]]],
+    ["savedQuestionFilters", false], ["dailyWordPuzzles", ["bad"]],
+  ])("rejects an explicit malformed %s collection before normalization", (key, value) => {
+    for (const schemaVersion of [undefined, SCHEMA_VERSION]) {
+      expect(() => parseImport(JSON.stringify({ terms: [], schemaVersion, [String(key)]: value })))
+        .toThrow(`invalid workspace collection (${key})`);
+    }
+  });
+
+  it.each([
+    undefined, null, {}, false, "bad", [null], [[]], [{}],
+    [{ id: "", name: "NB1" }], [{ id: " ", name: "NB1" }],
+    [{ id: 42, name: "NB1" }], [{ id: "m1" }],
+    [{ id: "m1", name: null }], [{ id: "m1", name: 42 }],
+    [{ id: "m1", name: "NB1" }, {}],
+  ].map(modules => ({ modules })))("rejects malformed course modules %j", ({ modules }) => {
+    for (const schemaVersion of [undefined, 31, SCHEMA_VERSION]) {
+      const course = { ...makeSeed().courses[0], modules };
+      expect(() => parseImport(JSON.stringify({ terms: [], schemaVersion, courses: [course] })))
+        .toThrow("invalid course module collection");
+    }
+  });
+
+  it("preserves valid module identifiers, names and empty courses through portable admission", () => {
+    const seed = makeSeed();
+    seed.courses[0].modules = [{ id: "m1", name: "NB1" }, { id: "m2", name: "" }];
+    const populated = parseImport(JSON.stringify(toPortableState(seed)));
+    expect(populated.courses).toEqual(seed.courses);
+    seed.courses[0].modules = [];
+    expect(parseImport(JSON.stringify(toPortableState(seed))).courses).toEqual(seed.courses);
+    expect(parseImport(JSON.stringify({ terms: [] })).courses).toEqual([]);
+  });
+
+  it.each([undefined, null, 42, false, {}, [], "", "  ", "/", " / / "].map(path => ({ path })))(
+    "rejects unusable tracker paths %j before projection", ({ path }) => {
+      for (const schemaVersion of [undefined, 31, SCHEMA_VERSION]) {
+        const tracker = [{ id: "invalid-tracker", path, label: "Retain original" }];
+        expect(() => parseImport(JSON.stringify({ terms: [], schemaVersion, tracker })))
+          .toThrow("invalid Course Tracker path");
+      }
+    },
+  );
+
+  it.each(["T2/NB3/Lectures", "Personal reading", " T2 / NB3 ", "T2//NB3"])(
+    "preserves the exact usable tracker path %s, including legacy formatting", path => {
+      const seed = makeSeed();
+      const tracker = [{ ...seed.tracker[0], path }];
+      expect(parseImport(JSON.stringify({ terms: [], tracker })).tracker).toEqual(tracker);
+    },
+  );
+
+  it("accepts omitted and empty legacy tracker collections", () => {
+    expect(parseImport(JSON.stringify({ terms: [] })).tracker).toEqual([]);
+    expect(parseImport(JSON.stringify({ terms: [], tracker: [] })).tracker).toEqual([]);
+  });
+
+  it("continues to accept omitted legacy record collections and valid arrays", () => {
+    expect(parseImport(JSON.stringify({ terms: [] })).tasks).toEqual([]);
+    const seed = makeSeed();
+    const restored = parseImport(JSON.stringify(toPortableState(seed)));
+    expect(restored.terms).toEqual(seed.terms);
+    expect(restored.tasks).toEqual(seed.tasks);
+  });
+
+  it.each([SCHEMA_VERSION + 1, SCHEMA_VERSION + 100])("rejects future workspace schema %s without projecting it to the current schema", (schemaVersion) => {
+    const portable = { ...toPortableState(makeSeed()), schemaVersion, futureOnlyRecord: { retained: "original bytes" } };
+    expect(() => parseImport(JSON.stringify(portable))).toThrow("newer workspace schema");
+  });
+
+  it.each([null, "35", "36", true, -1, 35.5, Number.MAX_SAFE_INTEGER + 1, {}, []])("rejects malformed explicit workspace schema %j", (schemaVersion) => {
+    expect(() => parseImport(JSON.stringify({ terms: [], schemaVersion }))).toThrow("invalid workspace schema version");
+  });
+
+  it.each([undefined, 0, 31, SCHEMA_VERSION])("still restores supported workspace schema %s", (schemaVersion) => {
+    const seed = makeSeed();
+    const restored = parseImport(JSON.stringify({ ...toPortableState(seed), schemaVersion }));
+    expect(restored.schemaVersion).toBe(SCHEMA_VERSION);
+    expect(restored.terms).toEqual(seed.terms);
+  });
+
+
   it("round-trips exact learner method descriptions, timing and every preference layer", () => {
     const state = makeSeed();
     const original = "  Exact original words\n".repeat(50);
@@ -463,6 +546,183 @@ describe("portable backup safety", () => {
     expect(merged.questions).toHaveLength(2);
     expect(merged.questions.find((question) => question.id === "q1")?.stem).toBe("Current stem");
     expect(merged.questions.find((question) => question.id === "q2")?.stem).toBe("New question");
+  });
+
+
+
+  it.each([
+    ["tasks", "id"], ["logs", "id"], ["dayPlans", "dayKey"], ["dailyArchives", "date"],
+  ] as const)("refuses noncanonical record identities in %s without aliasing or mutation", (collection, identity) => {
+    const parse = (records: Array<Record<string, unknown>>) =>
+      parseImport(JSON.stringify({ terms: [], [collection]: records }));
+    const valid = { [identity]: "1", updatedAt: "2026-11-25T00:00:00Z", value: "valid" };
+    for (const bad of [1, 0, true, false, {}, [], ["1"], " ", "\t", " 1", "1 ", "\u00a0"]) {
+      const malformed = { [identity]: bad, updatedAt: "2026-11-26T00:00:00Z", value: "malformed" };
+      for (const [left, right] of [
+        [[valid], [malformed]], [[malformed], [valid]],
+        [[], [valid, malformed]], [[], [malformed, valid]],
+        [[valid, malformed], []], [[malformed, valid], []], [[], [malformed]],
+      ]) {
+        // Raw local state may predate parser admission; retain the merge defense.
+        const local = Object.assign(parse([]), { [collection]: left });
+        const imported = Object.assign(parse([]), { [collection]: right });
+        const snapshot = JSON.stringify([local, imported]);
+        expect(() => mergeStates(local, imported)).toThrow("invalid or noncanonical record identity");
+        expect(JSON.stringify([local, imported])).toBe(snapshot);
+      }
+    }
+  });
+
+  it.each([
+    ["tasks", "id"], ["logs", "id"], ["dayPlans", "dayKey"], ["dailyArchives", "date"],
+  ] as const)("refuses malformed %s identity at common portable admission", (collection, identity) => {
+    const valid = { [identity]: "1", value: "valid" };
+    for (const schemaVersion of [undefined, 31, SCHEMA_VERSION]) {
+      for (const bad of [1, 0, true, false, {}, [], ["1"], " ", "\t", " 1", "1 ", "\u00a0"]) {
+        const malformed = { [identity]: bad, value: "malformed" };
+        for (const records of [[malformed], [valid, malformed], [malformed, valid]]) {
+          const raw = JSON.stringify({ terms: [], schemaVersion, [collection]: records });
+          expect(() => parseImport(raw)).toThrow(`invalid or noncanonical record identity (${collection})`);
+        }
+      }
+      const records = [valid, { [identity]: "01" }, { [identity]: "a b" },
+        { [identity]: "A" }, { [identity]: "a" }, {}, { [identity]: null }, { [identity]: "" }];
+      expect(parseImport(JSON.stringify({ terms: [], schemaVersion, [collection]: records }))[collection]).toEqual(records);
+    }
+  });
+
+  it.each([
+    ["tasks", "id"], ["logs", "id"], ["dayPlans", "dayKey"], ["dailyArchives", "date"],
+  ] as const)("preserves exact string identities and legacy unkeyed records in %s", (collection, identity) => {
+    const parse = (records: Array<Record<string, unknown>>) =>
+      parseImport(JSON.stringify({ terms: [], [collection]: records }));
+    const keyed = ["1", "01", "0", "a", "A", "a b"].map(value => ({ [identity]: value, value }));
+    const unkeyed = [{ value: "missing" }, { [identity]: null, value: "null" }, { [identity]: "", value: "empty" }];
+    const local = parse([...keyed.slice(0, 3), ...unkeyed]);
+    const imported = parse([...keyed.slice(3), ...unkeyed]);
+    const snapshot = JSON.stringify([local, imported]);
+    expect(mergeStates(local, imported)[collection]).toEqual([...keyed.slice(3), ...keyed.slice(0, 3), ...unkeyed, ...unkeyed]);
+    expect(mergeStates(imported, local)[collection]).toEqual([...keyed, ...unkeyed, ...unkeyed]);
+    expect(JSON.stringify([local, imported])).toBe(snapshot);
+  });
+
+  it.each([
+    ["tasks", "id"], ["logs", "id"], ["dayPlans", "dayKey"], ["dailyArchives", "date"],
+  ] as const)("orders explicit timestamp instants in %s without changing the stored representation", (collection, identity) => {
+    const parse = (records: Array<Record<string, unknown>>) =>
+      parseImport(JSON.stringify({ terms: [], [collection]: records }));
+    const pairs = [
+      ["2026-11-25T05:30:00Z", "2026-11-25T01:00:00-05:00"],
+      ["2026-11-25T05:30:00.1234Z", "2026-11-25T05:30:00.123456Z"],
+      ["2026-11-25T05:30:00Z", "2026-11-25T05:30:00.1Z"],
+      ["2026-11-25T03:30:00Z", "2026-11-24T23:30:00-05:00"],
+      [undefined, "2026-11-25T05:30:00Z"],
+    ] as const;
+    for (const [earlier, later] of pairs) {
+      const older = { [identity]: "fixture", ...(earlier === undefined ? {} : { updatedAt: earlier }), value: "old" };
+      const newer = { [identity]: "fixture", updatedAt: later, value: "new" };
+      for (const ordered of [[older, newer], [newer, older]]) {
+        const local = parse([ordered[0]]);
+        const imported = parse([ordered[1]]);
+        const duplicates = parse(ordered);
+        const snapshot = JSON.stringify([local, imported, duplicates]);
+        expect(mergeStates(local, imported)[collection]).toEqual([newer]);
+        expect(mergeStates(parse([]), duplicates)[collection]).toEqual([newer]);
+        expect(mergeStates(duplicates, parse([]))[collection]).toEqual([newer]);
+        expect(JSON.stringify([local, imported, duplicates])).toBe(snapshot);
+      }
+    }
+  });
+
+  it.each([
+    ["tasks", "id"], ["logs", "id"], ["dayPlans", "dayKey"], ["dailyArchives", "date"],
+  ] as const)("handles equivalent instants and structural equality in %s", (collection, identity) => {
+    const parse = (records: Array<Record<string, unknown>>) =>
+      parseImport(JSON.stringify({ terms: [], [collection]: records }));
+    const first = { [identity]: "fixture", updatedAt: "2026-11-25T05:30:00.100Z", value: { a: 1, b: { x: 2, y: 3 } } };
+    const reordered = { value: { b: { y: 3, x: 2 }, a: 1 }, updatedAt: first.updatedAt, [identity]: "fixture" };
+    const conflict = { ...first, updatedAt: "2026-11-25T00:30:00.1-05:00", value: "different" };
+    for (const ordered of [[first, reordered], [reordered, first]]) {
+      expect(mergeStates(parse([]), parse(ordered))[collection]).toEqual([first]);
+    }
+    for (const ordered of [[first, conflict], [conflict, first]]) {
+      expect(mergeStates(parse([ordered[0]]), parse([ordered[1]]))[collection]).toEqual([ordered[0]]);
+      const duplicates = parse(ordered);
+      const snapshot = JSON.stringify(duplicates);
+      expect(() => mergeStates(parse([]), duplicates)).toThrow("conflicting records with the same identity and timestamp");
+      expect(() => mergeStates(duplicates, parse([]))).toThrow("conflicting records with the same identity and timestamp");
+      expect(JSON.stringify(duplicates)).toBe(snapshot);
+    }
+    const arrays = [{ ...first, value: [1, 2] }, { ...first, value: [2, 1] }];
+    expect(() => mergeStates(parse([]), parse(arrays))).toThrow("conflicting records with the same identity and timestamp");
+  });
+
+  it.each([
+    ["tasks", "id"], ["logs", "id"], ["dayPlans", "dayKey"], ["dailyArchives", "date"],
+  ] as const)("refuses incomparable competing timestamps in %s without dropping legacy records", (collection, identity) => {
+    const parse = (records: Array<Record<string, unknown>>) =>
+      parseImport(JSON.stringify({ terms: [], [collection]: records }));
+    const good = { [identity]: "fixture", updatedAt: "2026-11-25T05:30:00Z", value: "valid" };
+    for (const invalid of ["2026-11-25T05:30:00", "2026-02-30T00:00:00Z", "2026-11-25", "bad", 42,
+      "2026-11-25T24:00:00Z", "2026-11-25T05:30:00+99:00", "2026-11-25T05:30:00Z\n", "2025-02-29T00:00:00Z"]) {
+      const bad = { ...good, updatedAt: invalid, value: "legacy" };
+      expect(mergeStates(parse([]), parse([bad]))[collection]).toEqual([bad]);
+      expect(mergeStates(parse([]), parse([bad, { ...bad }]))[collection]).toEqual([bad]);
+      for (const ordered of [[bad, good], [good, bad]]) {
+        const local = parse([ordered[0]]);
+        const imported = parse([ordered[1]]);
+        const snapshot = JSON.stringify([local, imported]);
+        expect(() => mergeStates(local, imported)).toThrow("invalid or unzoned timestamp");
+        expect(() => mergeStates(parse([]), parse(ordered))).toThrow("invalid or unzoned timestamp");
+        expect(JSON.stringify([local, imported])).toBe(snapshot);
+      }
+    }
+  });
+
+  it.each([
+    ["tasks", "id"], ["logs", "id"], ["dayPlans", "dayKey"], ["dailyArchives", "date"],
+  ] as const)("resolves same-side duplicate chronology in %s before comparing workspaces", (collection, identity) => {
+    const record = (value: string, updatedAt: string) => ({ [identity]: "fixture", value, updatedAt });
+    const older = record("older", "2026-11-24T00:00:00Z");
+    const middle = record("middle", "2026-11-25T00:00:00Z");
+    const latest = record("latest", "2026-11-26T00:00:00Z");
+    const parse = (records: Array<Record<string, unknown>>) =>
+      parseImport(JSON.stringify({ terms: [], [collection]: records }));
+    for (const records of [[latest, older], [older, latest]]) {
+      const local = parse([middle]);
+      const imported = parse(records);
+      const snapshot = JSON.stringify([local, imported]);
+      expect(mergeStates(local, imported)[collection]).toEqual([latest]);
+      expect(mergeStates(imported, local)[collection]).toEqual([latest]);
+      expect(mergeStates(parse([]), imported)[collection]).toEqual([latest]);
+      expect(JSON.stringify([local, imported])).toBe(snapshot);
+    }
+    expect(mergeStates(parse([latest]), parse([{ ...latest, value: "other side" }]))[collection]).toEqual([latest]);
+    expect(mergeStates(parse([]), parse([latest, { ...latest }]))[collection]).toEqual([latest]);
+    const unkeyed = { value: "legacy" };
+    const distinct = { ...older, [identity]: "other" };
+    expect(mergeStates(parse([distinct, unkeyed]), parse([latest, unkeyed]))[collection])
+      .toEqual([latest, distinct, unkeyed, unkeyed]);
+  });
+
+  it.each([
+    ["tasks", "id"], ["logs", "id"], ["dayPlans", "dayKey"], ["dailyArchives", "date"],
+  ] as const)("refuses ambiguous latest duplicates in %s without changing inputs", (collection, identity) => {
+    const first = { [identity]: "fixture", updatedAt: "2026-11-25T00:00:00Z", value: "first" };
+    const second = { ...first, value: "second" };
+    const newest = { ...first, updatedAt: "2026-11-26T00:00:00Z", value: "newest" };
+    const parse = (records: Array<Record<string, unknown>>) =>
+      parseImport(JSON.stringify({ terms: [], [collection]: records }));
+    for (const records of [[first, second], [second, first]]) {
+      const local = parse([]);
+      const imported = parse(records);
+      const snapshot = JSON.stringify([local, imported]);
+      expect(() => mergeStates(local, imported)).toThrow("conflicting records with the same identity and timestamp");
+      expect(() => mergeStates(imported, local)).toThrow("conflicting records with the same identity and timestamp");
+      expect(JSON.stringify([local, imported])).toBe(snapshot);
+      expect(mergeStates(local, parse([...records, newest]))[collection]).toEqual([newest]);
+      expect(mergeStates(local, parse([newest, ...records]))[collection]).toEqual([newest]);
+    }
   });
 
   it("keeps unlocks and the selected blueprint lane through export and import", () => {

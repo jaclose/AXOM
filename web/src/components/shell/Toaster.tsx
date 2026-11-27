@@ -2,7 +2,7 @@
 // on phones). Mounted once at the app root. Placement and light-theme colors
 // are in components.css ("Notification layer").
 import { CheckCircle2, Info, AlertTriangle, X, ArrowRight } from "lucide-react";
-import { useToasts, type Toast } from "../../lib/toast";
+import { useToasts, type Toast, type ToastAction } from "../../lib/toast";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { useReducedMotion } from "../../lib/motion";
 import { useExitingList } from "../../lib/useExitingList";
@@ -31,7 +31,7 @@ export function Toaster() {
     <div className="toast-stack" role="region" aria-label="Notifications">
       {entries.map(({ item: toast, leaving }) => {
         const Icon = ICON[toast.tone];
-        const actions = toast.actions?.length
+        const actions: ToastAction[] = toast.actions?.length
           ? toast.actions
           : toast.actionLabel && (toast.href || toast.onAction)
             ? [{ label: toast.actionLabel, href: toast.href, onAction: toast.onAction }]
@@ -64,7 +64,7 @@ export function Toaster() {
                       className="toast-action"
                       href={action.href}
                       key={`${action.label}-${index}`}
-                      onClick={() => { action.onAction?.(); dismiss(toast.id); }}
+                      onClick={() => { action.onAction?.(); if (!action.keepOpen) dismiss(toast.id); }}
                     >
                       {action.label} <ArrowRight size={ICON_SIZE.body} aria-hidden="true" />
                     </a>
@@ -73,7 +73,8 @@ export function Toaster() {
                       className="toast-action"
                       type="button"
                       key={`${action.label}-${index}`}
-                      onClick={() => { action.onAction?.(); dismiss(toast.id); }}
+                      aria-disabled={action.disabled || undefined}
+                      onClick={() => { if (action.disabled) return; action.onAction?.(); if (!action.keepOpen) dismiss(toast.id); }}
                     >
                       {action.label} <ArrowRight size={ICON_SIZE.body} aria-hidden="true" />
                     </button>

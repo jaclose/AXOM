@@ -7,6 +7,10 @@ export type ToastTone = "info" | "success" | "warn";
 
 export interface ToastAction {
   label: string;
+  /** Keep a sticky recovery notice until the user explicitly dismisses it. */
+  keepOpen?: boolean;
+  /** Button actions can remain focusable while their operation is pending. */
+  disabled?: boolean;
   href?: string;
   onAction?: () => void;
 }
