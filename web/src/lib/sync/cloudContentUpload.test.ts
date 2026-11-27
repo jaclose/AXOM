@@ -18,6 +18,15 @@ function storageClient(upload: (...args: unknown[]) => unknown, download: (...ar
   return { storage: { from: () => ({ upload, download }) } } as unknown as SupabaseClient;
 }
 
+// A successful mock storage transfer must expose the same immutable bytes.
+function readback(records: ContentUpload[]) {
+  const byHash = new Map(records.map(record => [record.reference.hash, record.content]));
+  return vi.fn(async (path: unknown) => {
+    const content = byHash.get(String(path).split("/").at(-1) ?? "");
+    return content === undefined ? { data: null, error: new Error("Synthetic missing object") } : { data: new Blob([content]), error: null };
+  });
+}
+
 const guard = vi.fn(async () => undefined);
 beforeEach(() => { clearCloudContentCache(); guard.mockClear(); });
 
@@ -35,7 +44,8 @@ describe("cloud content upload", () => {
       active -= 1;
       return { error: null };
     });
-    const client = storageClient(upload, vi.fn());
+    const download = readback(records);
+    const client = storageClient(upload, download);
     const progress = vi.fn();
     const pending = uploadCloudContent(client, "account-a", records, [], guard, progress);
     await vi.waitFor(() => expect(upload).toHaveBeenCalledTimes(8));
@@ -45,6 +55,7 @@ describe("cloud content upload", () => {
     await pending;
     expect(upload).toHaveBeenCalledTimes(records.length);
     expect(peak).toBe(8);
+    expect(download).toHaveBeenCalledTimes(records.length);
     expect(progress).toHaveBeenLastCalledWith(records.length, records.length);
   });
 
@@ -53,7 +64,8 @@ describe("cloud content upload", () => {
     const second = await record("second");
     const twin = { ...first, reference: { ...first.reference, id: "twin" } };
     const upload = vi.fn(async () => ({ error: null }));
-    const client = storageClient(upload, vi.fn());
+    const download = readback([first, second]);
+    const client = storageClient(upload, download);
     await uploadCloudContent(client, "account-a", [first, second, twin], [], guard);
     expect(upload).toHaveBeenCalledTimes(2);
     await uploadCloudContent(client, "account-a", [first, second], [], guard);
@@ -63,6 +75,7 @@ describe("cloud content upload", () => {
     clearCloudContentCache();
     await uploadCloudContent(client, "account-a", [first], [], guard);
     expect(upload).toHaveBeenCalledTimes(5);
+    expect(download).toHaveBeenCalledTimes(5);
   });
 
   it("caches a conflict only after downloading and hashing the existing bytes", async () => {
@@ -84,7 +97,8 @@ describe("cloud content upload", () => {
     const records = await Promise.all(Array.from({ length: 12 }, (_, index) => record(String(index))));
     const resolveUpload: Array<(value: { error: Error | null }) => void> = [];
     const upload = vi.fn(() => new Promise<{ error: Error | null }>(resolve => { resolveUpload.push(resolve); }));
-    const client = storageClient(upload, vi.fn());
+    const download = readback(records);
+    const client = storageClient(upload, download);
     let finished = false;
     const result = uploadCloudContent(client, "account-a", records, [], guard)
       .then(() => "resolved", (error: Error) => error.message)
@@ -100,5 +114,6 @@ describe("cloud content upload", () => {
     upload.mockImplementation(async () => ({ error: null }));
     await uploadCloudContent(client, "account-a", records, [], guard);
     expect(upload).toHaveBeenCalledTimes(13);
+    expect(download).toHaveBeenCalledTimes(12);
   });
 });

@@ -181,13 +181,13 @@ export async function uploadCloudContent(client: SupabaseClient, userId: string,
         const path = `${userId}/${reference.hash}`;
         const bucket = client.storage.from(CONTENT_BUCKET);
         const result = await bucket.upload(path, new Blob([content], { type: "text/plain" }), { contentType: "text/plain", upsert: false, cacheControl: "31536000" });
-        if (result.error) {
-          if (!("statusCode" in result.error) || String(result.error.statusCode) !== "409") throw result.error;
-          await assertCurrent();
-          assertGeneration();
-          const existing = await bucket.download(path);
-          if (existing.error || !existing.data || existing.data.size !== reference.byteSize || await sha256(new Uint8Array(await existing.data.arrayBuffer())) !== reference.hash) throw new Error("A source file could not be verified in your account.");
-        }
+        if (result.error && (!("statusCode" in result.error) || String(result.error.statusCode) !== "409")) throw result.error;
+        // An upload acknowledgement (including a conflict) is not byte proof.
+        // Verify only fresh objects, never re-download historical exact receipts.
+        await assertCurrent();
+        assertGeneration();
+        const existing = await bucket.download(path);
+        if (existing.error || !existing.data || existing.data.size !== reference.byteSize || await sha256(new Uint8Array(await existing.data.arrayBuffer())) !== reference.hash) throw new Error("A source file could not be verified in your account.");
         await assertCurrent();
         assertGeneration();
         confirmed.add(privateReceiptKey(reference));

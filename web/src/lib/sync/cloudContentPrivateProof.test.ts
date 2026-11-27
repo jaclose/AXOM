@@ -98,7 +98,7 @@ describe("private source object proof", () => {
     clearCloudContentCache();
     f.upload.mockResolvedValueOnce({ error: { statusCode: "409" } });
     await f.push(A);
-    expect(f.download).toHaveBeenCalledTimes(2);
+    expect(f.download).toHaveBeenCalledTimes(3);
     await f.push(A);
     expect(f.upload).toHaveBeenCalledTimes(4);
   });
@@ -214,7 +214,7 @@ describe("private digest size agreement", () => {
     const object: ContentUpload = { reference: { ...f.reference, byteSize: f.reference.byteSize + 1 }, content: f.packed, canonicalText: "", canonicalHash: f.reference.hash };
     await expect(uploadCloudContent(client, A, [object], [], guard)).rejects.toThrow(/could not be verified/);
     expect(f.upload).toHaveBeenCalledTimes(1);
-    expect(f.download).not.toHaveBeenCalled();
+    expect(f.download).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -303,5 +303,68 @@ describe("fresh private upload byte proof", () => {
     await result;
     await f.push(A);
     expect(f.upload).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("fresh private upload readback", () => {
+  it.each(["missing", "same-size wrong bytes", "read denied"] as const)("refuses 2xx with %s and retries without a receipt", async failure => {
+    const f = await fixture();
+    const path = A + "/" + f.reference.hash;
+    const before = JSON.stringify(f.state);
+    if (failure === "missing") {
+      f.upload.mockResolvedValueOnce({ error: null });
+    } else if (failure === "same-size wrong bytes") {
+      const wrong = new Blob([new Uint8Array(f.reference.byteSize)]);
+      expect(wrong.size).toBe(f.reference.byteSize);
+      f.upload.mockImplementationOnce(async () => {
+        f.blobs.set(path, wrong);
+        return { error: null };
+      });
+    } else {
+      f.download.mockResolvedValueOnce({ data: null, error: new Error("Synthetic transient read denial") });
+    }
+    await expect(f.push(A)).rejects.toThrow(/could not be verified/);
+    expect(f.upload).toHaveBeenCalledTimes(1);
+    expect(f.download).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(f.state)).toBe(before);
+    // Model a subsequent successful immutable transfer, or an existing intact object.
+    if (failure === "same-size wrong bytes") {
+      // Conflict with a corrupted object must also refuse, not overwrite it.
+      f.upload.mockResolvedValueOnce({ error: { statusCode: "409" } });
+      await expect(f.push(A)).rejects.toThrow(/could not be verified/);
+      expect(f.blobs.get(path)?.size).toBe(f.reference.byteSize);
+      expect(f.upload).toHaveBeenCalledTimes(2);
+      return;
+    }
+    if (failure === "read denied") f.upload.mockResolvedValueOnce({ error: { statusCode: "409" } });
+    await f.push(A);
+    expect(f.upload).toHaveBeenCalledTimes(2);
+    expect(f.download).toHaveBeenCalledTimes(2);
+    await f.push(A);
+    expect(f.upload).toHaveBeenCalledTimes(2);
+    expect(f.download).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects an A-B-A reset during successful upload readback and never caches it", async () => {
+    const f = await fixture();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    f.download.mockImplementationOnce(async () => {
+      await gate;
+      return { data: new Blob([f.packed]), error: null };
+    });
+    const pending = f.push(A);
+    const result = expect(pending).rejects.toThrow(/cache changed/);
+    await vi.waitFor(() => expect(f.download).toHaveBeenCalledTimes(1));
+    clearCloudContentCache();
+    clearCloudContentCache();
+    release();
+    await result;
+    f.upload.mockResolvedValueOnce({ error: { statusCode: "409" } });
+    await f.push(A);
+    expect(f.upload).toHaveBeenCalledTimes(2);
+    expect(f.download).toHaveBeenCalledTimes(2);
+    await f.push(A);
+    expect(f.download).toHaveBeenCalledTimes(2);
   });
 });
