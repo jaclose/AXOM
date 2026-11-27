@@ -188,7 +188,7 @@ describe("publishing a prepared library", () => {
     expect(mocks.batch).not.toHaveBeenCalled();
   });
 
-  it("explains when a bank's unsupported original stays on this device", async () => {
+  it("explains an omitted bank original without claiming its local availability", async () => {
     const bankSource = fixture.catalog.sources.find(source => source.name === "goer-pq.pdf")!;
     const original = bankSource.originalFile!;
     bankSource.originalFile = original.replace(/\.pdf$/, ".pptx");
@@ -200,7 +200,7 @@ describe("publishing a prepared library", () => {
     fireEvent.click(screen.getByRole("button", { name: /Check 2 courses/ }));
     const goer = screen.getByText("GOER").closest("article")!;
     expect(await within(goer).findByText("Ready to publish")).toBeTruthy();
-    expect(within(goer).getByText(/1 source file will stay on this device because the file type or course size limit prevents upload/)).toBeTruthy();
+    expect(within(goer).getByText(/1 source file will not be uploaded because the file type or course size limit prevents upload\. Availability of these omitted files has not been verified/)).toBeTruthy();
     expect(mocks.batch).not.toHaveBeenCalled();
   });
 

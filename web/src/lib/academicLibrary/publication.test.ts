@@ -460,6 +460,60 @@ describe("publication reviewed bank identity", () => {
     expect(refusedOriginals).toBe(1);
   });
 
+  it.each(["row", "pointer", "extension", "checksum", "duplicate"] as const)(
+    "rejects omitted optional-source %s drift in the actual uploader size retry", async change => {
+      const { fixture, inventory, course } = await reviewedFixture();
+      const optional = fixture.catalog.sources.find(item => course.optionalSourceIds.includes(item.id))!;
+      const originalPath = optional.originalFile!;
+      const original = fixture.files.get(originalPath)!.slice();
+      let originalReads = 0;
+      const read = async (file: string) => {
+        if (file === originalPath) {
+          originalReads += 1;
+          switch (change) {
+            case "row": fixture.catalog.sources = fixture.catalog.sources.filter(item => item.id !== optional.id); break;
+            case "pointer": delete optional.originalFile; break;
+            case "extension": optional.originalFile = originalPath.replace(/\.pdf$/, ".txt"); break;
+            case "checksum": optional.checksum = "d".repeat(64); break;
+            case "duplicate": fixture.catalog.sources.push({ ...optional }); break;
+          }
+          fixture.files.set("catalog.json", new TextEncoder().encode(JSON.stringify(fixture.catalog)));
+          throw new Error("exceeds the supported upload size");
+        }
+        return fixture.read(file);
+      };
+      const { jobs, notes } = publicationJobs(read, inventory, [course]);
+      await expect(jobs[0].prepare()).rejects.toThrow(/library changed while publishing|reviewed original file coverage changed|duplicate source identities/);
+      expect(originalReads).toBe(1);
+      expect(notes.keptLocal.has(course.catalogId)).toBe(false);
+      expect(fixture.files.get(originalPath)).toEqual(original);
+    },
+  );
+
+  it("reports intentional omission without rereading unavailable optional bytes", async () => {
+    const { fixture, inventory, course } = await reviewedFixture();
+    const optional = fixture.catalog.sources.find(item => course.optionalSourceIds.includes(item.id))!;
+    const originalPath = optional.originalFile!;
+    let originalReads = 0;
+    const read = async (file: string) => {
+      if (file === originalPath) {
+        originalReads += 1;
+        // Simulate an external disappearance during the first size refusal.
+        fixture.files.delete(originalPath);
+        throw new Error("exceeds the supported upload size");
+      }
+      return fixture.read(file);
+    };
+    const { jobs, notes } = publicationJobs(read, inventory, [course]);
+    const upload = await jobs[0].prepare();
+    expect(originalReads).toBe(1);
+    expect(upload.files.some(file => file.path === originalPath)).toBe(false);
+    expect(upload.metadata.ready_questions).toBe(course.ready);
+    // This count denotes omission, not proof that the original is still local.
+    expect(notes.keptLocal.get(course.catalogId)).toBe(1);
+    expect(fixture.files.has(originalPath)).toBe(false);
+  });
+
   it("fails closed when the reviewed inventory has no bank digest", async () => {
     const { fixture, source, inventory, course } = await reviewedFixture();
     delete inventory.sources.find(item => item.id === source.id)!.bankIdentity;

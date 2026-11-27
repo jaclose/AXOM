@@ -192,6 +192,46 @@ describe("publication jobs", () => {
     expect(notes.failures.get(course.catalogId)).toMatch(/reviewed question package changed/);
   });
 
+  it.each(["row", "pointer", "extension", "checksum", "name", "duplicate", "linked"] as const)(
+    "refuses optional source %s drift between preflight and size fallback", async change => {
+      const changed = JSON.parse(JSON.stringify(catalog)) as typeof catalog;
+      const optional = changed.sources.find(source => source.id === "slides")!;
+      const driftRead = async (path: string) => path === "catalog.json"
+        ? new TextEncoder().encode(JSON.stringify(changed)) : read(path);
+      vi.mocked(prepareAcademicUpload).mockImplementation(afterBank(prepared()));
+      vi.mocked(preflightAcademicUpload).mockImplementationOnce(async () => {
+        switch (change) {
+          case "row": changed.sources = changed.sources.filter(source => source.id !== optional.id); break;
+          case "pointer": delete optional.originalFile; break;
+          case "extension": optional.originalFile = "sources/slides.txt"; break;
+          case "checksum": optional.checksum = "c".repeat(64); break;
+          case "name": optional.name = "changed.pdf"; break;
+          case "duplicate": changed.sources.push({ ...optional }); break;
+          case "linked": Object.assign(optional, { status: "duplicate-linked", duplicateOf: "bank" }); break;
+        }
+        throw new Error("This collection exceeds the supported upload size.");
+      });
+      const { jobs, notes } = publicationJobs(driftRead, inventory, [course]);
+      await expect(jobs[0].prepare()).rejects.toThrow(/library changed while publishing|reviewed original file coverage changed|duplicate source identities/);
+      expect(prepareAcademicUpload).toHaveBeenCalledTimes(2);
+      expect(preflightAcademicUpload).toHaveBeenCalledTimes(1);
+      expect(notes.keptLocal.has(course.catalogId)).toBe(false);
+      expect(notes.failures.has(course.catalogId)).toBe(true);
+    },
+  );
+
+  it("does not retain an old omission receipt after another preparation fails", async () => {
+    vi.mocked(prepareAcademicUpload)
+      .mockImplementationOnce(afterBank(new Error("This collection exceeds the supported upload size.")))
+      .mockImplementationOnce(afterBank(prepared()))
+      .mockImplementationOnce(afterBank(new Error("The library changed while publishing.")));
+    const { jobs, notes } = publicationJobs(read, inventory, [course]);
+    await jobs[0].prepare();
+    expect(notes.keptLocal.get(course.catalogId)).toBe(1);
+    await expect(jobs[0].prepare()).rejects.toThrow(/library changed/);
+    expect(notes.keptLocal.has(course.catalogId)).toBe(false);
+  });
+
   it("stops before preparing when publishing is cancelled", async () => {
     const controller = new AbortController();
     controller.abort();

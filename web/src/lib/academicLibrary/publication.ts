@@ -348,19 +348,21 @@ export interface CourseReaderOptions {
 export function courseLibraryReader(read: LibraryReader, inventory: PublicationInventory, course: PlannedCourse,
   options: CourseReaderOptions = {}): LibraryReader {
   const include = options.include ?? (() => true);
-  const includedIds = course.sourceIds.filter(include);
-  const ids = new Set(includedIds);
-  if (ids.size !== includedIds.length) throw new Error("The planned course contains duplicate source identities.");
+  // The reviewed plan is the admission boundary, even when a size retry
+  // intentionally omits original-only rows from the projected catalog.
+  const ids = new Set(course.sourceIds);
+  if (ids.size !== course.sourceIds.length) throw new Error("The planned course contains duplicate source identities.");
+  const includedIds = new Set(course.sourceIds.filter(include));
   const sources = inventory.sources.filter(source => ids.has(source.id)
     && source.status !== "duplicate-linked" && !source.duplicateOf)
     .sort((left, right) => left.checksum.localeCompare(right.checksum));
-  if (sources.length !== includedIds.length
+  if (sources.length !== ids.size
     || new Set(sources.map(source => source.id)).size !== sources.length
     || new Set(sources.map(source => source.checksum)).size !== sources.length)
     throw new Error("The planned course has missing or duplicate source identities. Review its source filing.");
   const reviewedBanks = new Map<string, string>();
   for (const source of sources) {
-    if (!source.hasBank) continue;
+    if (!includedIds.has(source.id) || !source.hasBank) continue;
     const identity = source.bankIdentity;
     if (!identity || !/^sha256:[a-f0-9]{64}$/.test(identity.digest)
       || (reviewedBanks.has(identity.path) && reviewedBanks.get(identity.path) !== identity.digest))
@@ -384,9 +386,11 @@ export function courseLibraryReader(read: LibraryReader, inventory: PublicationI
       const rows = new Map<string, CatalogSource>();
       const checksums = new Set<string>();
       for (const source of original.sources) {
-        if (!ids.has(source.id) || source.status === "duplicate-linked" || source.duplicateOf) continue;
+        if (!ids.has(source.id)) continue;
         if (rows.has(source.id) || checksums.has(source.checksum))
           throw new Error("The library contains duplicate source identities. Review its source filing.");
+        if (source.status === "duplicate-linked" || source.duplicateOf)
+          throw new Error("The library changed while publishing. Choose it again and review the plan.");
         rows.set(source.id, source);
         checksums.add(source.checksum);
       }
@@ -402,7 +406,7 @@ export function courseLibraryReader(read: LibraryReader, inventory: PublicationI
           throw new Error("The reviewed original file coverage changed while publishing. Choose the library again and review the plan.");
         return options.originals === false || (row.originalFile && !UPLOADABLE_ORIGINALS.has(extension))
           ? { ...row, originalFile: undefined } : row;
-      });
+      }).filter(row => includedIds.has(row.id));
       catalog = encode({ ...inventory.library, id: course.catalogId,
         templates: course.sections.map(section => ({ file: section.file, name: section.name, checksum: section.checksum })),
         sources: selected });
@@ -415,7 +419,7 @@ export function courseLibraryReader(read: LibraryReader, inventory: PublicationI
 const TOO_LARGE = /exceeds the supported upload size|1–1500 verified files/;
 
 export interface PublicationJobNotes {
-  /** Original files kept on this device so the course fits its size limit. */
+  /** Reviewed catalog originals omitted by type/size policy; their local bytes are not verified by omission. */
   keptLocal: Map<string, number>;
   /** Why a course could not be prepared, in the validator's own words. */
   failures: Map<string, string>;
@@ -432,6 +436,9 @@ export function publicationJobs(read: LibraryReader, inventory: PublicationInven
   const jobs = courses.map((course): AcademicBatchJob => ({
     key: course.catalogId,
     async prepare(signal) {
+      // A retry of this job must not expose an earlier preparation's receipt.
+      notes.keptLocal.delete(course.catalogId);
+      notes.failures.delete(course.catalogId);
       try {
         if (course.termBasis === "proposed") throw new Error("Confirm this course's term before publishing it.");
         const planTerm: AcademicPlanTerm | undefined = course.sections.length && course.termBasis !== "plan"
