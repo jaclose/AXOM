@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { QuestionSet } from "../../lib/library";
@@ -39,6 +39,8 @@ vi.mock("../../lib/ai", () => ({
   memoryHook: vi.fn(),
 }));
 vi.mock("../../lib/toast", () => ({ pushToast: vi.fn() }));
+const backup = vi.hoisted(() => ({ exportSavedWorkCopy: vi.fn() }));
+vi.mock("../../lib/backup", () => backup);
 
 const question: QuestionRecord = {
   id: "question-1",
@@ -116,6 +118,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.clearAllMocks();
   localStorage.clear();
   sessionStorage.clear();
@@ -1085,6 +1088,125 @@ describe("ExamRunner durable finalization", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
     expect(mocked.commitQuizRun).toHaveBeenCalledTimes(2);
     expect(mocked.commitQuizRun.mock.calls[1][0].session.id).toBe(mocked.commitQuizRun.mock.calls[0][0].session.id);
+    expect(localStorage.getItem(STORAGE_KEYS.quizActiveSession)).toBeNull();
+    confirm.mockRestore();
+  });
+
+  // The 27 Nov "Saving…" freeze (INC-04, fault F2): Exit block awaited a
+  // workspace write with no ceiling. A write that never settled left every
+  // control disabled and reading "Saving…", with no way out of the block.
+  it("F2: asks once instead of freezing when the exit save never settles", async () => {
+    setStore();
+    mocked.vaultFlush.mockReturnValue(new Promise<void>(() => {}));
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const onClose = vi.fn();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<ExamRunner mode="tutor" retakeIds={[question.id]} onClose={onClose} />);
+
+    await user.click(screen.getByRole("button", { name: "B. Beta" }));
+    await user.click(screen.getByRole("button", { name: "Check answer" }));
+    await user.click(screen.getByRole("button", { name: "Exit block" }));
+    expect(screen.getAllByRole("button", { name: "Saving…" }).length).toBeGreaterThan(0);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+
+    expect(screen.queryAllByRole("button", { name: "Saving…" })).toHaveLength(0);
+    const prompt = screen.getByRole("dialog", { name: /not saved yet/i });
+    expect(within(prompt).getByRole("button", { name: "Keep studying" })).toBeTruthy();
+    expect(within(prompt).getByRole("button", { name: "Download a copy" })).toBeTruthy();
+    await user.click(within(prompt).getByRole("button", { name: "Exit anyway" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    // Nothing confirmed the write, so the recovery copy stays for the next visit.
+    expect(localStorage.getItem(STORAGE_KEYS.quizActiveSession)).not.toBeNull();
+    confirm.mockRestore();
+  });
+
+  it("F2: keeps studying open when the finish save never settles", async () => {
+    setStore();
+    mocked.vaultFlush.mockReturnValue(new Promise<void>(() => {}));
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<ExamRunner mode="exam" retakeIds={[question.id]} onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "B. Beta" }));
+    await user.click(screen.getByRole("button", { name: "Submit & finish" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+
+    expect(screen.queryAllByRole("button", { name: "Saving…" })).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "Not saved yet · Retry" })).toBeTruthy();
+    expect((screen.getByRole("button", { name: "B. Beta" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: /exit/i }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByText("Block results")).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.quizActiveSession)).not.toBeNull();
+  });
+
+  it("F4: a slow finish save gives the block back, then says Saved once, without saving twice", async () => {
+    setStore();
+    let land!: () => void;
+    mocked.vaultFlush.mockReturnValue(new Promise<void>((resolve) => { land = resolve; }));
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<ExamRunner mode="exam" retakeIds={[question.id]} onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "B. Beta" }));
+    await user.click(screen.getByRole("button", { name: "Submit & finish" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(screen.getByRole("button", { name: "Not saved yet · Retry" })).toBeTruthy();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); land(); });
+
+    const saved = await screen.findByText(/This block is stored on this device now/);
+    expect(saved.closest('[role="status"]')?.textContent).toMatch(/^Saved\./);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(mocked.commitQuizRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps studying, or downloads a copy from memory, when an exit save is refused", async () => {
+    setStore();
+    mocked.vaultFlush.mockRejectedValueOnce(new Error("QuotaExceededError: synthetic refusal"));
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    render(<ExamRunner mode="exam" retakeIds={[question.id]} onClose={onClose} />);
+
+    await user.click(screen.getByRole("button", { name: "B. Beta" }));
+    await user.click(screen.getByRole("button", { name: "Exit block" }));
+
+    // A refusal asks at once; only an unanswered save waits for the ceiling.
+    const prompt = await screen.findByRole("dialog", { name: /not saved yet/i });
+    await user.click(within(prompt).getByRole("button", { name: "Download a copy" }));
+    expect(backup.exportSavedWorkCopy).toHaveBeenCalledWith(mocked.store);
+    expect(within(prompt).getByRole("status").textContent).toMatch(/copy of your work was downloaded/i);
+    await user.click(within(prompt).getByRole("button", { name: "Keep studying" }));
+
+    expect(screen.queryByRole("dialog", { name: /not saved yet/i })).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    expect((screen.getByRole("button", { name: "B. Beta" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByRole("button", { name: "Not saved yet · Retry" })).toBeTruthy();
+    confirm.mockRestore();
+  });
+
+  it("removes the recovery copy only when a save that was still running after Exit anyway lands", async () => {
+    setStore();
+    let land!: () => void;
+    mocked.vaultFlush.mockReturnValue(new Promise<void>((resolve) => { land = resolve; }));
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const onClose = vi.fn();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<ExamRunner mode="exam" retakeIds={[question.id]} onClose={onClose} />);
+
+    await user.click(screen.getByRole("button", { name: "B. Beta" }));
+    await user.click(screen.getByRole("button", { name: "Exit block" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    await user.click(within(screen.getByRole("dialog", { name: /not saved yet/i })).getByRole("button", { name: "Exit anyway" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    const runKeys = () => [...localValues.keys()].filter((key) => key.startsWith(`${STORAGE_KEYS.quizActiveSession}:run:`));
+    expect(runKeys()).toHaveLength(1);
+
+    await act(async () => { land(); });
+    await waitFor(() => expect(runKeys()).toHaveLength(0));
     expect(localStorage.getItem(STORAGE_KEYS.quizActiveSession)).toBeNull();
     confirm.mockRestore();
   });

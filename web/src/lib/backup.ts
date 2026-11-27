@@ -69,6 +69,22 @@ export function exportState(state: NoctyriumState) {
   });
 }
 
+/**
+ * A copy of the open workspace, made from memory, for when a save to this
+ * device is not confirmed. It never reads IndexedDB (the part that may have
+ * stopped answering), so images stay as references to this device's copies.
+ * It merges back through Settings like any backup and is not counted as a
+ * complete backup.
+ */
+export function exportSavedWorkCopy(state: NoctyriumState): void {
+  downloadBackupPayload({
+    _app: BRAND.productName,
+    _exported: new Date().toISOString(),
+    _backupScope: "saved-work",
+    ...toPortableState(state),
+  }, "saved-work");
+}
+
 export type BackupScope = "complete" | "saved-work";
 
 /** Intentional portable recovery resolves deferred content and includes verified

@@ -8,7 +8,7 @@ import { QuestionViewControls, QuestionViewFrame, useQuestionView } from "./Ques
 // every answer is recorded on the question for spaced retry.
 // ===========================================================================
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { BookOpenCheck, Check, ChevronLeft, Flag, ListPlus, Play, WandSparkles, Sparkles, Minus, RotateCcw, Timer, X } from "lucide-react";
+import { BookOpenCheck, Check, ChevronLeft, Download, Flag, ListPlus, Play, WandSparkles, Sparkles, Minus, RotateCcw, Timer, X } from "lucide-react";
 import { useStore } from "../../lib/store";
 import { STORAGE_KEYS } from "../../lib/brand";
 import {
@@ -54,6 +54,8 @@ import {
   flushLocalVaultWrites,
   getVaultWriteCheckpoint,
 } from "../../lib/localVault";
+import { isVaultWriteTimeout, withSaveCeiling } from "../../lib/saveCeiling";
+import { exportSavedWorkCopy } from "../../lib/backup";
 import {
   BLOCK_PRESETS, EXAM_SKINS, blockCounts, clearSuspendedBlock, formatClock, readSuspendedBlock, writeSuspendedBlock,
   type BlockPreset, type ExamSkin, type SuspendedBlock,
@@ -190,6 +192,16 @@ function anotherActiveQuiz(excludingKey: string): ActiveQuizSnapshot | undefined
     }
   } catch { /* no replacement is available */ }
   return undefined;
+}
+
+function readActiveQuizRun(runId: string): string | null {
+  try { return localStorage.getItem(activeQuizRunKey(runId)); } catch { return null; }
+}
+
+/** After an unconfirmed exit, remove the recovery copy only once the save has
+ * landed, and only if nothing (such as a resumed run) has rewritten it since. */
+function clearActiveQuizIfUnchanged(runId: string, expected: string | null): void {
+  if (readActiveQuizRun(runId) === expected) clearActiveQuiz(runId);
 }
 
 /** Remove only this run. If another tab has a different run, keep its legacy
@@ -441,8 +453,20 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   const [aiText, setAiText] = useState<string | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [editingMapping, setEditingMapping] = useState(false);
+  /** True only while a finish or exit waits for its save, never longer than UI_SAVE_CEILING_MS. */
   const [finalizing, setFinalizing] = useState(false);
   const [finalizeError, setFinalizeError] = useState<string>();
+  /** The final save landed after the ceiling had already given the block back. */
+  const [lateSaved, setLateSaved] = useState(false);
+  /** Leaving with unsaved work asks once: keep studying, download a copy, or exit anyway. */
+  const [leavePrompt, setLeavePrompt] = useState<{ durable?: Promise<void>; recoverable: boolean; copyNote?: string } | null>(null);
+  const finalGenerationRef = useRef(0);
+  const lastFinalActionRef = useRef<"finish" | "exit">("finish");
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   // --- Q2a player toolkit: reading scale (persisted device pref), calculator,
   // and scroll-to-top on advance. Strike-outs live in the block, per question.
@@ -875,39 +899,97 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     if (index > 0) showQuestion(index - 1);
   }
 
-  async function confirmFinalWorkspaceWrite(write: () => void, onDurable: () => void): Promise<void> {
+  /**
+   * Save a finish or an exit, then move on. Saving never blocks studying (D13):
+   * the controls wait for the save for at most UI_SAVE_CEILING_MS. A save that
+   * fails or is still running then gives every control back with an honest
+   * "Not saved yet · Retry". The answers stay open here and in the recovery
+   * copy, and a save that lands later turns the label into "Saved".
+   */
+  async function confirmFinalWorkspaceWrite(write: () => void, onDurable: () => void, action: "finish" | "exit"): Promise<void> {
     if (finalizingRef.current) return;
     finalizingRef.current = true;
     setFinalizing(true);
     setFinalizeError(undefined);
+    setLateSaved(false);
+    setLeavePrompt(null);
+    lastFinalActionRef.current = action;
+    const generation = ++finalGenerationRef.current;
     const checkpoint = getVaultWriteCheckpoint();
+    let durable: Promise<void> | undefined;
     try {
       // Both finalization actions below are one Zustand set(), so persist queues
       // one serialized workspace. Flush it, prove that exact next adapter write
       // started, then reject any failed write coalesced after the checkpoint.
       write();
-      await flushLocalVaultWrites();
-      assertVaultWrite(checkpoint + 1);
-      assertVaultWritesSince(checkpoint);
+      durable = flushLocalVaultWrites().then(() => {
+        assertVaultWrite(checkpoint + 1);
+        assertVaultWritesSince(checkpoint);
+      });
+      await withSaveCeiling(durable);
     } catch (error) {
-      const detail = error instanceof Error ? error.message : "The local workspace write could not be confirmed.";
+      const stillSaving = isVaultWriteTimeout(error);
+      const detail = stillSaving
+        ? "Saving is taking longer than usual; AXOM keeps trying in the background."
+        : error instanceof Error ? error.message : "The local workspace write could not be confirmed.";
       setFinalizeError(recoveryAvailableRef.current
         ? `Your answers are still open and recoverable. AXOM could not confirm the final save. ${detail}`
         : `Your answers remain open in this window, but AXOM could not create or update browser recovery. Keep this window open and retry. ${detail}`);
-      pushToast({
-        title: "Block is still open",
-        body: recoveryAvailableRef.current
-          ? "AXOM kept the recovery copy. Free browser storage if needed, then use the same finish or exit action again."
-          : "Browser recovery is unavailable. Keep this window open, free browser storage if needed, then retry the same finish or exit action.",
-        tone: "warn",
-      });
+      if (action === "finish") {
+        pushToast({
+          title: "Block is still open",
+          body: recoveryAvailableRef.current
+            ? "AXOM kept the recovery copy. Keep studying, or use the same finish action again."
+            : "Browser recovery is unavailable. Keep this window open, free browser storage if needed, then retry the same finish action.",
+          tone: "warn",
+        });
+      }
       finalizingRef.current = false;
       setFinalizing(false);
+      if (stillSaving && durable) {
+        void durable.then(() => {
+          if (!mountedRef.current || finalGenerationRef.current !== generation) return;
+          setFinalizeError(undefined);
+          setLateSaved(true);
+        }, () => { /* the unconfirmed state stays on screen */ });
+      }
+      if (action === "exit") setLeavePrompt({ durable, recoverable: recoveryAvailableRef.current });
       return;
     }
     finalizingRef.current = false;
     setFinalizing(false);
     onDurable();
+  }
+
+  /** Retry the finish or exit whose save is not confirmed. */
+  function retryFinalSave() {
+    if (lastFinalActionRef.current === "exit") void leaveBlock();
+    else void finishBlock();
+  }
+
+  function keepStudying() {
+    setLeavePrompt(null);
+  }
+
+  /** A copy from memory: it does not depend on the storage that did not confirm. */
+  function downloadWorkCopy() {
+    try {
+      exportSavedWorkCopy(s);
+      setLeavePrompt((current) => current && { ...current, copyNote: "A copy of your work was downloaded. Merge it from Settings if this device loses it." });
+    } catch {
+      setLeavePrompt((current) => current && { ...current, copyNote: "The copy could not be downloaded. Keep this window open and keep studying." });
+    }
+  }
+
+  /** Leave without a confirmed save. The recovery copy stays so the block can
+   * be resumed after a reload; it is removed only if the save lands later. */
+  function exitAnyway() {
+    const durable = leavePrompt?.durable;
+    const id = runId;
+    const recovery = readActiveQuizRun(id);
+    setLeavePrompt(null);
+    void durable?.then(() => clearActiveQuizIfUnchanged(id, recovery), () => { /* keep the recovery copy */ });
+    onClose();
   }
 
   async function finishBlock() {
@@ -931,7 +1013,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       clearActiveQuiz(runId);
       setSession(result);
       setStage("results");
-    });
+    }, "finish");
   }
 
   /** This run's session record: every pool question, answered or not. */
@@ -973,7 +1055,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       }, () => {
         clearActiveQuiz(runId);
         onClose();
-      });
+      }, "exit");
       return;
     }
     clearActiveQuiz(runId);
@@ -1061,7 +1143,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
           .map((a) => ({ questionId: a.questionId, attempt: attemptFor(a, {}, "simulation", result.id) })),
         session: result,
       });
-      await flushLocalVaultWrites();
+      // Saving never blocks studying (D13): the exam waits five seconds at most.
+      await withSaveCeiling(flushLocalVaultWrites());
       // commitQuizRun is one synchronous Zustand set(), which schedules the
       // next single local-vault adapter write before any await can interleave.
       assertVaultWrite(checkpoint + 1);
@@ -1674,7 +1757,22 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
           )
       }
     >
-      {finalizeError && <div className="form-warning danger" role="alert"><b>Final save not confirmed.</b> {finalizeError}</div>}
+      {finalizeError && <div className="form-warning danger quiz-save-state" role="alert">
+        <b>Final save not confirmed.</b> {finalizeError}{" "}
+        <GButton size="sm" onClick={retryFinalSave}>Not saved yet · Retry</GButton>
+      </div>}
+      {lateSaved && <div className="form-warning quiz-save-state" role="status"><b>Saved.</b> This block is stored on this device now.</div>}
+      {leavePrompt && <Modal title="Not saved yet" className="quiz-leave-prompt" onClose={keepStudying} footer={<>
+        <GhostButton onClick={downloadWorkCopy}><Download size={ICON_SIZE.body} /> Download a copy</GhostButton>
+        <GhostButton onClick={exitAnyway}>Exit anyway</GhostButton>
+        <GButton variant="primary" onClick={keepStudying}>Keep studying</GButton>
+      </>}>
+        <p>AXOM could not confirm that this block is saved on this device yet.</p>
+        <p>{leavePrompt.recoverable
+          ? "Your answers are still open here and in this device's recovery copy, so you can resume the block after a reload."
+          : "Your answers are open in this window only. Download a copy before you leave."}</p>
+        {leavePrompt.copyNote && <p role="status">{leavePrompt.copyNote}</p>}
+      </Modal>}
       <CommunityPracticeNotice count={unreviewedInPool} pending={community.pending} />
       <div className="quiz-progress" aria-hidden="true">
         <span className="quiz-progress-fill" style={{ width: `${Math.round(((index + (revealed ? 1 : 0)) / pool.length) * 100)}%` }} />

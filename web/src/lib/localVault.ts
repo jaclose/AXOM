@@ -6,6 +6,66 @@ import {
   isPackedFallbackError, PackedFallbackError, packedFallbackKey, packVaultFallback, unpackVaultFallback,
   type LegacyFallbackBinding, type PackedFallbackCopy,
 } from "./packedVaultFallback";
+import { isVaultWriteTimeout, VaultWriteTimeout } from "./saveCeiling";
+
+export { isVaultWriteTimeout, UI_SAVE_CEILING_MS, VaultWriteTimeout, withSaveCeiling } from "./saveCeiling";
+
+/**
+ * How long the IndexedDB part of one save may stall before AXOM abandons it
+ * and uses the browser-storage fallback. A write that never settles used to
+ * hold the single write queue forever: every later save waited behind it and
+ * every flushLocalVaultWrites() caller froze (INC-04, fault F2). This is longer
+ * than a slow but healthy write (fault F4 is 15 s), so a working save is never
+ * abandoned and repeated.
+ */
+export const VAULT_WRITE_STALL_MS = 20_000;
+/** After a stall, saves skip IndexedDB for this long and go straight to the
+ * fallback, so hung requests do not pile up while browser storage is wedged. */
+export const VAULT_STALL_COOLDOWN_MS = 60_000;
+let indexedDbStalledUntil = 0;
+
+/** Wait for `work` unless `signal` aborts first. Work that finishes after it
+ * was abandoned is handed to `onLate` (for example, to close a connection). */
+function untilAbandoned<T>(work: Promise<T>, signal: AbortSignal | undefined, onLate?: (value: T) => void): Promise<T> {
+  if (!signal) return work;
+  return new Promise<T>((resolve, reject) => {
+    let done = false;
+    const abandon = () => {
+      if (done) return;
+      done = true;
+      // Always observe the abandoned work, so its own later rejection is
+      // handled here instead of surfacing as an unhandled error.
+      work.then(onLate ?? (() => undefined), () => { /* nothing to release */ });
+      reject(isVaultWriteTimeout(signal.reason) ? signal.reason : new VaultWriteTimeout(VAULT_WRITE_STALL_MS));
+    };
+    if (signal.aborted) {
+      abandon();
+      return;
+    }
+    signal.addEventListener("abort", abandon, { once: true });
+    work.then(
+      (value) => {
+        if (done) return;
+        done = true;
+        signal.removeEventListener("abort", abandon);
+        resolve(value);
+      },
+      (error: unknown) => {
+        if (done) return;
+        done = true;
+        signal.removeEventListener("abort", abandon);
+        reject(error);
+      },
+    );
+  });
+}
+
+/** One stall budget shared by every IndexedDB step of a single save. */
+function stallBudget(): { signal: AbortSignal; release: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new VaultWriteTimeout(VAULT_WRITE_STALL_MS)), VAULT_WRITE_STALL_MS);
+  return { signal: controller.signal, release: () => clearTimeout(timer) };
+}
 
 export const DB_NAME = STORAGE_KEYS.vaultDb;
 export const STORE_NAME = "state";
@@ -64,6 +124,7 @@ export function resetLocalVaultRuntimeForTests(): void {
   observedVaultUsers.clear();
   conflictedWorkspaceKeys.clear();
   vaultUpgradeBlocked = false;
+  indexedDbStalledUntil = 0;
 }
 
 /** Capture the current adapter position before a write that must be durable. */
@@ -604,6 +665,7 @@ function openExistingVault(): Promise<IDBDatabase> {
       resolve(req.result);
     };
     req.onerror = () => reject(req.error ?? new Error("Unable to open existing local vault"));
+    req.onblocked = () => reject(new Error("Local vault access is blocked by another tab"));
   });
 }
 
@@ -697,16 +759,23 @@ async function writeVault(
   value: string,
   userId: string,
   expected?: VaultExpectation,
+  signal?: AbortSignal,
 ): Promise<void> {
   const plan = storedValuePlan(name, value, userId);
   // A chunk manifest is only safe after the physical v4 upgrade succeeds.
   // Otherwise an already-open v3 writer could replace the manifest with a
   // legacy single value while leaving its chunks behind. Small legacy values
   // can continue using the long-lived state store while an upgrade is blocked.
-  const db = await (plan.manifest ? openUpgradedVault() : openVault());
+  // An open that never answers is abandoned; if it succeeds later, that
+  // connection is closed without writing.
+  const db = await untilAbandoned(plan.manifest ? openUpgradedVault() : openVault(), signal, (late) => late.close());
   if (plan.manifest && db.version < DB_VERSION) {
     db.close();
     throw new Error("The local vault must finish its storage upgrade before saving this large workspace.");
+  }
+  if (signal?.aborted) {
+    db.close();
+    throw isVaultWriteTimeout(signal.reason) ? signal.reason : new VaultWriteTimeout(VAULT_WRITE_STALL_MS);
   }
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
@@ -714,6 +783,10 @@ async function writeVault(
     let conflict: VaultConflictError | null = null;
     let chunkWriteFailure: Error | null = null;
     let settled = false;
+    // An abandoned save is rolled back, never left to land after a newer one.
+    const onAbandon = () => failWrite(isVaultWriteTimeout(signal?.reason) ? signal!.reason : new VaultWriteTimeout(VAULT_WRITE_STALL_MS));
+    signal?.addEventListener("abort", onAbandon, { once: true });
+    const release = () => signal?.removeEventListener("abort", onAbandon);
 
     const write = (current: string | undefined, previous: readonly (string | undefined)[]) => {
       // A missing record is a fresh/recreated vault, not a competing revision.
@@ -799,17 +872,20 @@ async function writeVault(
     };
 
     tx.oncomplete = () => {
+      release();
       db.close();
       if (!settled) resolve();
       settled = true;
     };
     tx.onerror = () => {
       if (conflict || settled) return;
+      release();
       db.close();
       reject(chunkWriteFailure ?? tx.error ?? new Error("Local vault transaction failed"));
       settled = true;
     };
     tx.onabort = () => {
+      release();
       db.close();
       if (!settled) reject(conflict ?? chunkWriteFailure ?? tx.error ?? new Error("Local vault transaction failed"));
       settled = true;
@@ -841,10 +917,18 @@ async function readVaultSnapshot(name: string): Promise<string | null> {
   return await readVaultRecord(scopedStateKey(name, activeUser), openExistingVault) ?? null;
 }
 
-async function removeVaultRecords(name: string, active?: string): Promise<void> {
-  const db = await openExistingVault();
+async function removeVaultRecords(name: string, active?: string, signal?: AbortSignal): Promise<void> {
+  // A removal abandoned before its transaction opens never runs later: it
+  // could otherwise delete a newer workspace saved in the meantime.
+  const db = await untilAbandoned(openExistingVault(), signal, (late) => late.close());
+  if (signal?.aborted) {
+    db.close();
+    throw isVaultWriteTimeout(signal.reason) ? signal.reason : new VaultWriteTimeout(VAULT_WRITE_STALL_MS);
+  }
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
+    const abandon = () => { try { tx.abort(); } catch { /* finished already */ } };
+    signal?.addEventListener("abort", abandon, { once: true });
     const store = tx.objectStore(STORE_NAME);
     const keys = [name, ...(active ? [scopedStateKey(name, active)] : [])];
     for (const key of keys) {
@@ -859,8 +943,12 @@ async function removeVaultRecords(name: string, active?: string): Promise<void> 
       store.delete(key);
     }
     store.delete(activeUserKey(name));
-    tx.oncomplete = () => { db.close(); resolve(); };
-    tx.onerror = () => { db.close(); reject(tx.error ?? new Error("Unable to remove the local workspace.")); };
+    tx.oncomplete = () => { signal?.removeEventListener("abort", abandon); db.close(); resolve(); };
+    tx.onerror = () => {
+      signal?.removeEventListener("abort", abandon);
+      db.close();
+      reject(tx.error ?? new Error("Unable to remove the local workspace."));
+    };
     tx.onabort = tx.onerror;
   });
 }
@@ -977,6 +1065,8 @@ const vaultStorage: StateStorage = {
     const fallbackStore = localFallback();
     let fallbackBaseFingerprint: string | null | undefined;
     let currentPacked: PackedFallbackCopy | null = null;
+    const stall = stallBudget();
+    const indexedDbCoolingDown = Date.now() < indexedDbStalledUntil;
     try {
       const expected = workspaceExpectation(name);
       currentPacked = await readPackedFallback(fallbackStore, name);
@@ -990,9 +1080,9 @@ const vaultStorage: StateStorage = {
       fallbackBaseFingerprint = currentPacked !== null ? currentPacked.baseFingerprint : currentFallback !== null
         ? currentFallback.baseFingerprint
         : observedVaultFingerprint(name);
-      if (currentPacked === null && currentFallback === null && fallbackBaseFingerprint === undefined) {
+      if (currentPacked === null && currentFallback === null && fallbackBaseFingerprint === undefined && !indexedDbCoolingDown) {
         try {
-          fallbackBaseFingerprint = workspaceFingerprint(await readVaultSnapshot(name));
+          fallbackBaseFingerprint = workspaceFingerprint(await untilAbandoned(readVaultSnapshot(name), stall.signal));
         } catch {
           // The write attempt below decides whether a local fallback is needed.
         }
@@ -1006,13 +1096,18 @@ const vaultStorage: StateStorage = {
       const vaultExpectation = currentPacked !== null ? packedExpectation(currentPacked) : currentFallback !== null
         ? fallbackExpectation(currentFallback)
         : expected;
-      await writeVault(name, value, userId, vaultExpectation);
+      if (indexedDbCoolingDown) {
+        throw new VaultWriteTimeout(VAULT_WRITE_STALL_MS, "Browser storage stopped answering moments ago, so this save went to the fallback.");
+      }
+      await untilAbandoned(writeVault(name, value, userId, vaultExpectation, stall.signal), stall.signal);
       if (currentPacked) assertPackedLegacyCurrent(fallbackStore, currentPacked);
       retirePackedFallback(fallbackStore, name, currentPacked?.raw ?? null);
       clearFallbackCopy(fallbackStore, name, userId);
       rememberVaultSnapshot(name, value);
       markVaultWrite("indexeddb");
     } catch (indexedDbError) {
+      // A stalled IndexedDB is skipped for a while; later saves go straight to the fallback.
+      if (stall.signal.aborted && isVaultWriteTimeout(indexedDbError)) indexedDbStalledUntil = Date.now() + VAULT_STALL_COOLDOWN_MS;
       if (isVaultConflictError(indexedDbError) || isPackedFallbackError(indexedDbError)) {
         if (isVaultConflictError(indexedDbError) && observesWorkspace(name)) conflictedWorkspaceKeys.add(name);
         vaultWriteFailures.set(writeSequence, indexedDbError);
@@ -1097,30 +1192,40 @@ const vaultStorage: StateStorage = {
         // Ordinary saves are best-effort, so say so: this one is on no disk.
         markVaultWriteFailure(new Date(), recordedFailure);
       }
+    } finally {
+      stall.release();
     }
   },
 
   async removeItem(name) {
     const fallback = localFallback();
-    let active = fallback?.getItem(activeUserKey(name)) ?? undefined;
-    if (!active) {
-      try {
-        active = await withStore<string | undefined>("readonly", (store) => store.get(activeUserKey(name)), openExistingVault);
-      } catch {
-        // Continue with the localStorage cleanup path below.
-      }
-    }
-    fallback?.removeItem(name);
-    fallback?.removeItem(fallbackMarkerKey(name));
-    if (observesWorkspace(name)) fallback?.removeItem(packedFallbackKey(name));
-    fallback?.removeItem(activeUserKey(name));
-    if (active) fallback?.removeItem(scopedStateKey(name, active));
+    const stall = stallBudget();
     try {
-      await removeVaultRecords(name, active);
-      conflictedWorkspaceKeys.delete(name);
-      rememberVaultSnapshot(name, null);
-    } catch {
-      // No-op; best effort cleanup.
+      let active = fallback?.getItem(activeUserKey(name)) ?? undefined;
+      if (!active) {
+        try {
+          active = await untilAbandoned(
+            withStore<string | undefined>("readonly", (store) => store.get(activeUserKey(name)), openExistingVault),
+            stall.signal,
+          );
+        } catch {
+          // Continue with the localStorage cleanup path below.
+        }
+      }
+      fallback?.removeItem(name);
+      fallback?.removeItem(fallbackMarkerKey(name));
+      if (observesWorkspace(name)) fallback?.removeItem(packedFallbackKey(name));
+      fallback?.removeItem(activeUserKey(name));
+      if (active) fallback?.removeItem(scopedStateKey(name, active));
+      try {
+        await untilAbandoned(removeVaultRecords(name, active, stall.signal), stall.signal);
+        conflictedWorkspaceKeys.delete(name);
+        rememberVaultSnapshot(name, null);
+      } catch {
+        // No-op; best effort cleanup.
+      }
+    } finally {
+      stall.release();
     }
   },
 };
@@ -1134,10 +1239,11 @@ const vaultStorage: StateStorage = {
 async function replaceVaultItem(name: string, value: string): Promise<void> {
   const writeSequence = ++vaultWriteSequence;
   const userId = persistedUserId(value);
+  const stall = stallBudget();
   try {
     const fallback = localFallback();
     const previousPacked = observesWorkspace(name) ? fallback?.getItem(packedFallbackKey(name)) ?? null : null;
-    await writeVault(name, value, userId);
+    await untilAbandoned(writeVault(name, value, userId, undefined, stall.signal), stall.signal);
     // Explicit verified restore already authorizes replacing the live workspace;
     // retire only the fallback captured before that write. A concurrent save
     // remains available and makes this replacement fail explicitly.
@@ -1153,6 +1259,8 @@ async function replaceVaultItem(name: string, value: string): Promise<void> {
       error instanceof Error ? error : new Error("AXOM could not replace the local workspace."),
     );
     markVaultWriteFailure(new Date(), error);
+  } finally {
+    stall.release();
   }
 }
 
