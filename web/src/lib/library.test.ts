@@ -161,6 +161,92 @@ describe("question-set progress, current mastery, and historical accuracy", () =
   });
 });
 
+
+describe("question-set summaries hold ambiguous canonical source identity", () => {
+  const attempt = (answerKey: string, status: "correct" | "incorrect") => ({
+    at: "2026-07-09T10:00:00.000Z", answerKey, status,
+  });
+
+  it("cannot report 200% completion for two distinct imported records sharing one set ID, in either source order", () => {
+    const sourceA = question("collided", {
+      category: "Renal", attempts: [attempt("A", "correct")],
+    });
+    const sourceB = question("collided", {
+      category: "Cardiac", options: [{ key: "A", text: "Beta" }, { key: "B", text: "Gamma" }],
+      attempts: [attempt("B", "incorrect")],
+    });
+    const reviewSet = { ...set, questionIds: ["collided"] };
+    for (const records of [[sourceA, sourceB], [sourceB, sourceA]]) {
+      const metrics = questionSetMetrics(reviewSet, records);
+      expect(metrics).toMatchObject({
+        total: 1, completed: 0, remaining: 1, completionPct: 0,
+        currentMasteryCorrect: 0, currentMasteryQuestions: 0,
+        currentMasteryPct: null, historicalCorrectAttempts: 0,
+        historicalAttemptCount: 0, historicalAccuracyPct: null,
+        needsReview: 1,
+        mapping: { ready: 0, reviewSuggested: 0, unresolved: 1,
+          issueCount: 1, issueQuestionIds: ["collided"], unresolvedQuestionIds: ["collided"] },
+      });
+      expect(metrics.lastStudiedAt).toBeUndefined();
+      expect(metrics.missedQuestionIds).toEqual([]);
+      expect(metrics.category).toBeUndefined();
+      expect(metrics.importConfidence).toBeNull();
+    }
+  });
+
+  it("keeps unique source progress, accuracy, category, and confidence while quarantining only collided records", () => {
+    const collidedA = question("collided", {
+      category: "Renal", extraction: { confidence: "high", reviewed: true, overallImportConfidence: 0.99 },
+      attempts: [attempt("A", "correct")],
+    });
+    const collidedB = question("collided", {
+      category: "Cardiac", extraction: { confidence: "high", reviewed: true, overallImportConfidence: 0.98 },
+      attempts: [attempt("B", "incorrect")],
+    });
+    const valid = question("valid", {
+      category: "Pathology", extraction: { confidence: "high", reviewed: true, overallImportConfidence: 0.8 },
+      attempts: [attempt("A", "correct")],
+    });
+    const reviewSet = { ...set, questionIds: ["collided", "valid"] };
+    const originalSet = structuredClone(reviewSet);
+    const originalQuestions = structuredClone([collidedA, collidedB, valid]);
+    for (const records of [[collidedA, valid, collidedB], [collidedB, collidedA, valid]]) {
+      const metrics = questionSetMetrics(reviewSet, records);
+      expect(metrics).toMatchObject({
+        total: 2, completed: 1, remaining: 1, completionPct: 50,
+        currentMasteryCorrect: 1, currentMasteryQuestions: 1, currentMasteryPct: 100,
+        historicalCorrectAttempts: 1, historicalAttemptCount: 1, historicalAccuracyPct: 100,
+        category: "Pathology", importConfidence: 80, needsReview: 1,
+        mapping: { ready: 1, unresolved: 1, issueCount: 1, issueQuestionIds: ["collided"] },
+      });
+      expect(metrics.missedQuestionIds).toEqual([]);
+    }
+    expect(reviewSet).toEqual(originalSet);
+    expect([collidedA, collidedB, valid]).toEqual(originalQuestions);
+  });
+
+  it("counts repeated legacy membership IDs once without changing the saved membership", () => {
+    const legacySet = { ...set, questionIds: ["valid", "valid", "unseen"] };
+    const valid = question("valid", { attempts: [attempt("A", "correct")] });
+    const metrics = questionSetMetrics(legacySet, [valid, question("unseen")]);
+    expect(metrics).toMatchObject({
+      total: 2, completed: 1, remaining: 1, completionPct: 50,
+      historicalAttemptCount: 1, currentMasteryQuestions: 1,
+    });
+    expect(legacySet.questionIds).toEqual(["valid", "valid", "unseen"]);
+  });
+
+  it("marks even unattempted duplicate source rows as one unresolved set membership, not two ready questions", () => {
+    const metrics = questionSetMetrics({ ...set, questionIds: ["unattempted"] },
+      [question("unattempted"), question("unattempted")]);
+    expect(metrics.mapping).toMatchObject({
+      ready: 0, unresolved: 1, issueCount: 1,
+      issueQuestionIds: ["unattempted"], unresolvedQuestionIds: ["unattempted"],
+    });
+    expect(metrics).toMatchObject({ total: 1, completed: 0, remaining: 1, completionPct: 0 });
+  });
+});
+
 describe("recent question-set ordering", () => {
   function qset(id: string, createdAt: string, questionId: string): QuestionSet {
     return {
