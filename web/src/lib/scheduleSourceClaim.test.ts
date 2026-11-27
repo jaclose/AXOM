@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readScheduleSourceClaim, scheduleSourceReplayStatus, collectScheduleSourceReviewEvidence, type ScheduleSourceClaimV1 } from "./scheduleSourceClaim";
+import { readScheduleSourceClaim, scheduleSourceReplayStatus, collectScheduleSourceReviewEvidence, captureScheduleReviewBinding, checkScheduleReviewBinding, type ScheduleSourceClaimV1 } from "./scheduleSourceClaim";
 
 function claim(): ScheduleSourceClaimV1 {
   return {
@@ -176,5 +176,103 @@ describe("schedule review evidence across the active account", () => {
       unresolvedAtDestination: [],
     });
     expect(JSON.stringify(rows)).toBe(before);
+  });
+});
+
+describe("ephemeral schedule review binding", () => {
+  function inputFor<T extends { recordId: string; path: string; sourceClaim: unknown }>(rows: readonly T[]) {
+    return {
+      workspaceLease: {},
+      candidateBatchSnapshot: JSON.stringify([claim()]),
+      rows: rows.map(row => ({ recordId: row.recordId, recordSnapshot: JSON.stringify(row) })),
+    };
+  }
+
+  it("rejects changes hidden by the deliberately lossy review projection", () => {
+    const original = claim();
+    const moved = { ...original, destinationKey: "t4/ders/week 15" };
+    const pairs = [
+      [original, { ...original, reviewedDate: "2026-11-28" }],
+      [original, { ...original, source: { ...original.source, kind: "Assessment", activity: "imcq" } }],
+      [moved, { ...moved, destinationKey: "t4/ders/week 14" }],
+      [original, { ...original, source: { ...original.source, title: "RENAL physiology" } }],
+      [{ ...original, version: 2 }, { ...original, version: 3 }],
+    ];
+    for (const [beforeClaim, afterClaim] of pairs) {
+      const beforeRows = [{ recordId: "a", path: original.destinationKey, sourceClaim: beforeClaim }];
+      const afterRows = [{ ...beforeRows[0], sourceClaim: afterClaim }];
+      // This old projection must remain equal: it is review evidence, not a CAS token.
+      expect(collectScheduleSourceReviewEvidence(original, beforeRows)).toEqual(
+        collectScheduleSourceReviewEvidence(original, afterRows));
+      const input = inputFor(beforeRows);
+      const captured = captureScheduleReviewBinding(input);
+      if (captured.state !== "captured") throw new Error("expected a captured binding");
+      expect(checkScheduleReviewBinding(captured.binding, {
+        ...input, rows: inputFor(afterRows).rows,
+      })).toBe("stale-records");
+    }
+  });
+
+  it("binds the full candidate batch and non-reused workspace lease, including ABA", () => {
+    const input = inputFor([]);
+    const captured = captureScheduleReviewBinding(input);
+    if (captured.state !== "captured") throw new Error("expected a captured binding");
+    expect(checkScheduleReviewBinding(captured.binding, input)).toBe("current");
+    expect(checkScheduleReviewBinding(captured.binding, { ...input, workspaceLease: {} })).toBe("stale-scope");
+    const returnedToA = { ...input, workspaceLease: {} };
+    expect(checkScheduleReviewBinding(captured.binding, returnedToA)).toBe("stale-scope");
+    expect(checkScheduleReviewBinding(captured.binding, {
+      ...input, candidateBatchSnapshot: JSON.stringify([claim(), claim()]),
+    })).toBe("stale-candidates");
+    const c = claim();
+    const two = { ...input, candidateBatchSnapshot: JSON.stringify([c, { ...c, reviewedDate: null }]) };
+    const second = captureScheduleReviewBinding(two);
+    if (second.state !== "captured") throw new Error("expected a captured binding");
+    expect(checkScheduleReviewBinding(second.binding, {
+      ...two, candidateBatchSnapshot: JSON.stringify([{ ...c, reviewedDate: null }, c]),
+    })).toBe("stale-candidates");
+  });
+
+  it("refuses duplicate record IDs without selecting a winner", () => {
+    const input = inputFor([{ recordId: "a", path: claim().destinationKey, sourceClaim: claim() }]);
+    const captured = captureScheduleReviewBinding(input);
+    if (captured.state !== "captured") throw new Error("expected a captured binding");
+    const duplicate = { ...input, rows: [...input.rows, { ...input.rows[0] }] };
+    expect(captureScheduleReviewBinding(duplicate)).toEqual({ state: "duplicate-record-id" });
+    expect(checkScheduleReviewBinding(captured.binding, duplicate)).toBe("duplicate-record-id");
+    const conflicting = { ...input, rows: [...input.rows, { recordId: "a", recordSnapshot: "{}" }] };
+    expect(captureScheduleReviewBinding(conflicting)).toEqual({ state: "duplicate-record-id" });
+  });
+
+  it("detects additions, removals, changes to editable fields and preserves input order", () => {
+    const c = claim();
+    const records = [{ recordId: "z", path: c.destinationKey, sourceClaim: c, note: "before" },
+      { recordId: "a", path: "other", sourceClaim: undefined, note: "unrelated" }];
+    const input = inputFor(records);
+    const before = JSON.stringify(input.rows);
+    const captured = captureScheduleReviewBinding(input);
+    if (captured.state !== "captured") throw new Error("expected a captured binding");
+    expect(JSON.stringify(input.rows)).toBe(before);
+    expect(checkScheduleReviewBinding(captured.binding, { ...input, rows: [...input.rows].reverse() })).toBe("current");
+    expect(checkScheduleReviewBinding(captured.binding, { ...input, rows: input.rows.slice(0, 1) })).toBe("stale-records");
+    expect(checkScheduleReviewBinding(captured.binding, {
+      ...input, rows: [...input.rows, { recordId: "new", recordSnapshot: "{}" }],
+    })).toBe("stale-records");
+    const edited = inputFor([{ ...records[0], note: "after" }, records[1]]);
+    expect(checkScheduleReviewBinding(captured.binding, { ...input, rows: edited.rows })).toBe("stale-records");
+    input.rows[0].recordSnapshot = "{}";
+    expect(checkScheduleReviewBinding(captured.binding, input)).toBe("stale-records");
+    expect(Object.isFrozen(captured.binding)).toBe(true);
+    expect(Object.isFrozen(captured.binding.rows)).toBe(true);
+    expect(Object.isFrozen(captured.binding.rows[0])).toBe(true);
+  });
+
+  it("fails closed when snapshot evidence is missing", () => {
+    const input = inputFor([]);
+    for (const value of [
+      { ...input, candidateBatchSnapshot: "" },
+      { ...input, rows: [{ recordId: "", recordSnapshot: "{}" }] },
+      { ...input, rows: [{ recordId: "a", recordSnapshot: "" }] },
+    ]) expect(captureScheduleReviewBinding(value)).toEqual({ state: "invalid-input" });
   });
 });

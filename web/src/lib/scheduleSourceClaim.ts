@@ -172,3 +172,72 @@ export function collectScheduleSourceReviewEvidence(
     compare(a.status, b.status) || Number(b.legacyIdentityMatches) - Number(a.legacyIdentityMatches));
   return { state: "valid", matches, unresolvedAtDestination };
 }
+
+/**
+ * Ephemeral confirmation guard, not a persisted token or authorization check.
+ * The caller must supply a non-reused lease for the active account/workspace,
+ * full ordered candidate-batch bytes, and exact full-record snapshots for ALL
+ * current Tracker rows in that scope (not the lossy review evidence above).
+ * Capture and recheck against authoritative state; commit only in the same
+ * atomic boundary as the final check. Never persist or log these snapshots.
+ */
+export interface ScheduleReviewBindingInput {
+  workspaceLease: object;
+  candidateBatchSnapshot: string;
+  rows: readonly { recordId: string; recordSnapshot: string }[];
+}
+
+export interface ScheduleReviewBinding {
+  readonly workspaceLease: object;
+  readonly candidateBatchSnapshot: string;
+  readonly rows: readonly Readonly<{ recordId: string; recordSnapshot: string }>[];
+}
+
+export type ScheduleReviewBindingFailure = "invalid-input" | "duplicate-record-id";
+export type ScheduleReviewBindingCapture =
+  | { state: ScheduleReviewBindingFailure }
+  | { state: "captured"; binding: ScheduleReviewBinding };
+export type ScheduleReviewBindingCheck =
+  | ScheduleReviewBindingFailure | "stale-scope" | "stale-candidates" | "stale-records" | "current";
+
+export function captureScheduleReviewBinding(input: ScheduleReviewBindingInput): ScheduleReviewBindingCapture {
+  if (!isRecord(input.workspaceLease) || typeof input.candidateBatchSnapshot !== "string" ||
+      !input.candidateBatchSnapshot.trim() || !Array.isArray(input.rows)) {
+    return { state: "invalid-input" };
+  }
+  const ids = new Set<string>();
+  const rows: { recordId: string; recordSnapshot: string }[] = [];
+  for (const row of input.rows) {
+    if (!row || typeof row.recordId !== "string" || !row.recordId.trim() ||
+        typeof row.recordSnapshot !== "string" || !row.recordSnapshot.trim()) {
+      return { state: "invalid-input" };
+    }
+    if (ids.has(row.recordId)) return { state: "duplicate-record-id" };
+    ids.add(row.recordId);
+    rows.push(Object.freeze({ recordId: row.recordId, recordSnapshot: row.recordSnapshot }));
+  }
+  rows.sort((a, b) => a.recordId < b.recordId ? -1 : a.recordId > b.recordId ? 1 : 0);
+  return { state: "captured", binding: Object.freeze({
+    workspaceLease: input.workspaceLease,
+    candidateBatchSnapshot: input.candidateBatchSnapshot,
+    rows: Object.freeze(rows),
+  }) };
+}
+
+export function checkScheduleReviewBinding(
+  binding: ScheduleReviewBinding,
+  current: ScheduleReviewBindingInput,
+): ScheduleReviewBindingCheck {
+  // Reference identity is deliberate. The caller must renew this lease on
+  // logout, account/workspace change, or rehydration, including A -> B -> A.
+  if (binding.workspaceLease !== current.workspaceLease) return "stale-scope";
+  const result = captureScheduleReviewBinding(current);
+  if (result.state !== "captured") return result.state;
+  const next = result.binding;
+  if (binding.candidateBatchSnapshot !== next.candidateBatchSnapshot) return "stale-candidates";
+  if (binding.rows.length !== next.rows.length || binding.rows.some((row, index) =>
+    row.recordId !== next.rows[index].recordId || row.recordSnapshot !== next.rows[index].recordSnapshot)) {
+    return "stale-records";
+  }
+  return "current";
+}
