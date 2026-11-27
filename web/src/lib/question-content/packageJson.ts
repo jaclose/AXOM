@@ -17,6 +17,7 @@ import {
   type ImportPackage,
   type IssueCode,
   type IssueSeverity,
+  type PackageAxomExtension,
   type PackageIssue,
   type PackageManifest,
   type PackageQuestion,
@@ -315,8 +316,43 @@ function writeManifest(manifest: PackageManifest): Json {
 
 const QUESTION_KEYS = [
   "id", "course", "term", "week", "bankId", "discipline", "topic", "subtopic", "source", "stem", "choices",
-  "choiceTable", "correctAnswer", "explanation", "teaching", "assets", "flags", "provenance",
+  "choiceTable", "correctAnswer", "explanation", "teaching", "assets", "flags", "provenance", "axom",
 ] as const;
+const AXOM_KEYS = [
+  "origin", "termWeek", "lectures", "system", "disciplines", "concepts", "answerableFrom", "examScopes",
+  "yield", "keywords", "alsoIn", "share",
+] as const;
+const AXOM_CONCEPT_KEYS = ["primary", "secondary"] as const;
+
+/** Curator tags (package contract §6): known fields are kept, others warn. */
+function readAxom(value: unknown, ctx: ReadContext): PackageAxomExtension | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) {
+    note(ctx, "warning", "unknown_field", "The axom tags are not an object. They were left out.", "axom");
+    return undefined;
+  }
+  warnUnknown(value, AXOM_KEYS, "axom", ctx);
+  const conceptsRaw = isRecord(value.concepts) ? value.concepts : undefined;
+  if (conceptsRaw) warnUnknown(conceptsRaw, AXOM_CONCEPT_KEYS, "axom.concepts", ctx);
+  const primary = filled(conceptsRaw?.primary);
+  const secondary = textList(conceptsRaw?.secondary);
+  const positive = (raw: unknown) => { const n = integer(raw); return n !== undefined && n > 0 ? n : undefined; };
+  const tags: PackageAxomExtension = {
+    ...optional("origin", filled(value.origin)),
+    ...optional("termWeek", positive(value.termWeek)),
+    ...optional("lectures", textList(value.lectures)),
+    ...optional("system", filled(value.system)),
+    ...optional("disciplines", textList(value.disciplines)),
+    ...optional("concepts", primary || secondary ? { ...optional("primary", primary), ...optional("secondary", secondary) } : undefined),
+    ...optional("answerableFrom", positive(value.answerableFrom)),
+    ...optional("examScopes", textList(value.examScopes)),
+    ...optional("yield", oneOf(["high", "medium", "low"] as const, value.yield)),
+    ...optional("keywords", textList(value.keywords)),
+    ...optional("alsoIn", textList(value.alsoIn)),
+    ...optional("share", oneOf(["visitors", "signed-in", "owner"] as const, value.share)),
+  };
+  return Object.keys(tags).length ? tags : undefined;
+}
 const ASSET_KEYS = [
   "id", "filename", "mimeType", "width", "height", "byteSize", "sourceFile", "sourcePage", "role", "questionId",
   "checksum", "derivation", "bounds", "revealOf", "crop",
@@ -669,6 +705,7 @@ function readQuestion(value: unknown, index: number, issues: PackageIssue[]): Pa
     assets,
     ...optional("flags", flags.length ? flags : undefined),
     provenance,
+    ...optional("axom", readAxom(value.axom, ctx)),
   };
 }
 
@@ -694,6 +731,10 @@ function writeQuestion(question: PackageQuestion): Json {
     provenance: compact({
       method: question.provenance.method, tool: question.provenance.tool, createdAt: question.provenance.createdAt,
       sourceChecksum: question.provenance.sourceChecksum, notes: question.provenance.notes,
+    }),
+    axom: question.axom && compact({
+      ...question.axom,
+      concepts: question.axom.concepts && compact({ ...question.axom.concepts }),
     }),
   });
 }

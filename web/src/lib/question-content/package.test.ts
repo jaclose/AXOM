@@ -70,6 +70,29 @@ describe("reading a package", () => {
     expect(parsed.package!.questions[0]).not.toHaveProperty("imageUrl");
   });
 
+  it("keeps curator tags under the registered axom key and writes them back", () => {
+    const axom = {
+      origin: "jd", termWeek: 5, lectures: ["t1.ftm2.L36"], system: "GEN", disciplines: ["BCHM", "GNET"],
+      concepts: { primary: "lesch-nyhan-syndrome", secondary: ["purine-salvage"] }, answerableFrom: 1,
+      examScopes: ["bsce1", "cbse", "mod:t1.ftm2"], yield: "high", keywords: ["HGPRT"], alsoIn: ["imcq:t1.ftm2.imcq3#7"],
+      share: "visitors",
+    };
+    const parsed = read([question({ axom })]);
+    expect(parsed.issues).toEqual([]);
+    expect(parsed.package!.questions[0].axom).toEqual(axom);
+    const again = parsePackage(serializeManifest(parsed.package!.manifest), serializeQuestionsFile(parsed.package!));
+    expect(again.package!.questions[0].axom).toEqual(axom);
+  });
+
+  it("warns about unknown or malformed axom tags and keeps only the valid ones", () => {
+    const parsed = read([question({ axom: { origin: "jd", yield: "very", termWeek: -2, mood: "calm", concepts: { primary: "x", extra: 1 } } })]);
+    expect(parsed.issues.map((issue) => [issue.code, issue.path])).toEqual([
+      ["unknown_field", "axom"], ["unknown_field", "axom.concepts"],
+    ]);
+    expect(parsed.package!.questions[0].axom).toEqual({ origin: "jd", concepts: { primary: "x" } });
+    expect(read([question({ axom: "jd" })]).package!.questions[0]).not.toHaveProperty("axom");
+  });
+
   it("will not take a number for a table cell, so 0.50 cannot become 0.5", () => {
     const parsed = read([question({ stem: [{ type: "text", text: "Read the table." }, { type: "table", rows: [["Dose", 0.5]] }] })]);
     expect(parsed.issues).toEqual([expect.objectContaining({ severity: "error", code: "invalid_block", questionId: "ex-q01", path: "stem[1]" })]);

@@ -243,6 +243,27 @@ export interface PackageTeaching {
   factCheck: TeachingFactCheck;
 }
 
+/**
+ * Curator tags carried under one `axom` key (package contract §6). Registered
+ * and kept with the question; QBank facets and the course map read them later.
+ */
+export interface PackageAxomExtension {
+  origin?: string;
+  /** The SGU term week; `week` on the question stays the module week. */
+  termWeek?: number;
+  lectures?: string[];
+  system?: string;
+  disciplines?: string[];
+  concepts?: { primary?: string; secondary?: string[] };
+  /** The latest home term among the concepts the question needs. */
+  answerableFrom?: number;
+  examScopes?: string[];
+  yield?: "high" | "medium" | "low";
+  keywords?: string[];
+  alsoIn?: string[];
+  share?: "visitors" | "signed-in" | "owner";
+}
+
 export interface PackageQuestion {
   id: string;
   /** Filing. Absent means "as the manifest says"; see `questionScope`. */
@@ -265,6 +286,7 @@ export interface PackageQuestion {
   assets: QuestionAsset[];
   flags?: QuestionFlag[];
   provenance: ProvenanceMetadata;
+  axom?: PackageAxomExtension;
 }
 
 export interface ImportPackage {
