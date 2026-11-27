@@ -32,7 +32,8 @@ export interface AttemptEvent {
 export function attemptEvents(questions: readonly QuestionRecord[]): AttemptEvent[] {
   const events: AttemptEvent[] = [];
   for (const question of questions) {
-    const correctKey = questionMappingStatus(question) === "ready" ? question.correctKey : undefined;
+    const mappingReady = questionMappingStatus(question) === "ready";
+    const correctKey = mappingReady ? question.correctKey : undefined;
     const ordered = [...question.attempts].sort((left, right) => left.at.localeCompare(right.at));
     let exposure = 0;
     for (const attempt of ordered) {
@@ -40,13 +41,23 @@ export function attemptEvents(questions: readonly QuestionRecord[]): AttemptEven
       const answered = attempt.status === "correct" || attempt.status === "incorrect" || attempt.status === "guessed";
       if (!answered && !attempt.answerKey) continue;
       exposure += 1;
+      // Keep the recorded answer untouched, but never promote its historical
+      // correct/incorrect flag into *current* scored analytics while the
+      // answer mapping or required source media is held for review.
+      const recordedCorrect = attempt.status === "correct" || attempt.status === "guessed"
+        ? true : attempt.status === "incorrect" ? false : undefined;
+      // A reviewed key may have been repaired since this attempt was saved.
+      // If the learner's recorded choice and old success flag contradict the
+      // *current* trusted key, neither old flag nor a retrospective regrade is
+      // defensible without the original key revision. Keep the raw attempt.
+      const contradictsCurrentKey = attempt.answerKey !== undefined
+        && recordedCorrect !== undefined
+        && (attempt.answerKey === correctKey) !== recordedCorrect;
       events.push({
         questionId: question.id,
         at: attempt.at,
         exposure,
-        correct: attempt.status === "correct" || attempt.status === "guessed"
-          ? true
-          : attempt.status === "incorrect" ? false : undefined,
+        correct: mappingReady && !contradictsCurrentKey ? recordedCorrect : undefined,
         answerKey: attempt.answerKey,
         correctKey,
         seconds: attempt.timeSpentSeconds,

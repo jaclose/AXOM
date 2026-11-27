@@ -39,6 +39,34 @@ interface ManagedQuestionSetShare extends OwnedQuestionSetShare {
   link: string;
 }
 
+interface DigestMembership {
+  records: QuestionRecord[];
+  holdReason: string | null;
+}
+
+/** The saved set is an ID snapshot, not authority to pick an arbitrary imported
+ * row. Never send an ambiguous or incomplete membership to an AI provider. */
+function digestMembership(set: QuestionSet, questions: readonly QuestionRecord[]): DigestMembership {
+  const ids = new Set(set.questionIds);
+  const byId = new Map<string, QuestionRecord>();
+  const collisions = new Set<string>();
+  for (const question of questions) {
+    if (!ids.has(question.id)) continue;
+    if (byId.has(question.id)) collisions.add(question.id);
+    else byId.set(question.id, question);
+  }
+  if (collisions.size > 0) return {
+    records: [],
+    holdReason: `AI digest on hold: ${collisions.size} question ID${collisions.size === 1 ? " has" : "s have"} conflicting question records. Review source mapping first.`,
+  };
+  const missing = [...ids].filter((id) => !byId.has(id));
+  if (ids.size === 0 || missing.length > 0) return {
+    records: [],
+    holdReason: `AI digest on hold: ${missing.length || 1} missing question records or empty membership. Restore the original questions first.`,
+  };
+  return { records: [...ids].map((id) => byId.get(id)!), holdReason: null };
+}
+
 export function SourceLibrary({
   onParseFrom,
   onGenerateFrom,
@@ -193,13 +221,20 @@ export function QuestionSetList({
 
   async function enhance(set: QuestionSet) {
     if (!provider) return;
+    // Re-evaluate on activation, not only at render time. Missing/collided IDs
+    // must never reach the provider or create a persistent teaching digest.
+    const membership = digestMembership(set, questions);
+    if (membership.holdReason) {
+      pushToast({ title: "Digest held for source review", body: membership.holdReason, tone: "warn" });
+      return;
+    }
     setEnhancing(set.id);
     try {
-      const byId = new Map(questions.map((q) => [q.id, q]));
-      const forDigest = set.questionIds
-        .map((id) => byId.get(id))
-        .filter((q): q is NonNullable<typeof q> => !!q)
-        .map((q) => ({ stem: q.stem, correct: q.options.find((o) => o.key === q.correctKey)?.text, explanation: q.explanation }));
+      const forDigest = membership.records.map((q) => ({
+        stem: q.stem,
+        correct: q.options.find((o) => o.key === q.correctKey)?.text,
+        explanation: q.explanation,
+      }));
       const digest = await enhanceQuestionSet(provider, { title: set.title, questions: forDigest });
       s.updateQuestionSet(set.id, {
         aiEnhanced: true,
@@ -374,6 +409,7 @@ export function QuestionSetList({
 
   function renderCard(set: QuestionSet) {
     const metrics = questionSetMetrics(set, questions, s.documents ?? []);
+    const { holdReason } = digestMembership(set, questions);
     return (
       <QuestionSetCard
         key={set.id}
@@ -393,7 +429,12 @@ export function QuestionSetList({
         onSubmit={!compact ? () => setSubmitSet(set) : undefined}
         compact={compact}
       >
-        {!compact && set.digest && (
+        {!compact && (provider || set.digest) && holdReason && (
+          <p className="sub" role="status">
+            {holdReason}{set.digest ? " Earlier AI digest and its tracker suggestions are withheld until source identity is resolved." : ""}
+          </p>
+        )}
+        {!compact && set.digest && !holdReason && (
           <div className="stack" style={{ gap: 6, marginTop: 10 }}>
             <div className="question-explanation">
               <b>{set.digest.generatedBy}:</b> {set.digest.summary}
@@ -408,11 +449,11 @@ export function QuestionSetList({
         )}
         {!compact && <div className="row wrap gap6">
           {provider && !set.digest && (
-            <GhostButton disabled={enhancing === set.id} onClick={() => void enhance(set)}>
+            <GhostButton disabled={enhancing === set.id || Boolean(holdReason)} onClick={() => void enhance(set)}>
               <Sparkles size={ICON_SIZE.body} /> {enhancing === set.id ? "Analyzing…" : "Build digest"}
             </GhostButton>
           )}
-          {set.digest?.suggestedReview.length ? (
+          {!holdReason && set.digest?.suggestedReview.length ? (
             <GhostButton onClick={() => addDigestReview(set)}>
               <ListPlus size={ICON_SIZE.body} /> Add review to Tracker
             </GhostButton>
