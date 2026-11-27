@@ -18,18 +18,18 @@ export interface ContentUpload { reference: ContentReference; content: string; c
 // Zustand preserves untouched record identities. Cache projections so ordinary
 // answer updates never recompress every source document in a large library.
 const cache = new WeakMap<object, Promise<ContentUpload>>();
-const contentCache = new Map<string, string>();
+const contentCache = new Map<string, { packed: string; byteSize: number }>();
 const confirmedContentUploads = new Map<string, Set<string>>();
 const MAX_CONCURRENT_CONTENT_UPLOADS = 8;
 let cachedBytes = 0;
-function cacheContent(hash: string, content: string) {
+function cacheContent(hash: string, content: string, byteSize: number) {
   if (contentCache.has(hash)) return;
-  contentCache.set(hash, content);
+  contentCache.set(hash, { packed: content, byteSize });
   cachedBytes += content.length * 2;
   while (cachedBytes > 32 * 1024 * 1024 && contentCache.size) {
     const [key, oldest] = contentCache.entries().next().value!;
     contentCache.delete(key);
-    cachedBytes -= oldest.length * 2;
+    cachedBytes -= oldest.packed.length * 2;
   }
 }
 
@@ -122,7 +122,8 @@ export function readContentReferences(value: unknown): ContentReference[] {
 export async function uploadCloudContent(client: SupabaseClient, userId: string, objects: ContentUpload[], previous: ContentReference[], assertCurrent: () => Promise<void>, onProgress?: (completed: number, total: number) => void): Promise<void> {
   const confirmed = confirmedContentUploads.get(userId) ?? new Set<string>();
   confirmedContentUploads.set(userId, confirmed);
-  const known = new Set([...previous.map((entry) => entry.hash), ...confirmed]);
+  // Academic revisions and private account objects occupy different storage namespaces.
+  const known = new Set([...previous.filter(entry => !entry.academic).map(entry => entry.hash), ...confirmed]);
   const pending = objects.filter(({ reference }) => {
     if (reference.academic || known.has(reference.hash)) return false;
     known.add(reference.hash);
@@ -176,7 +177,9 @@ export async function hydrateCloudContent(client: SupabaseClient, userId: string
       await assertCurrent();
       // Matching reconstructed text is not proof of access to an academic asset.
       // Only reuse verified academic files within this guarded hydration call.
-      let packed = reference.academic ? undefined : contentCache.get(`${userId}/${reference.hash}`);
+      const cached = reference.academic ? undefined : contentCache.get(`${userId}/${reference.hash}`);
+      if (cached && cached.byteSize !== reference.byteSize) throw new Error("A source file could not be downloaded or verified. Your current workspace is unchanged.");
+      let packed = cached?.packed;
       if (packed === undefined) {
         let data: Blob | null;
         let error: unknown;
@@ -190,7 +193,7 @@ export async function hydrateCloudContent(client: SupabaseClient, userId: string
         } else ({ data, error } = await client.storage.from(CONTENT_BUCKET).download(`${userId}/${reference.hash}`));
         if (error || !data || data.size !== reference.byteSize || await sha256(new Uint8Array(await data.arrayBuffer())) !== reference.hash) throw new Error("A source file could not be downloaded or verified. Your current workspace is unchanged.");
         packed = await data.text();
-        if (!reference.academic) cacheContent(`${userId}/${reference.hash}`, packed);
+        if (!reference.academic) cacheContent(`${userId}/${reference.hash}`, packed, data.size);
       }
       const text = await decompressText(packed, reference.expandedBytes);
       if (new TextEncoder().encode(text).length !== reference.expandedBytes) throw new Error("A source file has an invalid expanded size.");
