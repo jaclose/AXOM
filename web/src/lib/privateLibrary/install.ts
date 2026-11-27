@@ -19,7 +19,15 @@ import { PRIVATE_LIBRARY_DOCUMENT, PRIVATE_LIBRARY_FORMAT, PRIVATE_REVIEW_DOCUME
 import type { SourceDocument } from "../library";
 
 export type LibraryReader = (path: string) => Promise<Uint8Array>;
-const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+/** Raw source bytes are evidence. Reject malformed UTF-8 instead of silently
+ * substituting U+FFFD; retain the historical single leading BOM handling. */
+export function decodeLibraryText(bytes: Uint8Array): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new Error("Invalid UTF-8 in academic source text. Recover the original file before retrying.");
+  }
+}
 function installationFailureReason(cause: unknown, fallback: string): string {
   try {
     const message = cause instanceof Error ? cause.message : undefined;
@@ -394,7 +402,7 @@ async function install(read: LibraryReader, progress: (message: string) => void,
     // serialize transactions shared with other import entry points.
     return { ...useStore.getState(), assertCurrent };
   };
-  const catalog = readCatalog(JSON.parse(text(await read("catalog.json"))));
+  const catalog = readCatalog(JSON.parse(decodeLibraryText(await read("catalog.json"))));
   const refreshEquivalentSource = auditedRhpsSourceRefresh(catalog);
   const installedIds: LibraryInstallation = { status: "complete", warnings: [], templateIds: [], documentIds: [], questionIds: [], setIds: [] };
   progress("Protecting your current workspace…");
@@ -407,7 +415,7 @@ async function install(read: LibraryReader, progress: (message: string) => void,
   for (const entry of catalog.templates) {
     const bytes = await read(entry.file);
     if (await sha256(bytes) !== `sha256:${entry.checksum}`) throw new Error(`Template integrity check failed: ${entry.name}`);
-    const doc = await prepareCourseTemplate(text(bytes), entry.name);
+    const doc = await prepareCourseTemplate(decodeLibraryText(bytes), entry.name);
     installedIds.templateIds.push(doc.id);
     installedIds.documentIds.push(doc.id);
     const s = currentStore();
@@ -455,7 +463,7 @@ async function install(read: LibraryReader, progress: (message: string) => void,
       if (source.bankFile) {
       report("opening question package");
       const storedReview = currentStore().documents.find(d => d.id === `private-review-${source.checksum}`);
-      const incomingBank = readPreparedBank(JSON.parse(text(await read(source.bankFile))));
+      const incomingBank = readPreparedBank(JSON.parse(decodeLibraryText(await read(source.bankFile))));
       if (incomingBank.pkg.questions.some(question => question.provenance.sourceChecksum !== `sha256:${source.checksum}`))
         throw new Error("The question package does not match its recorded source checksum. Rebuild its source bindings before installing; no questions from this bank were saved.");
       report("checking saved source review");

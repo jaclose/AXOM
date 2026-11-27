@@ -786,3 +786,57 @@ describe("shared image identity in prepared libraries", () => {
     expect(await getQuestionAttachmentBlob(`private-library:${checksum}`)).toBeUndefined();
   });
 });
+
+describe("raw academic source UTF-8 admission", () => {
+  // These synthetic fixtures are ASCII, so the string index is the byte index.
+  function corrupt(bytes: Uint8Array, marker: string) {
+    const copy = new Uint8Array(bytes);
+    const index = new TextDecoder().decode(copy).indexOf(marker);
+    expect(index).toBeGreaterThanOrEqual(0);
+    copy[index] = 0xff;
+    return copy;
+  }
+
+  it("rejects malformed catalog text before importing questions", async () => {
+    const b = await bundle();
+    b.files.set("catalog.json", corrupt(b.files.get("catalog.json")!, "sample.txt"));
+    await expect(installPrivateLibrary(b.read)).rejects.toThrow("Invalid UTF-8");
+    expect(useStore.getState().questions).toHaveLength(0);
+  });
+
+  it("rejects a checksum-matching malformed template", async () => {
+    const b = await bundle();
+    const bytes = corrupt(b.files.get("templates/test.txt")!, "Example topic");
+    b.files.set("templates/test.txt", bytes);
+    b.catalog.templates[0].checksum = (await sha256(bytes)).slice(7);
+    b.files.set("catalog.json", encode(b.catalog));
+    await expect(installPrivateLibrary(b.read)).rejects.toThrow("Invalid UTF-8");
+    expect(useStore.getState().questions).toHaveLength(0);
+  });
+
+  it("holds a malformed bank without saving questions from it", async () => {
+    const b = await bundle();
+    const bytes = corrupt(b.files.get("banks/test/bank.json")!, "Which sample");
+    b.files.set("banks/test/bank.json", bytes);
+    const result = await installPrivateLibrary(b.read);
+    expect(result.status).toBe("partial");
+    expect(result.warnings.join(" ")).toContain("Invalid UTF-8");
+    expect(useStore.getState().questions).toHaveLength(0);
+    expect(useStore.getState().documents.filter(document => document.fileType === PRIVATE_REVIEW_DOCUMENT)).toHaveLength(0);
+  });
+
+  it("does not bind a valid saved question to a malformed source revision", async () => {
+    const b = await bundle();
+    const installation = await installPrivateLibrary(b.read);
+    const revision = "11111111-1111-4111-8111-111111111111";
+    const manifest = async () => Promise.all([...b.files].map(async ([path, bytes]) => ({
+      path, sha256: (await sha256(bytes)).slice(7), mime_type: "application/json",
+    })));
+    const valid = await academicBindings(useStore.getState(), installation, revision, await manifest(), b.files);
+    expect(valid.sources.some(reference => reference.academic?.kind === "question")).toBe(true);
+    b.files.set("banks/test/bank.json", corrupt(b.files.get("banks/test/bank.json")!, "Original sample source."));
+    const invalid = await academicBindings(useStore.getState(), installation, revision, await manifest(), b.files);
+    expect(invalid.sources).toEqual([]);
+    expect(useStore.getState().questions).toHaveLength(1);
+  });
+});

@@ -4,7 +4,7 @@ import { hasExplanationBlocks, hasExplanationProse } from "../questionExplanatio
 import { sha256 } from "../question-content/assets";
 import type { PackageQuestion } from "../question-content/package";
 import type { Readiness } from "../question-content/readiness";
-import { readCatalog, readPreparedBank, type LibraryReader } from "../privateLibrary/install";
+import { decodeLibraryText, readCatalog, readPreparedBank, type LibraryReader } from "../privateLibrary/install";
 import { academicLibraryReader } from "./client";
 import { academicAssetPath, type AcademicUpload } from "./upload";
 
@@ -45,7 +45,7 @@ export function countReadyExplanations(
   return { readyQuestions, explainedReadyQuestions, missingExplanations: readyQuestions - explainedReadyQuestions };
 }
 
-const decode = (bytes: Uint8Array): unknown => JSON.parse(new TextDecoder().decode(bytes));
+const decode = (bytes: Uint8Array): unknown => JSON.parse(decodeLibraryText(bytes));
 
 async function inspectBanks(
   read: LibraryReader, files: readonly { path: string; byte_size: number; sha256: string }[], expectedReady: number,

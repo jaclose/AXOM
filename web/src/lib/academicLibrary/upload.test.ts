@@ -5,6 +5,7 @@ import { sha256 } from "../question-content/assets";
 import { academicAssetPath, assertAcademicFigureBudget, assertAcademicStoredFigureBudget, academicCollectionId, academicUploadHash, prepareAcademicUpload, preflightAcademicUpload, uploadAcademicCourse, type AcademicUpload } from "./upload";
 import { planPublication, publicationJobs, readPublicationInventory } from "./publication";
 import { library } from "./publicationFixture.testing";
+import { inspectPreparedUploadExplanations } from "./explanationReview";
 
 const tus = vi.hoisted(() => ({
   blobs: new Map<string, Blob>(),
@@ -1106,4 +1107,27 @@ it("uploads every plan section of one module as one course, with a reviewed term
     await expect(uploadAcademicCourse(rejected.client, accountId, copy, () => {}, () => {})).rejects.toThrow();
     expect(rejected.rpc).not.toHaveBeenCalled();
   }
+});
+
+it("rejects malformed UTF-8 before preparing or replaying a source package", async () => {
+  const f = await templateBackedBankFixture();
+  const upload = await prepareAcademicUpload(f.read);
+  const bank = upload.files.find(file => file.path === "banks/sample/bank.json")!;
+  const sourceBytes = new Uint8Array(f.files.get(bank.path)!);
+  const sourceOffset = new TextDecoder().decode(sourceBytes).indexOf("Synthetic educational fixture.");
+  expect(sourceOffset).toBeGreaterThanOrEqual(0);
+  sourceBytes[sourceOffset] = 0xff;
+  f.files.set(bank.path, sourceBytes);
+  await expect(prepareAcademicUpload(f.read)).rejects.toThrow("Invalid UTF-8");
+  // Every encoded question still has its original answer and readiness fields.
+  const bytes = new Uint8Array(bank.bytes);
+  const offset = new TextDecoder().decode(bytes).indexOf("Which labeled item is first?");
+  expect(offset).toBeGreaterThanOrEqual(0);
+  bytes[offset] = 0xff;
+  bank.bytes = bytes;
+  bank.byte_size = bytes.length;
+  bank.sha256 = (await sha256(bytes)).slice(7);
+  upload.hash = await academicUploadHash(upload);
+  await expect(preflightAcademicUpload(upload)).rejects.toThrow("Invalid UTF-8");
+  await expect(inspectPreparedUploadExplanations(upload)).rejects.toThrow("Invalid UTF-8");
 });

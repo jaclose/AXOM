@@ -174,7 +174,7 @@ it.each(["flat question", "native explanation", "local review", "local key"])("p
   expect(useStore.getState().questions).toHaveLength(3);
 });
 
-it.each(["unavailable", "wrong collection", "wrong account", "damaged bytes"])("does not use an %s prior source as a trusted baseline", async reason => {
+it.each(["unavailable", "wrong collection", "wrong account", "damaged bytes", "checksum-matching malformed text"])("does not use an %s prior source as a trusted baseline", async reason => {
   const f = await fixture(); await f.installOld();
   if (reason === "unavailable") f.state.oldAccessible = false;
   if (reason === "wrong collection") f.state.oldCollection = "55555555-5555-4555-8555-555555555555";
@@ -183,6 +183,14 @@ it.each(["unavailable", "wrong collection", "wrong account", "damaged bytes"])("
     useStore.getState().updateDocument(reference.id, { rawText: JSON.stringify({ ...JSON.parse(reference.rawText), accountId: "other-account" }) });
   }
   if (reason === "damaged bytes") f.files.get(oldRevision)!.set(path, encode({ changed: true }));
+  if (reason === "checksum-matching malformed text") {
+    const bytes = new Uint8Array(f.files.get(oldRevision)!.get(path)!);
+    const offset = new TextDecoder().decode(bytes).indexOf("An invented source for source-update tests.");
+    expect(offset).toBeGreaterThanOrEqual(0);
+    bytes[offset] = 0xff;
+    f.files.get(oldRevision)!.set(path, bytes);
+    await f.refreshManifest(oldRevision);
+  }
   await f.installNew();
   const saved = useStore.getState().questions.find(question => question.content?.id === "synthetic-q1")!;
   expect(saved.needsReview).toBe(true);

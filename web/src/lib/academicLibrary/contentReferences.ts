@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { PreparedBank } from "../privateLibrary/types";
 import type { NoctyriumState } from "../types";
 import { sha256 } from "../compressedText";
-import { readCatalog, readPreparedBank, safeLibraryPath, type LibraryInstallation } from "../privateLibrary/install";
+import { decodeLibraryText, readCatalog, readPreparedBank, safeLibraryPath, type LibraryInstallation } from "../privateLibrary/install";
 import { packageToReviewedImport } from "../question-content/toReviewedImport";
 import { prepareReviewedImport } from "../questionImportSave";
 import { validateQuestionRecord } from "../questions";
@@ -85,7 +85,7 @@ export async function academicBindings(state: NoctyriumState, installation: Libr
     const bytes = captured.get(file.path);
     if (!bytes || file.path === "catalog.json" || !file.path.endsWith(".json")) continue;
     let bank;
-    try { bank = readPreparedBank(JSON.parse(new TextDecoder().decode(bytes))); } catch { continue; }
+    try { bank = readPreparedBank(JSON.parse(decodeLibraryText(bytes))); } catch { continue; }
     const asset = { revisionId, path: file.path, sha256: file.sha256, adapterVersion: 1 as const };
     for (const collection of ["questions", "documents"] as const) {
       const ids = new Set(collection === "questions" ? installation.questionIds : installation.documentIds);
@@ -108,7 +108,7 @@ export async function academicBindings(state: NoctyriumState, installation: Libr
     }
   }
   const catalogBytes = captured.get("catalog.json");
-  const originalPaths = new Set(catalogBytes ? readCatalog(JSON.parse(new TextDecoder().decode(catalogBytes))).sources.flatMap(source => source.originalFile ? [source.originalFile] : []) : []);
+  const originalPaths = new Set(catalogBytes ? readCatalog(JSON.parse(decodeLibraryText(catalogBytes))).sources.flatMap(source => source.originalFile ? [source.originalFile] : []) : []);
   const originals = state.documents.filter(document => installation.documentIds.includes(document.id) && document.checksum && document.fileType !== "axom-course-template")
     .flatMap(document => {
       const file = files.find(item => originalPaths.has(item.path) && item.sha256 === document.checksum!.replace(/^sha256:/, "")
