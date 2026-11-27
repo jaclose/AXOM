@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { accountOperationClient } from "../account/supabase";
 import { sha256 } from "../question-content/assets";
 import { installPrivateLibrary, safeLibraryPath, type LibraryReader, type LibraryInstallation } from "../privateLibrary/install";
+import { safeInputPath } from "../privateLibrary/inputRoot";
 import type { LibraryInstallOptions, LibraryInstallScope } from "../privateLibrary/install";
 import { attestAcademicExplanations, type ExplanationReviewReceipt } from "./explanationReview";
 import { academicSourceReconciler } from "./sourceUpdate";
@@ -87,8 +88,27 @@ export async function academicLibraryReader(client: SupabaseClient, revision: st
     if (data.length < 500) break;
   }
   if (!manifest.length || manifest.length > 1500) throw new Error("Invalid course file manifest.");
-  const files = new Map(manifest.map(file => [safeLibraryPath(file.path), file]));
-  if (files.size !== manifest.length || !files.has("catalog.json")) throw new Error("Invalid course file manifest.");
+  // A cloud revision must be round-trippable as an exact local/source archive.
+  // Filesystems disagree on case, Unicode normalization and file-vs-folder
+  // names. Reject the entire manifest rather than silently choosing a file.
+  const files = new Map<string, AcademicFile>();
+  const portablePaths = new Set<string>();
+  for (const file of manifest) {
+    let path: string;
+    try { path = safeInputPath(safeLibraryPath(file?.path)); }
+    catch { throw new Error("Invalid course file manifest: conflicting or unsafe path."); }
+    const portable = path.toLowerCase();
+    if (path !== file.path || portablePaths.has(portable)) throw new Error("Invalid course file manifest: conflicting or unsafe path.");
+    portablePaths.add(portable);
+    files.set(path, file);
+  }
+  if (!files.has("catalog.json")) throw new Error("Invalid course file manifest.");
+  for (const path of portablePaths) {
+    const parts = path.split("/");
+    for (let depth = 1; depth < parts.length; depth++) {
+      if (portablePaths.has(parts.slice(0, depth).join("/"))) throw new Error("Invalid course file manifest: conflicting or unsafe path.");
+    }
+  }
   let bytes = 0;
   for (const file of files.values()) {
     if (!/^[a-f0-9]{64}$/.test(file.sha256) || !Number.isSafeInteger(file.byte_size) || file.byte_size < 1 || file.byte_size > 50 * 1024 * 1024 || typeof file.object_path !== "string" || !uuid(file.object_path.split("/")[0]) || file.object_path.split("/").length !== 2 || !file.object_path.endsWith(`/${file.sha256}`)) throw new Error("Invalid course file manifest.");
