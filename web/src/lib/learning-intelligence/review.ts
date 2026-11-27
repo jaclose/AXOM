@@ -110,6 +110,24 @@ function retryFor(reasons: readonly ReviewReason[]): RetryWhen[] {
 }
 
 /**
+ * A saved status alone cannot establish a trustworthy pace observation after
+ * answer-key revisions. For timing advice require a recorded selected option
+ * that can still be checked against the currently reviewed key. This does not
+ * regrade or erase legacy status-only attempts used elsewhere in analytics.
+ */
+function hasVerifiableCorrectChoice(event: AttemptEvent): boolean {
+  return event.correct === true && event.answerKey !== undefined
+    && event.correctKey !== undefined && event.answerKey === event.correctKey;
+}
+
+/** Imported or legacy attempt durations are untrusted at runtime. Invalid
+ * duration values must not establish either a pace baseline or slow-right
+ * advice; this does not change stored answers or ordinary score tallies. */
+function hasValidDurationSeconds(seconds: unknown): seconds is number {
+  return typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0;
+}
+
+/**
  * The questions of one block worth a second look. `history` is every earlier
  * event for the same questions, so a miss can be told from a repeat miss and
  * "slow" is judged against the learner's own pace.
@@ -119,9 +137,32 @@ export function reviewCandidates(
   history: readonly AttemptEvent[] = block,
   rank: ReviewRanker = rankByReasons,
 ): ReviewCandidate[] {
-  const usual = median(history.filter((event) => event.correct && event.seconds).map((event) => event.seconds!));
-  // Needs a few timed answers before "usual" means anything.
-  const usualSeconds = usual && history.filter((item) => item.seconds).length >= 6 ? usual : undefined;
+  // Require six positive, finite, currently verifiable saved correct choices.
+  // Legacy status-only, key-held and contradictory outcomes retain their
+  // recorded times, but cannot substantiate a diagnostic pace benchmark.
+  const trustedTimed = history
+    .filter((event) => hasVerifiableCorrectChoice(event) && hasValidDurationSeconds(event.seconds));
+  const trustedCorrectSeconds = trustedTimed.map((event) => event.seconds!).sort((a, b) => a - b);
+  const overallUsualSeconds = trustedCorrectSeconds.length >= 6 ? median(trustedCorrectSeconds) : undefined;
+  // Session history can contain the block being reviewed. A candidate cannot
+  // be its own sixth supporting observation; duplicate identities are held.
+  const identity = (event: AttemptEvent) => JSON.stringify([event.questionId, event.at, event.exposure, event.quizSessionId]);
+  const paceIdentityCounts = new Map<string, number>();
+  for (const event of trustedTimed) {
+    const key = identity(event);
+    paceIdentityCounts.set(key, (paceIdentityCounts.get(key) ?? 0) + 1);
+  }
+  const usualWithoutSelf = (event: AttemptEvent): number | undefined => {
+    const matches = paceIdentityCounts.get(identity(event)) ?? 0;
+    if (matches === 0) return overallUsualSeconds;
+    if (matches !== 1 || trustedCorrectSeconds.length < 7 || event.seconds === undefined) return undefined;
+    const index = trustedCorrectSeconds.indexOf(event.seconds);
+    if (index < 0) return undefined;
+    const remaining = trustedCorrectSeconds.length - 1;
+    const at = (position: number) => trustedCorrectSeconds[position + (position >= index ? 1 : 0)];
+    const mid = Math.floor(remaining / 2);
+    return remaining % 2 ? at(mid) : (at(mid - 1) + at(mid)) / 2;
+  };
   const earlierMisses = new Map<ID, number>();
   const firstAnswers = new Map<ID, boolean | undefined>();
   const blockKeys = new Set(block.map((event) => `${event.questionId}\u001f${event.at}`));
@@ -136,6 +177,7 @@ export function reviewCandidates(
 
   const candidates: ReviewCandidate[] = [];
   for (const event of block) {
+    const usualSeconds = usualWithoutSelf(event);
     const reasons: ReviewReason[] = [];
     if (event.correct === undefined) reasons.push("unscored");
     else if (event.correct === false) {
@@ -144,7 +186,8 @@ export function reviewCandidates(
       if (!reasons.length) reasons.push("wrong");
     } else {
       if (event.certainty === "guess" || event.certainty === "unsure") reasons.push("unsure-right");
-      if (usualSeconds && event.seconds && event.seconds >= usualSeconds * SLOW_FACTOR) reasons.push("slow-right");
+      if (hasVerifiableCorrectChoice(event) && hasValidDurationSeconds(event.seconds)
+        && usualSeconds !== undefined && event.seconds >= usualSeconds * SLOW_FACTOR) reasons.push("slow-right");
     }
     if (reasons.length) {
       const signals: ReviewSignals = {
@@ -166,15 +209,49 @@ export function reviewCandidates(
   return candidates.sort((left, right) => right.priority - left.priority);
 }
 
-/** The review candidates of a finished block, read from the workspace. */
+/**
+ * The review candidates of a finished block, read from the workspace.
+ * A historical block must be read against its own past, not future answers:
+ * opening an old result after more practice must never rewrite its reasons.
+ *
+ * Equal or malformed timestamps are not proof that another event preceded
+ * this block. Keep the block itself for scoring, but fail closed on ambiguous
+ * external history instead of inventing repeat misses or a faster baseline.
+ */
 export function reviewCandidatesForSession(
   quizSessionId: ID,
   questions: readonly QuestionRecord[],
 ): ReviewCandidate[] {
-  const events = attemptEvents(questions);
+  // Events retain canonical question IDs, not the imported source-row identity.
+  // If two records claim an ID, neither its attempts nor its history can be
+  // assigned to a defensible retry target. Quarantine both from actionable
+  // session review without modifying their saved attempts or scored history.
+  const seen = new Set<ID>();
+  const ambiguousIds = new Set<ID>();
+  for (const question of questions) {
+    if (seen.has(question.id)) ambiguousIds.add(question.id);
+    seen.add(question.id);
+  }
+  const attributable = ambiguousIds.size
+    ? questions.filter((question) => !ambiguousIds.has(question.id))
+    : questions;
+  const events = attemptEvents(attributable);
   const block = events.filter((event) => event.quizSessionId === quizSessionId);
+  if (!block.length) return [];
+
+  // Use the first answer in the selected session as a conservative cutoff.
+  // Events from other sessions interleaved with this one are not prior
+  // knowledge of the whole block, even if they precede its final answer.
+  const blockTimes = block.map((event) => Date.parse(event.at));
+  const start = blockTimes.every(Number.isFinite) ? Math.min(...blockTimes) : undefined;
   const inBlock = new Set(block.map((event) => event.questionId));
-  return reviewCandidates(block, events.filter((event) => inBlock.has(event.questionId) || event.seconds));
+  const history = events.filter((event) => {
+    if (event.quizSessionId === quizSessionId) return true;
+    const at = Date.parse(event.at);
+    return start !== undefined && Number.isFinite(at) && at < start
+      && (inBlock.has(event.questionId) || event.seconds);
+  });
+  return reviewCandidates(block, history);
 }
 
 /**
@@ -196,7 +273,10 @@ export function buildReviewSet(input: {
     title: `${input.parent ? `${input.parent.title}: ` : ""}review, ${new Date(input.now).toLocaleDateString()}`,
     sourceDocumentIds: [],
     createdAt: input.now,
-    questionIds: picked.map((candidate) => candidate.questionId),
+    // One retry target per canonical question ID, even if this block includes
+    // multiple attempts for the same question. Keep the first selected order;
+    // source attempts and their independent review reasons remain untouched.
+    questionIds: [...new Set(picked.map((candidate) => candidate.questionId))],
     // The existing "missed-review" tag keeps older filters and cards working.
     tags: ["missed-review"],
     aiEnhanced: false,
