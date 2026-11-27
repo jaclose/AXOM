@@ -51,7 +51,7 @@ beforeEach(() => {
 });
 
 describe.each(collections)("content identity admission: %s", collection => {
-  it.each([undefined, ["x"], ["unselected"]])("rejects overlap before any I/O (selection %j)", async selection => {
+  it.each([{ selection: undefined }, { selection: ["x"] }, { selection: ["unselected"] }])("rejects overlap before any I/O (selection %j)", async ({ selection }) => {
     const remote = state(collection, ["x"], ["x"]);
     const before = JSON.stringify(remote);
     const filter = selection === undefined ? undefined : collection === "questions" ? { questionIds: selection } : { documentIds: selection };
@@ -73,7 +73,7 @@ describe.each(collections)("content identity admission: %s", collection => {
     noIO();
   });
 
-  it.each([["x", "x"], [""]])("refuses ambiguous downloaded identities %j", async downloaded => {
+  it.each([{ downloaded: ["x", "x"] }, { downloaded: [""] }])("refuses ambiguous downloaded identities %j", async ({ downloaded }) => {
     const remote = state(collection, downloaded, ["y"]);
     const before = JSON.stringify(remote);
     expect(() => contentMetadata(remote)).toThrow(/identit/);
