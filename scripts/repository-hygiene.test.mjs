@@ -505,3 +505,76 @@ test('repository gate catches the observed conflict and missing-route failure, p
     assert.equal(result.errors.length, 4);
   });
 });
+
+// Keep the expensive APEX gate attached to academic changes, including recovery and review.
+// This checks the intentionally simple literal, trailing-* and trailing-/** path forms
+// supported by this workflow; it is not a general GitHub glob evaluator.
+test('APEX academic acceptance path filter covers source recovery, QBank and tracker changes only', () => {
+  const yaml = readFileSync(new URL('../.github/workflows/apex-acceptance.yml', import.meta.url), 'utf8');
+  const section = yaml.match(/^    paths:\s*\n((?:      - [^\n]+\n)+)/m);
+  assert.ok(section, 'APEX pull_request.paths must be present');
+  const globs = section[1].trim().split('\n').map((line) => line.trim().replace(/^-[ ]+/, '').replace(/^['\"]|['\"]$/g, ''));
+  const matches = (pathName, glob) => {
+    if (glob.endsWith('/**')) return pathName.startsWith(glob.slice(0, -2));
+    if (glob.endsWith('*')) return pathName.startsWith(glob.slice(0, -1));
+    assert.ok(!glob.includes('*'), `Unhandled path-glob form: ${glob}`);
+    return pathName === glob;
+  };
+  const triggered = (pathName) => globs.some((glob) => matches(pathName, glob));
+  for (const pathName of [
+    // Academic database contracts must not bypass dedicated acceptance because their names lack a TS entrypoint.
+    'supabase/migrations/20261122002007_academic_tracker_review.sql',
+    'supabase/migrations/20261010233000_shared_academic_catalog.sql',
+    'supabase/migrations/20261010234000_catalog_storage_policy_boundary.sql',
+    'supabase/migrations/20991231235959_future_academic_rls.sql',
+    // Cloud sharing, source originals, tracker progress, and permissioned bookshelf UI are academic entrypoints.
+    // QBank book counts, prepared cloud courses and durable activation are academic sources.
+    // Immutable QBank filter membership/metrics and course-module curriculum shells.
+    'web/src/lib/library.ts',
+    'web/src/lib/library.test.ts',
+    'web/src/lib/curricula.ts',
+    'web/src/lib/curricula.test.ts',
+    'web/src/lib/bookshelf/questionBankBooks.ts',
+    'web/src/lib/bookshelf/preparedCourses.ts',
+    'web/src/lib/bookshelf/loadCourse.ts',
+    'web/src/lib/bookshelf/loadCourse.test.ts',
+    'web/src/lib/tracker.ts',
+    'web/src/lib/tracker.test.ts',
+    'web/src/lib/sourceOriginal.ts',
+    'web/src/lib/sourceOriginal.test.ts',
+    'web/src/pages/SharedQuestionSetPage.tsx',
+    'web/src/pages/SharedQuestionSetPage.test.tsx',
+    'web/src/components/bookshelf/AcademicBankDiscovery.tsx',
+    'web/src/components/bookshelf/AcademicBankDiscovery.test.tsx',
+    'web/src/lib/course-engine/academicQuizPlanner.ts',
+    'web/src/lib/academicLibrary/reviewExport.ts',
+    'web/src/lib/privateLibrary/install.ts',
+    'web/src/lib/privateLibrary/install.test.ts',
+    'web/src/lib/decode/sources.ts',
+    'web/src/lib/decode/sources.test.ts',
+    'web/src/lib/questionAttachments.ts',
+    'web/src/lib/questionBank.test.ts',
+    'web/src/lib/sharing/supabaseSharing.ts',
+    'web/src/lib/learning-intelligence/review.ts',
+    'web/src/lib/exam/examSession.ts',
+    'web/src/lib/quizRunCommit.test.ts',
+    'web/src/components/questions/LibraryPanels.tsx',
+    'web/src/components/tracker/AcademicReviewFiles.tsx',
+    'web/src/components/exam/ExamRunner.tsx',
+    'web/src/pages/CourseTrackerPage.tsx',
+    'web/src/pages/CourseTrackerPage.cloudBatch.tsx',
+    'web/src/pages/QuestionWorkspacePage.tsx',
+    'web/src/pages/QuestionWorkspacePage.practice.tsx',
+  ]) assert.equal(triggered(pathName), true, `academic edit must trigger APEX: ${pathName}`);
+  for (const pathName of [
+    'docs/AI_STATE.md',
+    'web/src/components/productivity/Timer.tsx',
+    'web/src/lib/localVault.ts',
+    'web/src/lib/operator/hostClient.ts',
+    'web/src/pages/AboutPage.tsx',
+    'web/src/pages/SettingsPage.tsx',
+    'web/src/lib/decode/unrelatedUtility.ts',
+    'supabase/functions/communications/index.ts',
+    'supabase/seed.sql',
+  ]) assert.equal(triggered(pathName), false, `unrelated edit must not trigger APEX: ${pathName}`);
+});

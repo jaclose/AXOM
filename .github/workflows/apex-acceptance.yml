@@ -2,8 +2,37 @@ name: APEX Academic Acceptance
 
 on:
   pull_request:
+    # Academic reviewer/catalog/storage RLS migrations must trigger acceptance even without web edits.
+    # Use all migrations: future filenames are not reliably classifiable before source review.
     paths:
+      - 'supabase/migrations/**'
       - 'web/src/lib/course-engine/**'
+      - 'web/src/lib/academicLibrary/**'
+      - 'web/src/lib/bookshelf/**'
+      - 'web/src/lib/library*'
+      - 'web/src/lib/curricula*'
+      - 'web/src/lib/privateLibrary/**'
+      - 'web/src/lib/decode/sources*'
+      - 'web/src/lib/learning-intelligence/**'
+      - 'web/src/lib/exam/**'
+      - 'web/src/lib/question-content/**'
+      - 'web/src/lib/sharing/**'
+      - 'web/src/lib/question*'
+      - 'web/src/lib/quiz*'
+      - 'web/src/lib/pdfQuestionImport*'
+      - 'web/src/lib/courseWork*'
+      - 'web/src/lib/courseScheduleImport*'
+      - 'web/src/lib/studyProgress*'
+      - 'web/src/lib/tracker*'
+      - 'web/src/lib/sourceOriginal*'
+      - 'web/src/lib/saveProgress*'
+      - 'web/src/components/questions/**'
+      - 'web/src/components/bookshelf/**'
+      - 'web/src/components/tracker/**'
+      - 'web/src/components/exam/**'
+      - 'web/src/pages/CourseTrackerPage*'
+      - 'web/src/pages/QuestionWorkspacePage*'
+      - 'web/src/pages/SharedQuestionSetPage*'
       - '.github/workflows/apex-acceptance.yml'
   workflow_dispatch:
 
