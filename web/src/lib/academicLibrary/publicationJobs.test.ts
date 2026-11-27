@@ -16,8 +16,8 @@ const inventory: PublicationInventory = {
   sections: [],
   sources: [
     { id: "bank", name: "bank.pdf", checksum: "a".repeat(64), status: "prepared", reason: "", ready: 3, review: 0, hasBank: true,
-      bankIdentity: { path: bankPath, digest: bankDigest } },
-    { id: "slides", name: "slides.pdf", checksum: "b".repeat(64), status: "reference/template-only", reason: "", ready: 0, review: 0, hasBank: false },
+      bankIdentity: { path: bankPath, digest: bankDigest }, original: { extension: "pdf" } },
+    { id: "slides", name: "slides.pdf", checksum: "b".repeat(64), status: "reference/template-only", reason: "", ready: 0, review: 0, hasBank: false, original: { extension: "pdf" } },
   ],
 };
 const course: PlannedCourse = {
@@ -28,7 +28,8 @@ const catalog = {
   format: "axom-private-library", schemaVersion: 1, id: "academic-library", version: "v1", templates: [],
   sources: inventory.sources.map(source => ({ id: source.id, name: source.name, sourcePath: source.name, checksum: source.checksum,
     module: "NCRS", status: source.status, reason: "", ready: source.ready, review: 0,
-    ...(source.hasBank ? { bankFile: `banks/${source.checksum}/bank.json` } : {}) })),
+    ...(source.hasBank ? { bankFile: `banks/${source.checksum}/bank.json` } : {}),
+    ...(source.original ? { originalFile: `sources/${source.checksum}.${source.original.extension}` } : {}) })),
 };
 const read = vi.fn(async (path: string) => path === "catalog.json" ? new TextEncoder().encode(JSON.stringify(catalog))
   : path === bankPath ? bankBytes.slice() : new Uint8Array());
@@ -124,7 +125,10 @@ describe("publication jobs", () => {
     vi.mocked(prepareAcademicUpload)
       .mockImplementationOnce(afterBank(new Error("This collection exceeds the supported upload size.")))
       .mockImplementationOnce(afterBank(upload));
-    const { jobs, notes } = publicationJobs(read, mixed, [course]);
+    const mixedCatalog = { ...catalog, sources: catalog.sources.map(source => source.id === "bank"
+      ? { ...source, originalFile: source.originalFile!.replace(/\.pdf$/, ".pptx") } : source) };
+    const mixedRead = async (path: string) => path === "catalog.json" ? new TextEncoder().encode(JSON.stringify(mixedCatalog)) : read(path);
+    const { jobs, notes } = publicationJobs(mixedRead, mixed, [course]);
     await expect(jobs[0].prepare()).resolves.toBe(upload);
     expect(prepareAcademicUpload).toHaveBeenCalledTimes(2);
     expect(notes.keptLocal.get(course.catalogId)).toBe(2);

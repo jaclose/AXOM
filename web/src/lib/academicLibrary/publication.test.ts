@@ -226,6 +226,40 @@ describe("publishing a prepared library as one course per term and module", () =
       .rejects.toThrow(/question counts differ from its unique planned sources/);
   });
 
+
+  it.each(["removed", "unsupported", "supported", "added", "optional-removed"] as const)(
+    "refuses post-review original coverage drift (%s) before preparing a publication receipt", async change => {
+      const fixture = await library();
+      const source = fixture.catalog.sources.find(item => item.name === (change === "optional-removed" ? "goer-slides.pdf" : "goer-pq.pdf"))!;
+      const path = source.originalFile!;
+      const bytes = fixture.files.get(path)!;
+      const saveCatalog = () => fixture.files.set("catalog.json", new TextEncoder().encode(JSON.stringify(fixture.catalog)));
+      if (change === "added") {
+        delete source.originalFile;
+        saveCatalog();
+      }
+      const inventory = await readPublicationInventory(fixture.read);
+      const course = planPublication(inventory).courses.find(item => item.moduleKey === "goer")!;
+      expect(course.sourceIds).toContain(source.id);
+      expect(course.originals).toBe(change === "added" ? 1 : 2);
+      if (change === "removed" || change === "optional-removed") delete source.originalFile;
+      else {
+        source.originalFile = change === "added" ? path : path.replace(/\.pdf$/, change === "unsupported" ? ".pptx" : ".txt");
+        fixture.files.set(source.originalFile, bytes);
+      }
+      saveCatalog();
+      const snapshot = fixture.files.get("catalog.json")!.slice();
+      const { jobs, notes } = publicationJobs(fixture.read, inventory, [course]);
+      await expect(jobs[0].prepare()).rejects.toThrow(/reviewed original file coverage changed/);
+      expect(notes.keptLocal.has(course.catalogId)).toBe(false);
+      expect(notes.failures.get(course.catalogId)).toMatch(/reviewed original file coverage changed/);
+      // Even an explicit omit-originals stage must not disguise selected-row drift.
+      await expect(courseLibraryReader(fixture.read, inventory, course, { originals: false })("catalog.json"))
+        .rejects.toThrow(/reviewed original file coverage changed/);
+      expect(fixture.files.get("catalog.json")).toEqual(snapshot);
+      expect(fixture.files.get(path)).toEqual(bytes);
+    });
+
   it("keeps an unsupported bank original local while publishing its questions", async () => {
     const fixture = await library();
     const bank = fixture.catalog.sources.find(source => source.name === "goer-pq.pdf")!;

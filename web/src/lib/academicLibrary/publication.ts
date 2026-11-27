@@ -146,11 +146,11 @@ export async function readPublicationInventory(
   for (const [index, source] of catalog.sources.entries()) {
     if (signal?.aborted) throw new DOMException("Reading the library was cancelled.", "AbortError");
     if (index % 10 === 0) progress(`Reading sources · ${index + 1} of ${catalog.sources.length}`);
-    const extension = source.originalFile?.split(".").at(-1)?.toLowerCase();
+    const extension = source.originalFile?.split(".").at(-1)?.toLowerCase() ?? "";
     const entry: PublicationSource = { id: source.id, name: source.name, checksum: source.checksum, status: source.status,
       reason: source.reason, ready: source.ready, review: source.review, hasBank: Boolean(source.bankFile),
       ...(source.module !== undefined && moduleIdentity(source.module) ? { moduleKey: moduleIdentity(source.module) } : {}),
-      ...(source.originalFile && extension ? { original: { extension } } : {}),
+      ...(source.originalFile ? { original: { extension } } : {}),
       ...(source.duplicateOf ? { duplicateOf: source.duplicateOf } : {}) };
     if (source.bankFile) {
       try {
@@ -397,6 +397,9 @@ export function courseLibraryReader(read: LibraryReader, inventory: PublicationI
           || (source.hasBank && row.bankFile !== source.bankIdentity?.path))
           throw new Error("The library changed while publishing. Choose it again and review the plan.");
         const extension = row.originalFile?.split(".").at(-1)?.toLowerCase() ?? "";
+        // Size fallback is an explicit choice, not permission to accept a changed inventory.
+        if (Boolean(row.originalFile) !== Boolean(source.original) || (row.originalFile && extension !== source.original?.extension))
+          throw new Error("The reviewed original file coverage changed while publishing. Choose the library again and review the plan.");
         return options.originals === false || (row.originalFile && !UPLOADABLE_ORIGINALS.has(extension))
           ? { ...row, originalFile: undefined } : row;
       });
