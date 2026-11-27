@@ -25,14 +25,29 @@ export function confirmCoursePass(item: TrackerItem, method: CourseStudyMethod, 
   }, at);
 }
 
+/** Unidentified historical review work retains broad duplicate protection. */
+const reviewSourceKey = (source?: TrackerItem["reviewTask"]): string | null =>
+  source?.sourceId?.trim() ? JSON.stringify([source.source, source.sourceId.trim()]) : null;
+
 export function reviewTaskInputs(titles: string[], path: string, source: NonNullable<TrackerItem["reviewTask"]>, existing: TrackerItem[]) {
-  const active = new Set(existing.filter((item) => !isArchivedCourseItem(item)).map((item) => `${trackerPathKey(item.path)}|${item.label.toLowerCase()}`));
+  const active = new Map<string, Set<string | null>>();
+  const taskKey = (path: string, label: string) => JSON.stringify([trackerPathKey(path), label.toLowerCase()]);
+  const remember = (key: string, identity: string | null) => {
+    const identities = active.get(key) ?? new Set<string | null>();
+    identities.add(identity);
+    active.set(key, identities);
+  };
+  for (const item of existing) {
+    if (!isArchivedCourseItem(item)) remember(taskKey(item.path, item.label), reviewSourceKey(item.reviewTask));
+  }
   return [...new Set(titles.map((title) => title.trim()).filter(Boolean))].flatMap((title): Array<Omit<TrackerItem, "id" | "updated">> => {
     const label = /^review\b/i.test(title) ? title : `Review ${title}`;
     const destination = normalizeTrackerPath(path || "Question Bank/Review");
-    const key = `${trackerPathKey(destination)}|${label.toLowerCase()}`;
-    if (active.has(key)) return [];
-    active.add(key);
+    const key = taskKey(destination, label);
+    const identity = reviewSourceKey(source);
+    const seen = active.get(key);
+    if (seen?.has(null) || (identity === null ? Boolean(seen?.size) : seen?.has(identity))) return [];
+    remember(key, identity);
     return [{ path: destination, label, kind: "Review Loop", passes: 0, ankiPasses: 0, yield: "review", reviewTask: source,
       note: source.source === "digest" ? "From a question-set digest. Archives after one completed review." : "Created from missed Question Bank results." }];
   });
