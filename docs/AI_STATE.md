@@ -5,15 +5,6 @@ authority: current-state
 ---
 # AXOM current AI state
 
-## QBank learner lane · 2026-11-27
-
-`claude/learner-experience-20261116` (on `codex/study-loop-recovery-20261116`)
-merges `origin/main` `2535cd76` once. It carries anonymous browsing of
-explicitly offered course revisions; migration
-`20261113220000_academic_public_catalog.sql` is **not applied to production**.
-Prepared imports keep separate reviews for sibling banks from one source.
-Current work: saving never blocks studying (bounded waits, honest save state).
-
 ## Page-load hotfix · 2026-11-24
 
 See [update policy](UPDATE-POLICY.md) and [Journal](JOURNAL-NOTEBOOK-ARCHITECTURE.md).
