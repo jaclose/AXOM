@@ -2,8 +2,10 @@
 // AnkiConnect client. AnkiConnect is an Anki add-on (code 2055492159) that
 // exposes a localhost HTTP API (default http://127.0.0.1:8765). With Anki open
 // and the add-on installed, AXOM can link to the collection: push its cards
-// into an AXOM deck, read review stats, and log review counts. Requests never
-// leave the machine. Endpoint config and the sync ledger live in localStorage
+// into an AXOM deck, read review stats, and log review counts. Requests are
+// limited to loopback or explicitly configured private-LAN endpoints; LAN
+// endpoints receive the user's Anki data and optional API key. Endpoint config
+// and the sync ledger live in localStorage
 // so they are never bundled into the persisted vault or a backup.
 //
 // Requests are CORS "simple requests" (a JSON string body with no custom
@@ -103,11 +105,26 @@ interface LocalFetchInit extends RequestInit {
 /** Loopback (127.0.0.1, localhost, ::1) or private-network address, else null. */
 export function addressSpaceFor(url: URL): AddressSpace | null {
   const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
-  if (host === "localhost" || host.endsWith(".localhost") || /^127\./.test(host) || host === "::1") return "loopback";
-  if (
-    /^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
-    /^169\.254\./.test(host) || host.endsWith(".local") || /^f[cd][0-9a-f]{2}:/.test(host) || host.startsWith("fe80:")
-  ) return "local";
+  if (host === "localhost" || host.endsWith(".localhost") || host === "::1") return "loopback";
+
+  // Match complete numeric IPv4 addresses, not DNS names that start with
+  // an apparent private-IP prefix (127.attacker.example, 10.attacker.example).
+  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (ipv4) {
+    const octets = ipv4.slice(1).map(Number);
+    if (octets.some((octet) => octet > 255)) return null;
+    const [first, second] = octets;
+    if (first === 127) return "loopback";
+    if (
+      first === 10 || (first === 192 && second === 168) ||
+      (first === 172 && second >= 16 && second <= 31) ||
+      (first === 169 && second === 254)
+    ) return "local";
+    return null;
+  }
+
+  // RFC 4291 reserves fe80::/10 for link-local, covering fe80 through febf.
+  if (host.endsWith(".local") || /^f[cd][0-9a-f]{2}:/.test(host) || /^fe[89ab][0-9a-f]:/.test(host)) return "local";
   return null;
 }
 
@@ -157,6 +174,11 @@ function endpointUrl(endpoint: string): URL {
   if (!["http:", "https:"].includes(url.protocol)) {
     throw new AnkiError("The endpoint must start with http:// or https://. AnkiConnect normally uses http://127.0.0.1:8765.", "malformed-endpoint");
   }
+  // The transport may contain a device-local API key. Do not send it to a
+  // public origin or a misleading URL containing embedded credentials.
+  if (url.username || url.password || addressSpaceFor(url) === null) {
+    throw new AnkiError("Use AnkiConnect on this computer or a trusted private network address. Public endpoints and URLs containing login details are blocked to protect your Anki data and API key.", "malformed-endpoint");
+  }
   return url;
 }
 
@@ -177,37 +199,49 @@ function errorFromAnki(message: string, action: string): AnkiError {
 async function send(url: URL, body: string, timeoutMs: number, fetchImpl: typeof fetch, hint: AddressSpace | undefined, action: string): Promise<unknown> {
   const controller = new AbortController();
   const timer = globalThis.setTimeout(() => controller.abort(), timeoutMs);
-  let response: Response;
   try {
     const init: LocalFetchInit = {
       method: "POST",
       mode: "cors",
       cache: "no-store",
       credentials: "omit",
+      redirect: "error", // Do not forward the Anki API key across redirects.
       referrerPolicy: "no-referrer",
       // No headers: a string body keeps this a CORS simple request.
       body,
       signal: controller.signal,
       ...(hint ? { targetAddressSpace: hint } : {}),
     };
-    response = await fetchImpl(url.toString(), init);
+    const response = await fetchImpl(url.toString(), init);
+    controller.signal.throwIfAborted();
+    if (response.status === 403) {
+      throw new AnkiError("AnkiConnect refused this page's origin. Connect again so Anki can ask you to allow AXOM, or add this origin to AnkiConnect's webCorsOriginList.", "permission-denied", action);
+    }
+    let data: unknown;
+    try {
+      data = await response.json();
+    } catch (error) {
+      // A body read may abort or lose its connection after headers arrived.
+      // Neither is proof that AnkiConnect is absent.
+      controller.signal.throwIfAborted();
+      if (error instanceof TypeError) {
+        throw new AnkiError("AnkiConnect's response was interrupted. Check the connection to Anki.", "network", action);
+      }
+      throw new AnkiError("The endpoint answered, but not with AnkiConnect JSON. Confirm the AnkiConnect add-on is installed and bound to this port.", "anki-connect-absent", action);
+    }
+    controller.signal.throwIfAborted();
+    if (!isRecord(data) || !("result" in data) || !("error" in data)) {
+      throw new AnkiError("The endpoint answered, but not like AnkiConnect (API version 6). Update AnkiConnect and restart Anki.", "anki-connect-absent", action);
+    }
+    if (data.error) throw errorFromAnki(String(data.error), action);
+    return data.result;
+  } catch (error) {
+    // Normalize aborts even if a fetch implementation rejects with TypeError.
+    controller.signal.throwIfAborted();
+    throw error;
   } finally {
     globalThis.clearTimeout(timer);
   }
-  if (response.status === 403) {
-    throw new AnkiError("AnkiConnect refused this page's origin. Connect again so Anki can ask you to allow AXOM, or add this origin to AnkiConnect's webCorsOriginList.", "permission-denied", action);
-  }
-  let data: unknown;
-  try {
-    data = await response.json();
-  } catch {
-    throw new AnkiError("The endpoint answered, but not with AnkiConnect JSON. Confirm the AnkiConnect add-on is installed and bound to this port.", "anki-connect-absent", action);
-  }
-  if (!isRecord(data) || !("result" in data) || !("error" in data)) {
-    throw new AnkiError("The endpoint answered, but not like AnkiConnect (API version 6). Update AnkiConnect and restart Anki.", "anki-connect-absent", action);
-  }
-  if (data.error) throw errorFromAnki(String(data.error), action);
-  return data.result;
 }
 
 function classifyFetchFailure(err: unknown, endpoint: URL, timeoutMs: number, action: string): AnkiError {
@@ -238,7 +272,7 @@ export interface AnkiClientOptions {
   /** AnkiConnect's optional apiKey. Device-local; never synced or exported. */
   apiKey?: string | null;
   fetchImpl?: typeof fetch;
-  /** Default per-request timeout. */
+  /** Default timeout per transport attempt, including reading its response body. */
   timeoutMs?: number;
 }
 
@@ -256,6 +290,39 @@ export interface AnkiClient {
   multi(actions: AnkiAction[], options?: { timeoutMs?: number }): Promise<AnkiMultiResult[]>;
 }
 
+// A hinted request may have reached Anki before its response was lost.
+// Only replay explicit, idempotent reads; unknown actions and multi batches
+// might contain mutations and must not be run twice automatically.
+const RETRYABLE_READ_ACTIONS = new Set([
+  "version", "deckNames", "deckNamesAndIds",
+  "getDeckStats", "getNumCardsReviewedToday", "getNumCardsReviewedByDay",
+  "findCards", "findNotes", "cardsInfo", "notesInfo",
+  "modelNames", "modelNamesAndIds", "modelFieldNames", "modelTemplates", "getTags",
+]);
+
+/** Decide from the exact transmitted bytes, not mutable caller objects or toJSON hooks. */
+function canRetryRead(body: string): boolean {
+  let wire: unknown;
+  try { wire = JSON.parse(body); } catch { return false; }
+  if (!isRecord(wire) || wire.version !== ANKI_CONNECT_API_VERSION ||
+      typeof wire.action !== "string" || !isRecord(wire.params)) return false;
+  if (wire.action !== "multi") return RETRYABLE_READ_ACTIONS.has(wire.action);
+  const actions = wire.params.actions;
+  return Array.isArray(actions) && actions.length > 0 && actions.every(
+    (entry) => isRecord(entry) && entry.version === ANKI_CONNECT_API_VERSION &&
+      isRecord(entry.params) && typeof entry.action === "string" && RETRYABLE_READ_ACTIONS.has(entry.action),
+  );
+}
+
+/** No response or an unreadable response cannot establish a write's outcome. */
+function uncertainOutcome(error: AnkiError): AnkiError {
+  if (!isAnkiOffline(error) && error.kind !== "anki-connect-absent") return error;
+  return new AnkiError(
+    `${error.message} AXOM did not repeat this action because Anki may already have applied it. Check Anki before retrying.`,
+    error.kind, error.action,
+  );
+}
+
 export function createAnkiClient(options: AnkiClientOptions = {}): AnkiClient {
   const endpoint = (options.endpoint ?? getAnkiEndpoint()).trim() || DEFAULT_ANKI_ENDPOINT;
   const fetchImpl = options.fetchImpl ?? ((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init));
@@ -265,21 +332,23 @@ export function createAnkiClient(options: AnkiClientOptions = {}): AnkiClient {
   async function request(action: string, payload: Record<string, unknown>, timeoutMs: number): Promise<unknown> {
     const url = endpointUrl(endpoint);
     const body = JSON.stringify({ action, version: ANKI_CONNECT_API_VERSION, params: payload, ...(key ? { key } : {}) });
+    // requestPermission can display a dialog or change origin trust: not a read.
+    const replaySafe = canRetryRead(body);
     const hint = addressSpaceHint(url);
     try {
       return await send(url, body, timeoutMs, fetchImpl, hint, action);
     } catch (error) {
-      if (error instanceof AnkiError) throw error;
-      // A browser whose Local Network Access rules reject the hint fails before
-      // any request is sent; one plain retry keeps those builds working.
-      if (hint && error instanceof TypeError) {
+      // Only a known read may retry a hinted fetch failure. A body failure
+      // already has a diagnostic and does not retry through another route.
+      if (replaySafe && hint && error instanceof TypeError) {
         try {
           return await send(url, body, timeoutMs, fetchImpl, undefined, action);
         } catch (retryError) {
           throw classifyFetchFailure(retryError, url, timeoutMs, action);
         }
       }
-      throw classifyFetchFailure(error, url, timeoutMs, action);
+      const diagnosed = classifyFetchFailure(error, url, timeoutMs, action);
+      throw replaySafe ? diagnosed : uncertainOutcome(diagnosed);
     }
   }
 
