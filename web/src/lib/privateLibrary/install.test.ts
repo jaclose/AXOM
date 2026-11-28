@@ -612,6 +612,37 @@ describe("shared image identity in prepared libraries", () => {
     } finally { unregister(); }
   });
 
+  it("recovers a held source-review image from the correct account when its local blob is absent", async () => {
+    stubSuccessfulImageDecode();
+    const b = await bundle();
+    const bank = JSON.parse(new TextDecoder().decode(b.files.get("banks/test/bank.json")!)) as PreparedBank;
+    const png = new Uint8Array([
+      137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,
+    ]);
+    const checksum = await sha256(png);
+    const key = `private-library:${checksum}`;
+    bank.pkg.questions[0].assets = [{
+      id: "source-review-image", filename: "review-image.png", mimeType: "image/png",
+      role: "source_page", questionId: "sample-1", checksum,
+    }];
+    await deleteQuestionAttachmentBlobs([key]);
+    const remote = vi.fn(async (blobKey: string) => {
+      expect(blobKey).toBe(key);
+      return {
+        blob: new Blob([png], { type: "image/png" }),
+        mimeType: "image/png" as const, byteSize: png.byteLength,
+        questionId: "sample-1", updatedAt: "2026-11-12T00:00:00.000Z",
+      };
+    });
+    const unregister = setMissingAttachmentLoader(remote);
+    try {
+      const recovered = await bankFiles(bank);
+      expect(recovered.map(file => file.name)).toEqual(["review-image.png"]);
+      expect(remote).toHaveBeenCalledTimes(1);
+      expect(await sha256(new Uint8Array(await recovered[0].arrayBuffer()))).toBe(checksum);
+    } finally { unregister(); }
+  });
+
   it("materializes a reused source-page image once even when question-local asset IDs differ", async () => {
     stubSuccessfulImageDecode();
     const b = await bundle();

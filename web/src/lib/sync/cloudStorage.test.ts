@@ -234,7 +234,12 @@ describe("private cloud content and media", () => {
     download.mockClear(); // Measure lazy recovery separately from upload.
 
     await deleteQuestionAttachmentBlobs([blobKey]);
-    await saveCloudMediaIndex("account-a", manifest);
+    // An older protected checkpoint may record a different reference timestamp
+    // for the SAME immutable SHA-256 original. It must still restore by exact
+    // account, hash and byte size, never from a different owner's index.
+    const historical = { ...manifest[0], updatedAt: "2026-10-04T00:00:00.000Z" };
+    expect(validateWorkspaceMedia(state, [historical])).toHaveLength(1);
+    await saveCloudMediaIndex("account-a", [historical]);
     dispose = installCloudMediaCache("account-a", () => state);
     const restored = await getQuestionAttachmentBlob(blobKey);
     expect(await restored!.blob.arrayBuffer()).toEqual(await blob.arrayBuffer());

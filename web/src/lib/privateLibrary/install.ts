@@ -298,7 +298,7 @@ export async function bankFiles(
       const key = reviewBlobKey(asset.checksum);
       // A selected prepared bundle supplies these bytes. Do not trigger an
       // unrelated cloud-media recovery before verifying the supplied original.
-      const stored = read && bankFile ? undefined : await getQuestionAttachmentBlob(key, { localOnly: true });
+      const stored = read && bankFile ? undefined : await getQuestionAttachmentBlob(key);
       const bytes = read && bankFile
         ? await read(bankAssetPath(bankFile, asset.filename))
         : stored ? new Uint8Array(await stored.blob.arrayBuffer()) : undefined;
