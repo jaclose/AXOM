@@ -3,7 +3,7 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 import type { DailySuccessResult } from "../../lib/dailySuccess";
 import { ICON_SIZE } from "../../lib/iconSize";
 
-export function DailyProgressVessel({ result, compact = false }: { result: DailySuccessResult; compact?: boolean }) {
+export function DailyProgressVessel({ result, compact = false, dayLabel = "Today" }: { result: DailySuccessResult; compact?: boolean; dayLabel?: string }) {
   const previous = useRef(result.progress);
   const [changed, setChanged] = useState(false);
   const [open, setOpen] = useState(false);
@@ -43,7 +43,7 @@ export function DailyProgressVessel({ result, compact = false }: { result: Daily
   return (
     <div className={`daily-progress-vessel ${compact ? "compact" : ""}`} data-state={result.status}>
       <div className="daily-progress-copy">
-        <span>Today</span>
+        <span>{dayLabel}</span>
         <strong>{displayStatus}</strong>
         <small>{result.eligibleCount
               ? `${result.metCount} of ${result.eligibleCount} selected target${result.eligibleCount === 1 ? "" : "s"} met`
@@ -55,7 +55,7 @@ export function DailyProgressVessel({ result, compact = false }: { result: Daily
         tabIndex={0}
         aria-expanded={open}
         aria-controls={breakdownId}
-        aria-label="Where today’s progress came from"
+        aria-label={dayLabel === "Today" ? "Where today’s progress came from" : "Where selected-day progress came from"}
         onMouseEnter={() => setPeek(true)}
         onMouseLeave={() => setPeek(false)}
         onFocus={() => setPeek(true)}
@@ -73,8 +73,10 @@ export function DailyProgressVessel({ result, compact = false }: { result: Daily
           aria-valuetext={ariaText}
         >
           <div className={`daily-progress-fill ${changed ? "changed" : ""}`} style={{ width: `${result.progress}%` }} />
+          {result.eligibleCount > 0 && <i className="daily-progress-threshold" aria-hidden="true" />}
           <span aria-hidden="true">{result.status === "neutral" ? "—" : `${result.progress}%`}</span>
         </div>
+        {result.eligibleCount > 0 && <div className="daily-progress-threshold-label">80% streak threshold</div>}
         {visible.length > 0 && (
           <div className="daily-progress-segments" aria-hidden="true">
             {visible.filter((item) => item.status !== "unavailable").map((item) => {

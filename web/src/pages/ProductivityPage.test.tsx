@@ -41,6 +41,39 @@ describe("ProductivityPage daily console", () => {
     });
   });
 
+  it("uses a quick self-report category without inventing time or questions", () => {
+    render(<ProductivityPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Use Questions template" }));
+    expect((screen.getByLabelText("What did you do?") as HTMLInputElement).value).toBe("Question Bank");
+    fireEvent.change(screen.getByLabelText("Questions"), { target: { value: "12" } });
+    fireEvent.click(screen.getByRole("button", { name: "Log" }));
+    expect(useStore.getState().logs[0]).toMatchObject({
+      type: "Question Bank", minutes: 0, quantity: 12, quantityKind: "questions",
+    });
+    expect(screen.getByText("Activity added. Your save status appears above.")).toBeTruthy();
+  });
+
+  it("prefills the exact self-report label for a linked goal without logging prematurely", () => {
+    const state = makeSeed();
+    state.profile.dailySuccess = { version: 1, configuredAt: state.activeDayKey, requirements: [makeDailyRequirement({
+      id: "review-goal", label: "Renal review", target: 2, unit: "times",
+      source: { kind: "activity-alias" }, aliases: ["Renal question practice"], trackingStartsAt: state.activeDayKey,
+    }, state.activeDayKey)] };
+    useStore.setState(state);
+    render(<ProductivityPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Use Renal review in self-report" }));
+    expect((screen.getByLabelText("What did you do?") as HTMLInputElement).value).toBe("Renal question practice");
+    expect(useStore.getState().logs).toHaveLength(0);
+  });
+
+  it("submits one self-report from the keyboard form with no synthetic duration", () => {
+    render(<ProductivityPage />);
+    fireEvent.change(screen.getByLabelText("What did you do?"), { target: { value: "Review renal physiology" } });
+    fireEvent.submit(screen.getByRole("form", { name: "Log self-reported activity" }));
+    expect(useStore.getState().logs).toHaveLength(1);
+    expect(useStore.getState().logs[0]).toMatchObject({ type: "Review renal physiology", minutes: 0, cards: 0 });
+  });
+
   it("accepts a named completion without inventing minutes or cards", () => {
     render(<ProductivityPage />);
     fireEvent.change(screen.getByLabelText("What did you do?"), { target: { value: "Prayer" } });
