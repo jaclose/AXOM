@@ -456,6 +456,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
   /** True only while a finish or exit waits for its save, never longer than UI_SAVE_CEILING_MS. */
   const [finalizing, setFinalizing] = useState(false);
   const [finalizeError, setFinalizeError] = useState<string>();
+  /** The unconfirmed final save is still running (slow), not refused. */
+  const [finalizePending, setFinalizePending] = useState(false);
   /** The final save landed after the ceiling had already given the block back. */
   const [lateSaved, setLateSaved] = useState(false);
   /** Leaving with unsaved work asks once: keep studying, download a copy, or exit anyway. */
@@ -911,6 +913,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
     finalizingRef.current = true;
     setFinalizing(true);
     setFinalizeError(undefined);
+    setFinalizePending(false);
     setLateSaved(false);
     setLeavePrompt(null);
     lastFinalActionRef.current = action;
@@ -929,12 +932,18 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
       await withSaveCeiling(durable);
     } catch (error) {
       const stillSaving = isVaultWriteTimeout(error);
-      const detail = stillSaving
-        ? "Saving is taking longer than usual; AXOM keeps trying in the background."
-        : error instanceof Error ? error.message : "The local workspace write could not be confirmed.";
-      setFinalizeError(recoveryAvailableRef.current
-        ? `Your answers are still open and recoverable. AXOM could not confirm the final save. ${detail}`
-        : `Your answers remain open in this window, but AXOM could not create or update browser recovery. Keep this window open and retry. ${detail}`);
+      setFinalizePending(stillSaving);
+      if (stillSaving) {
+        // Slow, not failed: say so calmly, once.
+        setFinalizeError(recoveryAvailableRef.current
+          ? "Your answers are still open here and in this device's recovery copy. AXOM keeps trying in the background."
+          : "Your answers are open in this window only. Keep it open; AXOM keeps trying in the background.");
+      } else {
+        const detail = error instanceof Error ? error.message : "The local workspace write could not be confirmed.";
+        setFinalizeError(recoveryAvailableRef.current
+          ? `Your answers are still open and recoverable. AXOM could not confirm the final save. ${detail}`
+          : `Your answers remain open in this window, but AXOM could not create or update browser recovery. Keep this window open and retry. ${detail}`);
+      }
       if (action === "finish") {
         pushToast({
           title: "Block is still open",
@@ -950,6 +959,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         void durable.then(() => {
           if (!mountedRef.current || finalGenerationRef.current !== generation) return;
           setFinalizeError(undefined);
+          setFinalizePending(false);
           setLateSaved(true);
         }, () => { /* the unconfirmed state stays on screen */ });
       }
@@ -1757,8 +1767,8 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
           )
       }
     >
-      {finalizeError && <div className="form-warning danger quiz-save-state" role="alert">
-        <b>Final save not confirmed.</b> {finalizeError}{" "}
+      {finalizeError && <div className={`form-warning ${finalizePending ? "" : "danger "}quiz-save-state`} role="alert">
+        <b>{finalizePending ? "Not saved yet." : "Final save not confirmed."}</b> {finalizeError}{" "}
         <GButton size="sm" onClick={retryFinalSave}>Not saved yet · Retry</GButton>
       </div>}
       {lateSaved && <div className="form-warning quiz-save-state" role="status"><b>Saved.</b> This block is stored on this device now.</div>}
@@ -1767,8 +1777,7 @@ export function ExamRunner({ mode: initialMode, retakeIds, presetFilters, preset
         <GhostButton onClick={exitAnyway}>Exit anyway</GhostButton>
         <GButton variant="primary" onClick={keepStudying}>Keep studying</GButton>
       </>}>
-        <p>AXOM could not confirm that this block is saved on this device yet.</p>
-        <p>{leavePrompt.recoverable
+        <p>AXOM could not confirm that this block is saved on this device yet. {leavePrompt.recoverable
           ? "Your answers are still open here and in this device's recovery copy, so you can resume the block after a reload."
           : "Your answers are open in this window only. Download a copy before you leave."}</p>
         {leavePrompt.copyNote && <p role="status">{leavePrompt.copyNote}</p>}

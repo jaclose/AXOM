@@ -1398,3 +1398,12 @@ ul.template-note { padding-left: 26px; }
 @media (prefers-reduced-motion: reduce) {
   .qb-practice-header .qb-cta { transition: none; }
 }
+
+/* The ask-once prompt when a block's save is not confirmed (D13). Labels never
+   break mid-word; on a phone the choices stack, the primary one first. */
+.quiz-leave-prompt .modal-actions { flex-wrap: wrap; }
+.quiz-leave-prompt .modal-actions > button { white-space: nowrap; }
+@media (max-width: 520px) {
+  .quiz-leave-prompt .modal-actions { flex-direction: column-reverse; align-items: stretch; }
+  .quiz-leave-prompt .modal-actions > button { justify-content: center; min-height: 44px; }
+}
