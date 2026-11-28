@@ -36,6 +36,8 @@ export function QuestionBankLibrary({ onPractice, onPracticeSet, onOpenBank, onI
   const [communityOpen, setCommunityOpen] = useState(false);
   const [preparedOpen, setPreparedOpen] = useState(localBookCount === 0);
   const preparedRef = useRef<HTMLDetailsElement>(null);
+  const zipInputRef = useRef<HTMLInputElement>(null);
+  const [chosenZip, setChosenZip] = useState<File>();
 
   return <section className="qb-library-workspace" aria-labelledby="qb-library-title">
     <header className="qb-library-intro">
@@ -57,8 +59,19 @@ export function QuestionBankLibrary({ onPractice, onPracticeSet, onOpenBank, onI
       </ol>
     </header>
     <AccountContentDownloads />
+    <input ref={zipInputRef} type="file" accept=".zip" hidden aria-label="Choose AXOM question ZIP" onChange={event => {
+      const chosen = event.target.files?.[0];
+      if (chosen) {
+        setPreparedOpen(true);
+        setChosenZip(chosen);
+        window.requestAnimationFrame(() => preparedRef.current?.scrollIntoView({ block: "nearest" }));
+      }
+      event.target.value = "";
+    }} />
     <AcademicLibrary title="Your collection" subtitle={`${localBookCount} course ${localBookCount === 1 ? "collection" : "collections"} on this device · ${sets.length} saved ${sets.length === 1 ? "set" : "sets"}.`}
-      onChooseFile={onImport} onCreate={onCreate} createHint="Build a reusable practice block from your saved questions."
+      onChooseFile={onImport} onChooseZip={() => zipInputRef.current?.click()}
+      importHint="Choose PDFs, Word, text, Markdown, CSV or JSON for question extraction. Import an existing AXOM question ZIP separately to preview source banks, figures and held answers before confirming."
+      onCreate={onCreate} createHint="Build a reusable practice block from your saved questions."
       browse={<AcademicBookshelf label="Question bank library" shelves={shelves}
         renderBook={(book) => <QuestionBankBookContent book={book} onPractice={onPractice} onOpenBank={onOpenBank} />} />} />
     <details className="qb-course-catalog" open={catalogOpen} onToggle={(event) => setCatalogOpen(event.currentTarget.open)}>
@@ -73,7 +86,7 @@ export function QuestionBankLibrary({ onPractice, onPracticeSet, onOpenBank, onI
     </details>
     <details ref={preparedRef} id="prepared-course-library" className="cloud-local-material qb-library-maintenance"
       open={preparedOpen} onToggle={(event) => setPreparedOpen(event.currentTarget.open)}>
-      <summary>Import status and source review</summary><PreparedLibrary />
+      <summary>Import status and source review</summary><PreparedLibrary externalZip={chosenZip} />
     </details>
   </section>;
 }

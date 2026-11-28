@@ -1,3 +1,4 @@
+import { confirmPreparedImport } from "./confirmPreparedImport";
 import { test, expect, waitForWorkspace } from "./fixtures";
 import { completeSetup } from "../scripts/setup-flow.mjs";
 import type { NoctyriumState } from "../src/lib/types";
@@ -35,6 +36,7 @@ test("reviewed FTM1 plan loads selected weeks and opens its image-rich quiz", as
   const chooser = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: "Install prepared library", exact: true }).click();
   await (await chooser).setFiles(bundle!);
+    await confirmPreparedImport(page);
   await expect(page.getByRole("region", { name: "Prepared library", exact: true }).getByRole("status")).toContainText("Library installed.", { timeout: 60_000 });
   const before = await read();
   expect(before.questions).toHaveLength(25);

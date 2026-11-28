@@ -70,5 +70,15 @@ export function resolveLibraryInputRoot(entries: readonly LibraryInputEntry[], l
   const questionPaths = paths.filter(path => path.split("/").pop() === "questions.json");
   if (questionPaths.length > 1) throw new Error("Several question exports were selected. Import each complete export separately.");
   if (questionPaths.length === 1) return { kind: "question-export", questionsPath: questionPaths[0] };
-  throw new Error("No prepared collection or AXOM question package was found. For PDFs, Word files or question text, use Question Bank > Import files. You do not need to create a catalog.json file.");
+  const names = paths.map(path => path.split("/").pop()!.toLowerCase());
+  if (names.includes("workspace.json")) {
+    throw new Error("This is an AXOM workspace backup, not a question-bank import. Keep this ZIP intact and use the account backup/restore workflow; no library content was changed.");
+  }
+  if (paths.some(path => /(?:curat(?:ion|ed)|review[_ -]?queue|audit[_ -]?counts|refiling[_ -]?patch|filing[_ -]?plan|held[_ -]?\d+|(?:bank|source|set)[_ -]?renames?)/i.test(path))) {
+    throw new Error("This ZIP is a review or curation packet, not an installable question bank. It contains no AXOM catalog.json or native manifest.json. Nothing was saved. Choose the actual question-bank ZIP for installation; keep this packet for source review.");
+  }
+  if (paths.some(path => /\.(pdf|docx?|txt|md)$/i.test(path))) {
+    throw new Error("This ZIP contains source documents but no prepared question bank. Extract it and choose the PDF, Word or text files under Question Bank > Import files. Nothing was saved.");
+  }
+  throw new Error("This ZIP has no supported AXOM question package. Choose a prepared library ZIP with catalog.json, or an AXOM native question ZIP with manifest.json and questions.json. Nothing was saved.");
 }

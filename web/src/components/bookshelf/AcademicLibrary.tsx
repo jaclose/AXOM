@@ -4,7 +4,7 @@
 // new one. A tab is shown only when the screen that hosts the library can
 // really do it, so nothing here pretends.
 import { useId, useState, type ReactNode } from "react";
-import { FilePlus2, FolderInput, History, LibraryBig } from "lucide-react";
+import { FileArchive, FilePlus2, FolderInput, History, LibraryBig } from "lucide-react";
 import { ICON_SIZE } from "../../lib/iconSize";
 import { GButton } from "../ui/primitives";
 
@@ -19,6 +19,8 @@ export interface AcademicLibraryProps {
   recover?: ReactNode;
   /** Opens the file picker. The browser only ever sees a file the learner chooses. */
   onChooseFile?: () => void;
+  /** A prepared AXOM question ZIP is inspected separately before it can write to the private library. */
+  onChooseZip?: () => void;
   importHint?: string;
   /** Starts a new template or bank, where that exists. */
   onCreate?: () => void;
@@ -32,10 +34,10 @@ const MODES: { id: LibraryMode; label: string; icon: typeof LibraryBig }[] = [
   { id: "create", label: "Create", icon: FilePlus2 },
 ];
 
-export function AcademicLibrary({ title, subtitle, browse, recover, onChooseFile, importHint, onCreate, createHint }: AcademicLibraryProps) {
+export function AcademicLibrary({ title, subtitle, browse, recover, onChooseFile, onChooseZip, importHint, onCreate, createHint }: AcademicLibraryProps) {
   const [mode, setMode] = useState<LibraryMode>("browse");
   const id = useId();
-  const offered = MODES.filter((entry) => entry.id === "browse" || (entry.id === "recover" && recover !== undefined) || (entry.id === "import" && onChooseFile) || (entry.id === "create" && onCreate));
+  const offered = MODES.filter((entry) => entry.id === "browse" || (entry.id === "recover" && recover !== undefined) || (entry.id === "import" && (onChooseFile || onChooseZip)) || (entry.id === "create" && onCreate));
   return (
     <div className="academic-library">
       <div className="academic-library-head">
@@ -72,7 +74,10 @@ export function AcademicLibrary({ title, subtitle, browse, recover, onChooseFile
           <div className="academic-library-plain">
             <h3>Add a file</h3>
             <p>{importHint ?? "Choose a file from this device. AXOM reads only the file you pick, shows you what it found, and saves nothing until you confirm."}</p>
-            <div><GButton variant="primary" onClick={onChooseFile}><FolderInput size={ICON_SIZE.emphasis} aria-hidden="true" /> Choose a file</GButton></div>
+            <div className="academic-library-import-actions">
+              {onChooseFile && <GButton variant="primary" onClick={onChooseFile}><FolderInput size={ICON_SIZE.emphasis} aria-hidden="true" /> Choose a file</GButton>}
+              {onChooseZip && <GButton onClick={onChooseZip}><FileArchive size={ICON_SIZE.emphasis} aria-hidden="true" /> Import AXOM ZIP</GButton>}
+            </div>
           </div>
         )}
         {mode === "create" && (

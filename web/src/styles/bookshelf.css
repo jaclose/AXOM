@@ -629,6 +629,26 @@
 .prepared-library-summary > div { flex: 1; min-width: 180px; }
 .prepared-library p { margin: 5px 0 0; font-size: var(--fs-sm); color: var(--text-60); line-height: 1.6; }
 .prepared-library [role=alert] { color: var(--red, #d45d5d); }
+.prepared-import-review { margin-top: 16px; padding: clamp(14px, 2vw, 22px); border: 1px solid var(--hairline); border-radius: var(--radius-lg, 14px); background: var(--surface-2, transparent); }
+.prepared-import-review-top { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; }
+.prepared-import-review h3 { font-size: var(--fs-md, 1rem); margin: 4px 0 6px; line-height: 1.3; }
+.prepared-import-eyebrow { font-size: var(--fs-xs, .75rem); text-transform: uppercase; letter-spacing: .1em; color: var(--text-60); }
+.prepared-import-review p { overflow-wrap: anywhere; }
+.prepared-import-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 16px 0; }
+.prepared-import-metrics > div { display: flex; flex-direction: column; gap: 3px; padding: 10px; border: 1px solid var(--hairline-soft); border-radius: var(--radius-md); min-width: 0; }
+.prepared-import-metrics strong { font-size: 1.2rem; font-variant-numeric: tabular-nums; }
+.prepared-import-metrics span { font-size: var(--fs-xs, .75rem); color: var(--text-60); }
+.prepared-import-sources summary { color: var(--text); }
+.prepared-import-sources ul { max-height: 220px; overflow-y: auto; list-style: none; margin: 9px 0 0; padding: 0; }
+.prepared-import-sources li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 5px 14px; padding: 9px 0; border-bottom: 1px solid var(--hairline-soft); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.prepared-import-sources li span:last-child { color: var(--text-60); white-space: nowrap; }
+.prepared-import-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.prepared-import-footnote { font-size: var(--fs-xs, .75rem) !important; }
+.prepared-import-receipt { margin-top: 14px; padding: clamp(14px, 2vw, 20px); border: 1px solid var(--hairline); border-radius: var(--radius-lg, 14px); }
+.prepared-import-receipt h3 { font-size: var(--fs-md, 1rem); margin: 0 0 7px; }
+.prepared-import-receipt li { margin: 6px 0; overflow-wrap: anywhere; font-size: var(--fs-sm); }
+.prepared-import-receipt ul { max-height: 190px; overflow-y: auto; padding-left: 20px; }
+@media (max-width: 600px) { .prepared-import-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .prepared-import-actions > button { flex: 1 1 170px; } }
 .prepared-library details { margin-top: 14px; }
 .prepared-library summary { cursor: pointer; font-size: var(--fs-sm); }
 .prepared-library summary svg { vertical-align: middle; margin-right: 6px; }
@@ -651,3 +671,5 @@
 
 .academic-collection .spine-title { color: #f4ead7; text-shadow: 0 1px 1px #0008; }
 .book-version { display: block; font-size: 13px; line-height: 1.7; font-weight: 500; overflow-wrap: anywhere; }
+
+.academic-library-import-actions { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; }

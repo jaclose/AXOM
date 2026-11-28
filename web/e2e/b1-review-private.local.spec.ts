@@ -1,3 +1,4 @@
+import { confirmPreparedImport } from "./confirmPreparedImport";
 // Opt-in LOCAL academic review queue acceptance. Source question content
 // remains in ignored authorized private folders; only counts are logged.
 // Never infer clinical answer correctness from a derivative TXT Answer: line.
@@ -24,6 +25,7 @@ test("18 B1 sources preserve 349 review-held candidates and originals without fa
     const chooser = page.waitForEvent("filechooser");
     await panel.getByRole("button", { name: "Install prepared folder" }).click();
     await (await chooser).setFiles(sourceDir!);
+    await confirmPreparedImport(page);
     await expect(panel.getByRole("status")).toContainText("Library installed.", { timeout: 60_000 });
     await expect(panel.getByRole("alert")).toHaveCount(0);
   }

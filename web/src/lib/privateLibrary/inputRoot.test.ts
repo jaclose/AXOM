@@ -34,3 +34,24 @@ test('retains a large PDF original without raising the JSON or total memory limi
   assert.throws(() => resolve([{ path: 'catalog.json', byteSize: 1 }, { path: 'source.pdf', byteSize: INPUT_MAX_PDF_BYTES + 1 }]), /256 MiB/);
   assert.throws(() => resolve([{ path: 'questions.json', byteSize: MAX + 1 }]), /128 MiB/);
 });
+
+test("identifies audit and curation ZIPs as non-importable without silently installing them", () => {
+  assert.throws(() => resolve(entries("REPORTS/HELD_155_REVIEW_QUEUE.csv", "REPORTS/README.md")),
+    /review or curation packet/i);
+});
+test("routes source-only ZIPs to the ordinary file importer", () => {
+  assert.throws(() => resolve(entries("source/DERS lecture 03.pdf", "source/DERS lecture 05.pdf")),
+    /ZIP contains source documents.*Import files/i);
+});
+test("does not interpret workspace backups as question package updates", () => {
+  assert.throws(() => resolve(entries("workspace.json", "originals/0")),
+    /workspace backup.*not a question-bank import/i);
+});
+
+test("recognizes the actual privately generated held-review curation archive by entry filenames", () => {
+  assert.throws(() => resolve(entries(
+    "AXOM_T4_CURATED_SOURCE_REVIEW_20261114/BANK_RENAMES_9.csv",
+    "AXOM_T4_CURATED_SOURCE_REVIEW_20261114/BSCE_HELD_49_EDITORIAL_REVIEW.csv",
+    "AXOM_T4_CURATED_SOURCE_REVIEW_20261114/READ_ME_FIRST.md",
+  )), /review or curation packet/i);
+});

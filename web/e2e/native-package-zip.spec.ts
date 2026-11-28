@@ -1,3 +1,4 @@
+import { confirmPreparedImport } from "./confirmPreparedImport";
 import { createHash } from "node:crypto";
 import { deflateSync } from "node:zlib";
 import JSZip from "jszip";
@@ -83,12 +84,23 @@ test("native multi-bank ZIP installs without catalog.json and persists practice"
     const library = page.getByRole("region", { name: "Prepared library" });
     if (!await library.isVisible()) await page.getByText("Import status and source review", { exact: true }).click();
     const chooser = page.waitForEvent("filechooser");
-    await page.getByRole("button", { name: button, exact: true }).click();
+    if (button === "Install prepared library") {
+      // The main collection Import tab offers the same verified ZIP preflight.
+      await page.getByRole("tab", { name: "Import", exact: true }).click();
+      await page.getByRole("button", { name: "Import AXOM ZIP", exact: true }).click();
+    } else {
+      await page.getByRole("button", { name: button, exact: true }).click();
+    }
     await (await chooser).setFiles({ name: "native-question-banks.zip", mimeType: "application/zip", buffer });
+    await confirmPreparedImport(page);
   }
   const library = page.getByRole("region", { name: "Prepared library" });
   await chooseBundle("Install prepared library");
   await expect(library.getByRole("status")).toContainText("Library installed.", { timeout: 90_000 });
+  const receipt = library.getByRole("region", { name: "Latest import result" });
+  await expect(receipt).toContainText("Completed locally");
+  await expect(receipt).toContainText("Cloud backup: not confirmed.");
+  await expect(receipt).toContainText("Ready on this device");
   const snapshot = () => page.evaluate(async () => {
     const dev = await (window as unknown as { __AXOM_DEV__: Promise<{
       flushVault: () => Promise<void>; useStore: { getState: () => {

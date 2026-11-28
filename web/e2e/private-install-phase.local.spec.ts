@@ -1,3 +1,4 @@
+import { confirmPreparedImport } from "./confirmPreparedImport";
 // Opt-in local performance diagnostic. Uses the user's explicitly selected
 // private fixture; never copies bank text, images, credentials or screenshots.
 import { test, expect, seedOnboarded } from "./fixtures";
@@ -17,6 +18,7 @@ test("private bank installer resolves its final phase and surfaces actionable fa
   const chooser = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: "Install prepared folder", exact: true }).click();
   await (await chooser).setFiles(process.env.AXOM_PRIVATE_LIBRARY_DIR!);
+    await confirmPreparedImport(page);
   let last = "";
   for (let i = 0; i < 100; i++) {
     const phase = (await panel.getByRole("status").allTextContents()).join(" | ");

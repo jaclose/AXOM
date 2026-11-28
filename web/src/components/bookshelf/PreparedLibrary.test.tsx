@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   readOriginal: vi.fn(),
   probeOriginal: vi.fn(),
   folderReader: vi.fn(),
+  zipReader: vi.fn(),
   installLibrary: vi.fn(),
   setState: vi.fn(),
   checkpoint: vi.fn(),
@@ -46,6 +47,7 @@ vi.mock("../../lib/privateLibrary/install", async (importOriginal) => {
   return {
     ...actual,
     folderLibraryReader: (...args: unknown[]) => mocks.folderReader(...args),
+    zipLibraryReader: (...args: unknown[]) => mocks.zipReader(...args),
     installPrivateLibrary: (...args: unknown[]) => mocks.installLibrary(...args),
   };
 });
@@ -78,7 +80,6 @@ beforeEach(() => {
   vi.resetAllMocks();
   mocks.readOriginal.mockResolvedValue(undefined);
   mocks.probeOriginal.mockResolvedValue(false);
-  mocks.folderReader.mockReturnValue(async () => new Uint8Array());
   mocks.installLibrary.mockResolvedValue({
     status: "complete", warnings: [], templateIds: [], documentIds: [], questionIds: [], setIds: [],
   });
@@ -92,6 +93,8 @@ beforeEach(() => {
       ready: 99, review: 4,
     }],
   };
+  mocks.folderReader.mockReturnValue(async () => new TextEncoder().encode(JSON.stringify(catalog)));
+  mocks.zipReader.mockResolvedValue(async () => new TextEncoder().encode(JSON.stringify(catalog)));
   mocks.documents = [
     {
       id: "private-library-prepared", title: "Prepared academic library", fileName: "catalog.json",
@@ -113,6 +116,107 @@ beforeEach(() => {
 });
 
 afterEach(cleanup);
+
+describe("PreparedLibrary import preview and consent", () => {
+  it("previews an AXOM ZIP selected from the collection's main Import tab", async () => {
+    const selected = new File(["archive"], "From-main-import.zip", { type: "application/zip" });
+    render(<PreparedLibrary externalZip={selected} />);
+    const preview = await screen.findByRole("region", { name: "Review selected import" });
+    expect(preview.textContent).toContain("From-main-import.zip");
+    expect(mocks.zipReader).toHaveBeenCalledWith(selected);
+    expect(mocks.installLibrary).not.toHaveBeenCalled();
+  });
+
+  it("inspects a native ZIP and waits for explicit confirmation before any writes", async () => {
+    render(<PreparedLibrary />);
+    fireEvent.change(screen.getByLabelText("Prepared library bundle"), {
+      target: { files: [new File(["archive"], "DERS_W1_W2.zip", { type: "application/zip" })] },
+    });
+    const preview = await screen.findByRole("region", { name: "Review selected import" });
+    expect(preview.textContent).toContain("DERS_W1_W2.zip");
+    expect(preview.textContent).toMatch(/99.*ready/i);
+    expect(preview.textContent).toMatch(/4.*review/i);
+    expect(mocks.installLibrary).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm installation on this device" }));
+    await waitFor(() => expect(mocks.installLibrary).toHaveBeenCalledTimes(1));
+  });
+
+  it("does not replace the latest preview when an earlier ZIP finishes parsing later", async () => {
+    let finishFirst!: (read: (path: string) => Promise<Uint8Array>) => void;
+    const slow = new Promise<(path: string) => Promise<Uint8Array>>(resolve => { finishFirst = resolve; });
+    const read = mocks.folderReader();
+    mocks.zipReader.mockImplementation((file: File) => file.name === "first.zip" ? slow : Promise.resolve(read));
+    render(<PreparedLibrary />);
+    const choose = screen.getByLabelText("Prepared library bundle");
+    fireEvent.change(choose, { target: { files: [new File(["a"], "first.zip")] } });
+    fireEvent.change(choose, { target: { files: [new File(["b"], "second.zip")] } });
+    await waitFor(() => expect(screen.getByRole("region", { name: "Review selected import" }).textContent).toContain("second.zip"));
+    finishFirst(read);
+    await waitFor(() => expect(mocks.zipReader).toHaveBeenCalledTimes(2));
+    await Promise.resolve();
+    expect(screen.getByRole("region", { name: "Review selected import" }).textContent).toContain("second.zip");
+    expect(mocks.installLibrary).not.toHaveBeenCalled();
+  });
+
+  it("shows an auditable installed result with actual ready count, declared holds and cloud status", async () => {
+    mocks.installLibrary.mockResolvedValueOnce({
+      status: "complete", warnings: [], templateIds: [], documentIds: ["doc"],
+      questionIds: ["ready-1", "ready-2"], setIds: ["set-1"],
+    });
+    render(<PreparedLibrary />);
+    fireEvent.change(screen.getByLabelText("Prepared library bundle"), {
+      target: { files: [new File(["synthetic"], "DERS-prepared.zip")] },
+    });
+    await screen.findByRole("region", { name: "Review selected import" });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm installation on this device" }));
+    const receipt = await screen.findByRole("region", { name: "Latest import result" });
+    expect(receipt.textContent).toContain("DERS-prepared.zip");
+    expect(receipt.textContent).toContain("2");
+    expect(receipt.textContent).toMatch(/ready.*on this device/i);
+    expect(receipt.textContent).toMatch(/4.*held/i);
+    expect(receipt.textContent).toMatch(/cloud.*not confirmed/i);
+    expect(receipt.textContent).toMatch(/declared.*99/i);
+  });
+
+  it("retains all partial-install warnings instead of hiding them after three items", async () => {
+    mocks.installLibrary.mockResolvedValueOnce({
+      status: "partial", warnings: ["Source A failed", "Source B failed", "Source C failed", "Source D failed"],
+      templateIds: [], documentIds: [], questionIds: ["ready-1"], setIds: [],
+    });
+    render(<PreparedLibrary />);
+    fireEvent.change(screen.getByLabelText("Prepared library bundle"), {
+      target: { files: [new File(["synthetic"], "Needs-review.zip")] },
+    });
+    await screen.findByRole("region", { name: "Review selected import" });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm installation on this device" }));
+    const receipt = await screen.findByRole("region", { name: "Latest import result" });
+    expect(receipt.textContent).toMatch(/partial/i);
+    expect(receipt.textContent).toContain("4 source warnings");
+    expect(receipt.textContent).toContain("Source D failed");
+    expect(screen.getByRole("region", { name: "Review selected import" })).toBeTruthy();
+  });
+
+  it("cancels a selected ZIP without writing questions or documents", async () => {
+    render(<PreparedLibrary />);
+    fireEvent.change(screen.getByLabelText("Prepared library bundle"), {
+      target: { files: [new File(["archive"], "Curation.zip", { type: "application/zip" })] },
+    });
+    await screen.findByRole("region", { name: "Review selected import" });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel selected import" }));
+    expect(screen.queryByRole("region", { name: "Review selected import" })).toBeNull();
+    expect(mocks.installLibrary).not.toHaveBeenCalled();
+  });
+
+  it("refuses a review-only ZIP before any installation call", async () => {
+    mocks.zipReader.mockRejectedValue(new Error("This ZIP is a review or curation packet, not an installable question bank."));
+    render(<PreparedLibrary />);
+    fireEvent.change(screen.getByLabelText("Prepared library bundle"), {
+      target: { files: [new File(["archive"], "Curation.zip", { type: "application/zip" })] },
+    });
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/review or curation packet/));
+    expect(mocks.installLibrary).not.toHaveBeenCalled();
+  });
+});
 
 describe("PreparedLibrary truthfulness", () => {
   it("combines installed catalogs, de-duplicates sources, and totals local readiness and held review", () => {
@@ -315,6 +419,9 @@ describe("PreparedLibrary truthfulness", () => {
       target: { files: [new File(["catalog"], "catalog.json")] },
     });
 
+    await screen.findByRole("region", { name: "Review selected import" });
+    expect(mocks.installLibrary).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm installation on this device" }));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(
       /2 answer-ready questions remain saved on this device.*reviewed filing needs another try/i,
     ));
@@ -333,6 +440,8 @@ describe("PreparedLibrary truthfulness", () => {
       target: { files: [new File(["catalog"], "catalog.json")] },
     });
 
+    await screen.findByRole("region", { name: "Review selected import" });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm installation on this device" }));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toBe(
       "Browser storage on this device is full. AXOM stopped while preparing your library · 2 of 3 sources · saving reviewed questions. Content confirmed before this step remains saved; this step was not confirmed. Free disk space, then retry the same bundle.",
     ));
@@ -348,15 +457,15 @@ describe("PreparedLibrary truthfulness", () => {
       target: { files: [new File(["catalog"], "catalog.json")] },
     });
 
-    expect(screen.getByRole("alert").textContent).toBe(
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toBe(
       "Browser storage on this device is full. No new content was confirmed. Free disk space, then retry the same bundle.",
-    );
+    ));
 
     mocks.folderReader.mockImplementationOnce(() => { throw new Error("Catalog checksum does not match this bundle."); });
     fireEvent.change(screen.getByLabelText("Prepared library folder"), {
       target: { files: [new File(["catalog"], "catalog.json")] },
     });
-    expect(screen.getByRole("alert").textContent).toBe("Catalog checksum does not match this bundle.");
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("Catalog checksum does not match this bundle."));
   });
 
   it("persists the reviewed source and catalog in one checked vault snapshot", async () => {

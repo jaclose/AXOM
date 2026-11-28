@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LibraryBig, Upload, ShieldCheck } from "lucide-react";
 import { useStore } from "../../lib/store";
 import { bankFiles, folderLibraryReader, installPrivateLibrary, readCatalog, readPreparedBank, zipLibraryReader, type LibraryReader } from "../../lib/privateLibrary/install";
 import { PRIVATE_LIBRARY_DOCUMENT, PRIVATE_REVIEW_DOCUMENT, type PreparedBank, type PrivateLibraryCatalog } from "../../lib/privateLibrary/types";
+import { previewPreparedLibrary, type PreparedLibraryPreview } from "../../lib/privateLibrary/importPreview";
 import { BankImportReview } from "../questions/BankImportReview";
 import { GButton } from "../ui/primitives";
 import { Modal } from "../ui/Modal";
@@ -187,7 +188,7 @@ interface InstalledPreparedSource {
 
 type OriginalAvailability = "checking" | "stored" | "missing";
 
-export function PreparedLibrary() {
+export function PreparedLibrary({ externalZip }: { externalZip?: File } = {}) {
   const documents = useStore(s => s.documents);
   const questions = useStore(s => s.questions);
   const catalogDocuments = useMemo(
@@ -263,12 +264,55 @@ export function PreparedLibrary() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [selectedImport, setSelectedImport] = useState<{ name: string; read: LibraryReader; summary: PreparedLibraryPreview }>();
+  const [lastReceipt, setLastReceipt] = useState<{
+    filename: string;
+    status: "complete" | "partial";
+    sources: number;
+    declaredReady: number;
+    declaredHeld: number;
+    readyOnDevice: number;
+    savedSetReferences: number;
+    warnings: string[];
+  }>();
+  const installInProgress = useRef(false);
+  const previewRequest = useRef(0);
   const [query, setQuery] = useState("");
   const [opened, setOpened] = useState<{ id: string; catalogDocumentId: string; bank: PreparedBank; files: File[]; originalFile?: Blob }>();
   const reviewRequest = useRef(0);
   const originalProbeCache = useRef(new Map<string, OriginalAvailability | Promise<OriginalAvailability>>());
   const [originalAvailability, setOriginalAvailability] = useState<Record<string, OriginalAvailability>>({});
-  async function install(read: LibraryReader) {
+  /** Selecting files is a read-only preflight. Only a second explicit click installs. */
+  const stageImport = useCallback(async (name: string, getReader: () => Promise<LibraryReader>): Promise<void> => {
+    if (installInProgress.current) {
+      setError("The current import must finish before another ZIP can be inspected.");
+      return;
+    }
+    const request = ++previewRequest.current;
+    setBusy(true);
+    setError("");
+    setMessage("Inspecting the selected package. Nothing is being saved.");
+    setSelectedImport(undefined);
+    try {
+      const read = await getReader();
+      const summary = await previewPreparedLibrary(read);
+      if (previewRequest.current !== request) return;
+      setSelectedImport({ name, read, summary });
+      setMessage("Package preview ready. Nothing has been saved.");
+    } catch (cause) {
+      if (previewRequest.current !== request) return;
+      setError(preparedLibraryError(cause, "The selected package could not be previewed."));
+      setMessage("");
+    } finally {
+      if (previewRequest.current === request) setBusy(false);
+    }
+  }, []);
+  useEffect(() => {
+    if (externalZip) void stageImport(externalZip.name, () => zipLibraryReader(externalZip));
+  }, [externalZip, stageImport]);
+  async function install(read: LibraryReader, selection?: { name: string; summary: PreparedLibraryPreview }): Promise<boolean> {
+    if (installInProgress.current) return false;
+    installInProgress.current = true;
     setBusy(true); setError("");
     let lastProgress = "";
     try {
@@ -276,12 +320,31 @@ export function PreparedLibrary() {
         lastProgress = progress;
         setMessage(progress);
       });
+      if (selection) {
+        setLastReceipt({
+          filename: selection.name,
+          status: result.status,
+          sources: selection.summary.sources,
+          declaredReady: selection.summary.potentialReady,
+          declaredHeld: selection.summary.heldForReview,
+          readyOnDevice: result.questionIds.length,
+          savedSetReferences: result.setIds.length,
+          warnings: result.warnings,
+        });
+      }
       if (result.status === "partial") {
         setError(`${result.questionIds.length} answer-ready question${result.questionIds.length === 1 ? " remains" : "s remain"} saved on this device. ${result.warnings.slice(0, 3).join(" ")}`);
+        return false;
       }
+      setMessage("Library installed. Check the source review queue and verify cloud protection separately.");
+      return true;
+    } catch (cause) {
+      setError(preparedLibraryError(cause, "Library installation failed. Retry with the same bundle.", lastProgress));
+      return false;
+    } finally {
+      installInProgress.current = false;
+      setBusy(false);
     }
-    catch (cause) { setError(preparedLibraryError(cause, "Library installation failed. Retry with the same bundle.", lastProgress)); }
-    finally { setBusy(false); }
   }
   // A real, explicitly prepared local package initializes clean local profiles.
   useEffect(() => {
@@ -385,15 +448,63 @@ export function PreparedLibrary() {
       <GButton disabled={busy} onClick={() => folderInput.current?.click()}>Install prepared folder</GButton>
       <input ref={folderInput} type="file" hidden multiple {...{ webkitdirectory: "" }} aria-label="Prepared library folder" onChange={event => {
         const files = Array.from(event.target.files ?? []);
-        if (files.length) { try { void install(folderLibraryReader(files)); } catch (cause) { setError(preparedLibraryError(cause, "The prepared folder could not be opened.")); } }
+        if (files.length) void stageImport(`Prepared folder (${files.length} files)`, async () => folderLibraryReader(files));
         event.target.value = "";
       }} />
       <input ref={input} type="file" accept=".zip" hidden aria-label="Prepared library bundle" onChange={event => {
         const file = event.target.files?.[0];
-        if (file) void zipLibraryReader(file).then(install).catch(cause => setError(preparedLibraryError(cause, "The prepared bundle could not be opened.")));
+        if (file) void stageImport(file.name, () => zipLibraryReader(file));
         event.target.value = "";
       }} />
     </div>
+    {selectedImport && <section className="prepared-import-review" role="region" aria-label="Review selected import">
+      <div className="prepared-import-review-top">
+        <div>
+          <span className="prepared-import-eyebrow">Review package · nothing saved yet</span>
+          <h3>Confirm before installing</h3>
+          <p><strong>{selectedImport.name}</strong></p>
+        </div>
+      </div>
+      <div className="prepared-import-metrics">
+        <div><strong>{selectedImport.summary.sources}</strong><span>Sources</span></div>
+        <div><strong>{selectedImport.summary.potentialReady}</strong><span>Potentially ready</span></div>
+        <div><strong>{selectedImport.summary.heldForReview}</strong><span>Held for review</span></div>
+        <div><strong>{selectedImport.summary.templates}</strong><span>Templates</span></div>
+      </div>
+      <p>These are declared package counts, not newly saved or faculty-verified questions. AXOM will verify sources and figures during installation. Held questions will not be released into scored practice by this action.</p>
+      <details className="prepared-import-sources">
+        <summary>Inspect {selectedImport.summary.sources} sources before installing</summary>
+        <ul>{selectedImport.summary.items.slice(0, 12).map((item, index) => <li key={index}>
+          <span>{item.name}{item.module ? ` · ${item.module}` : ""}</span>
+          <span>{item.ready} potentially ready · {item.review} review</span>
+        </li>)}</ul>
+        {selectedImport.summary.sources > 12 && <p>Showing the first 12 sources. All sources will be checked during installation.</p>}
+      </details>
+      <div className="prepared-import-actions">
+        <GButton disabled={busy} onClick={() => {
+          const selection = selectedImport;
+          void install(selection.read, selection).then(complete => { if (complete) setSelectedImport(undefined); });
+        }}>Confirm installation on this device</GButton>
+        <GButton disabled={busy} onClick={() => { previewRequest.current += 1; setSelectedImport(undefined); setMessage(""); setError(""); }}>Cancel selected import</GButton>
+      </div>
+      <p className="prepared-import-footnote">Local installation is not cloud synchronization or community publication. Keep the original ZIP until your account copy is verified.</p>
+    </section>}
+    {lastReceipt && <section className="prepared-import-receipt" role="region" aria-label="Latest import result">
+      <h3>{lastReceipt.status === "complete" ? "Completed locally" : "Partial local installation"}</h3>
+      <p><strong>{lastReceipt.filename}</strong></p>
+      <div className="prepared-import-metrics">
+        <div><strong>{lastReceipt.sources}</strong><span>Source records</span></div>
+        <div><strong>{lastReceipt.readyOnDevice}</strong><span>Ready on this device</span></div>
+        <div><strong>{lastReceipt.declaredHeld}</strong><span>Declared held for review</span></div>
+        <div><strong>{lastReceipt.savedSetReferences}</strong><span>Saved set references</span></div>
+      </div>
+      <p>Package declared {lastReceipt.declaredReady} potentially ready questions. The verified ready count includes existing matching questions and must not be interpreted as newly imported questions. Held answers remain excluded from scored practice.</p>
+      {lastReceipt.warnings.length > 0 && <details open>
+        <summary>{lastReceipt.warnings.length} source warnings</summary>
+        <ul>{lastReceipt.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>
+      </details>}
+      <p><strong>Cloud backup: not confirmed.</strong> This result verifies local installation only. Check the account sync status and complete a reload/readback before relying on cloud restoration.</p>
+    </section>}
     {(busy || message) && <p role="status">{message}</p>}
     {error && <p role="alert">{error}</p>}
     {parsed.error && <p role="alert">{parsed.error}</p>}
